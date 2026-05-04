@@ -2954,6 +2954,11 @@
     visibility: hidden;
 }
 
+#lock-screen,
+#passcode-overlay {
+    display: none !important;
+}
+
 .lock-screen-background {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
@@ -24765,57 +24770,38 @@ async function updateLockScreenWidgets() {
     }
 }
 
-/**
- * 显示锁屏界面 (V10 - 重构版)
- */
 async function showLockScreen() {
-    if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null; }
-
-    const lockScreenEl = document.getElementById('lock-screen');
-    const backgroundEl = document.querySelector('.lock-screen-background');
-
-    // 设置智能背景
-    let backgroundUrl = 'https://i.postimg.cc/SQ3DH79X/MEITU-20250811-151831796.jpg';
-    if (userSettings && userSettings.chatBackground) { backgroundUrl = userSettings.chatBackground; }
-    const lastContact = state.contacts.find(c => c.id === state.activeChatId);
-    if (lastContact && lastContact.customChatBackground) { backgroundUrl = lastContact.customChatBackground; }
-    backgroundEl.style.backgroundImage = `url(${backgroundUrl})`;
-
-    // ▼▼▼ 核心改动：直接调用我们的新函数来更新所有组件 ▼▼▼
-    await updateLockScreenWidgets();
-    // ▲▲▲ 改动结束 ▲▲▲
-
-    // 显示锁屏和启动其他功能 (不变)
-    lockScreenEl.style.display = 'flex';
-    setTimeout(() => { lockScreenEl.classList.remove('hidden'); }, 10);
-    if (!lockScreenClockInterval) {
-        updateLockScreenTime();
-        lockScreenClockInterval = setInterval(updateLockScreenTime, 1000);
-    }
-    startPhotoCarousel();
+    return;
 }
 
 /**
- * 隐藏锁屏界面
+ * 禁用锁屏
  */
-function hideLockScreen() {
-    const lockScreenEl = document.getElementById('lock-screen');
-    lockScreenEl.classList.add('hidden');
+function disableLockScreenCompletely() {
+    const lockScreen = document.getElementById('lock-screen');
+    if (lockScreen) {
+        lockScreen.style.display = 'none';
+        lockScreen.classList.add('hidden');
+    }
 
-    // ▼▼▼ 在这里添加新代码 ▼▼▼
-    // 停止照片轮播的定时器
-    if (photoCarouselInterval) {
+    const overlay = document.getElementById('passcode-overlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
+
+    if (typeof photoCarouselInterval !== 'undefined' && photoCarouselInterval) {
         clearInterval(photoCarouselInterval);
         photoCarouselInterval = null;
     }
-    // ▲▲▲ 新增结束 ▲▲▲
 
-    setTimeout(() => {
-        lockScreenEl.style.display = 'none';
-    }, 500);
-    // ▼▼▼ 新增：解锁后，开始无活动计时 ▼▼▼
-    resetInactivityTimer();
-    // ▲▲▲ 新增结束 ▲▲▲
+    if (typeof inactivityTimer !== 'undefined' && inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+    }
+}
+
+function hideLockScreen() {
+    return;
 }
 // ==========================================================
 // 🔐 锁屏密码逻辑 (修复版)
@@ -24824,10 +24810,8 @@ function hideLockScreen() {
 // 2. 核心逻辑：替换锁屏点击事件
 // (为了防止报错，我们把这段逻辑包裹起来立即执行)
 (function initPasscodeLogic() {
-    const oldLockScreen = document.getElementById('lock-screen');
-    
-    if (!oldLockScreen) {
-        console.error("错误：找不到 id='lock-screen' 的元素！");
+    console.log('锁屏密码已禁用');
+    return;
         return;
     }
 
@@ -24856,48 +24840,16 @@ function hideLockScreen() {
 // ==========================================
 
 // 显示密码盘
-window.showPasscodePad = function() {
-    const overlay = document.getElementById('passcode-overlay');
-    if(overlay) {
-        currentInput = "";
-        updateDots();
-        overlay.style.display = 'flex';
-    }
-}
+window.showPasscodePad = function() { return; };
 
 // 隐藏/取消密码盘
-window.cancelPasscode = function() {
-    const overlay = document.getElementById('passcode-overlay');
-    if(overlay) {
-        overlay.style.display = 'none';
-        currentInput = "";
-        updateDots();
-        // 移除震动样式
-        const dotsContainer = document.getElementById('passcode-dots');
-        if(dotsContainer) dotsContainer.classList.remove('shake-anim');
-    }
-}
+window.cancelPasscode = function() { return; };
 
 // 输入数字
-window.inputPasscode = function(num) {
-    if (currentInput.length < 4) {
-        currentInput += num.toString(); // 确保是字符串
-        updateDots();
-        
-        // 如果输满了4位，立即检查
-        if (currentInput.length === 4) {
-            checkPasscode();
-        }
-    }
-}
+window.inputPasscode = function(num) { return; };
 
 // 删除一位
-window.deletePasscode = function() {
-    if (currentInput.length > 0) {
-        currentInput = currentInput.slice(0, -1);
-        updateDots();
-    }
-}
+window.deletePasscode = function() { return; };
 
 // 更新圆点显示
 function updateDots() {
@@ -25101,17 +25053,7 @@ let autoLockDelay = 0; // 默认禁用
 
 // 函数：重置并启动计时器
 function resetInactivityTimer() {
-    // 先清除上一个计时器
-    if (inactivityTimer) {
-        clearTimeout(inactivityTimer);
-    }
-    // 如果设置的延迟大于0，则启动一个新的计时器
-    if (autoLockDelay > 0) {
-        inactivityTimer = setTimeout(() => {
-            // 时间到了，就显示锁屏
-            showLockScreen();
-        }, autoLockDelay * 1000); // 将秒转换为毫秒
-    }
+    return;
 }
 
 // 监听用户的各种操作事件，只要有操作，就重置计时器
@@ -37073,6 +37015,7 @@ function updatePreview(type, value, value2 = '') {
 // ==========================================================
 // ▲▲▲ 粘贴到这里结束 ▲▲▲
         async function initApp() {
+            disableLockScreenCompletely();
             await kokoMemory.init();
             await loadSnoopDataCache();
             await loadDataFromDB();
@@ -43796,13 +43739,56 @@ await initApp();
 }); 
 </script>
 <script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
-        .then(registration => console.log('ServiceWorker 注册成功: ', registration))
-        .catch(error => console.log('ServiceWorker 注册失败: ', error));
-    });
+  // PWA 缓存版本
+  const APP_BUILD_VERSION = '20260504_input_lockfix_1';
+
+  async function forcePwaFreshForDev() {
+    try {
+        if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (const reg of regs) {
+                await reg.update();
+            }
+        }
+
+        if ('caches' in window) {
+            const keys = await caches.keys();
+            await Promise.all(
+                keys
+                    .filter(key => key.includes('koko') || key.includes('cache') || key.includes('v'))
+                    .map(key => caches.delete(key))
+            );
+        }
+
+        const oldVersion = localStorage.getItem('APP_BUILD_VERSION');
+        if (oldVersion !== APP_BUILD_VERSION) {
+            localStorage.setItem('APP_BUILD_VERSION', APP_BUILD_VERSION);
+            console.log('[PWA] 已更新到版本:', APP_BUILD_VERSION);
+        }
+    } catch (e) {
+        console.warn('[PWA] 刷新缓存失败:', e);
+    }
   }
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', async () => {
+        try {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (const reg of regs) {
+                await reg.unregister();
+            }
+
+            if ('caches' in window) {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(key => caches.delete(key)));
+            }
+
+            console.log('[PWA] 开发阶段已注销 Service Worker 并清空缓存');
+        } catch (e) {
+            console.warn('[PWA] 清理 Service Worker/缓存失败:', e);
+        }
+    });
+}
 </script>
 <script>
 (function() {
