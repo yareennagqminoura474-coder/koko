@@ -17047,8 +17047,8 @@ function tryJsonParseLoose(text) {
     for (const item of candidates) {
         try {
             const parsed = JSON.parse(item);
-            if (Array.isArray(parsed)) return parsed;
-            if (parsed && Array.isArray(parsed.events)) return parsed.events;
+            // 返回完整 parsed，不提前取 parsed.events，让上层自行处理
+            if (parsed && typeof parsed === 'object') return parsed;
         } catch (e) {}
     }
     return null;
@@ -17100,36 +17100,40 @@ function parseOfflineAiResponseToEvents(raw) {
 
     const parsed = tryJsonParseLoose(source);
 
+    let rawEvents = [];
     if (Array.isArray(parsed)) {
-        return parsed.map(ev => {
-            if (!ev || typeof ev !== 'object') return null;
-            const type = String(ev.type || '').toLowerCase().trim();
-            const content = cleanOfflineEventContent(ev.content || ev.text || ev.message || '');
-            if (!content || isJsonGarbageFragment(content) || isOrphanBracket(content)) return null;
-            return {
-                type: (type === 'action' || type === 'narration' || type === 'scene') ? 'action' : 'speech',
-                characterId: ev.characterId || ev.character_id || ev.speakerId || '',
-                characterName: ev.characterName || ev.speaker || ev.name || '',
-                content
-            };
-        }).filter(Boolean);
-    }
+        rawEvents = parsed;
+    } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.events)) {
+        rawEvents = parsed.events;
+    } else {
+        const looksLikeJson =
+            /```json/i.test(source) ||
+            /^\s*[\{\[]/.test(source) ||
+            /"events"\s*:/.test(source) ||
+            /"type"\s*:/.test(source) ||
+            /"content"\s*:/.test(source);
 
-    const looksLikeJson =
-        /```json/i.test(source) ||
-        /^\s*[\{\[]/.test(source) ||
-        /"events"\s*:/.test(source) ||
-        /"type"\s*:/.test(source) ||
-        /"content"\s*:/.test(source);
+        if (looksLikeJson) {
+            console.warn('[线下模式] 疑似 JSON 但解析失败，已拦截');
+            return null;
+        }
 
-    if (looksLikeJson) {
-        console.warn('[线下模式] 疑似 JSON 但解析失败，已拦截');
+        console.warn('[线下模式] AI 未返回 JSON events，已拦截');
         return null;
     }
 
-    // 非 JSON 不再猜测，拦截避免乱渲染
-    console.warn('[线下模式] AI 未返回 JSON events，已拦截');
-    return null;
+    return rawEvents.map(ev => {
+        if (!ev || typeof ev !== 'object') return null;
+        const type = String(ev.type || '').toLowerCase().trim();
+        const content = cleanOfflineEventContent(ev.content || ev.text || ev.message || '');
+        if (!content || isJsonGarbageFragment(content) || isOrphanBracket(content)) return null;
+        return {
+            type: (type === 'action' || type === 'narration' || type === 'scene') ? 'action' : 'speech',
+            characterId: ev.characterId || ev.character_id || ev.speakerId || '',
+            characterName: ev.characterName || ev.speaker || ev.name || '',
+            content
+        };
+    }).filter(Boolean);
 }
 
 function parseOfflineAiResponsePayload(raw) {
@@ -17177,6 +17181,13 @@ function parseOfflineAiResponsePayload(raw) {
             content
         };
     }).filter(Boolean);
+
+    console.log('[线下payload解析]', {
+        hasEvents: !!(events && events.length),
+        hasHeartVoice: !!heartVoice,
+        hasDiary: !!diary,
+        parsed
+    });
 
     return { events, heart_voice: heartVoice, diary };
 }
@@ -17354,6 +17365,12 @@ async function persistOfflineHeartVoiceAndDiary(senderProfile, payload, effectiv
 
     const heartVoice = payload.heart_voice || payload.heartVoice || null;
     const diaryText = String(payload.diary || '').trim();
+
+    console.log('[线下心声日记保存]', {
+        contactId: contact && contact.id,
+        hasHeartVoice: !!heartVoice,
+        hasDiary: !!diaryText
+    });
 
     if (heartVoice && typeof heartVoice === 'object') {
         contact.history = contact.history || [];
