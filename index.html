@@ -24322,68 +24322,8 @@ function findBestMatchingEmoticon(keyword) {
 }
 // ==========================================================
 
-
-
-
-
-
-    // 🔧 已移除：此处原有 window.userSettings = { id: 'main' } 会覆盖外观数据
-    if (userSettings.lockScreenMemo) { memoEl.textContent = userSettings.lockScreenMemo; } 
-    else { memoEl.textContent = '点击这里编辑你的备忘录...'; }
-
-    // 2. 处理置顶纪念日/倒数日
-    const countdownDaysEl = document.querySelector('#lock-screen-countdown .countdown-days');
-    const countdownLabelEl = document.querySelector('#lock-screen-countdown .countdown-label');
-    let pinnedEvent = null;
-    for (const contact of state.contacts) {
-        if (contact.events && contact.events.length > 0) {
-            const foundEvent = contact.events.find(event => event.isPinned);
-            if (foundEvent) { pinnedEvent = foundEvent; break; }
-        }
-    }
-    if (pinnedEvent) {
-        const today = new Date(); today.setHours(0, 0, 0, 0);
-        const eventDate = new Date(pinnedEvent.date); eventDate.setHours(0, 0, 0, 0);
-        const diff = (eventDate - today) / (1000 * 60 * 60 * 24);
-        countdownDaysEl.textContent = Math.round(Math.abs(diff));
-        if (diff >= 0) { countdownLabelEl.textContent = `距离 ${pinnedEvent.eventName} 还有`; } 
-        else { countdownLabelEl.textContent = `${pinnedEvent.eventName} 已经`; }
-    } else {
-        countdownDaysEl.textContent = 'Pin!';
-        countdownLabelEl.textContent = "去“我们的日子”置顶一个纪念日吧";
-    }
-
-    // 3. 处理所有未读消息
-    const notificationWidget = document.getElementById('lock-screen-notification-widget');
-    const notificationTextEl = document.getElementById('lock-screen-notification-text');
-    let allUnreadMessages = [];
-    state.contacts.forEach(contact => {
-        if (contact.unreadCount > 0 && contact.history.length > 0) {
-            const unreadMessages = contact.history.slice(-contact.unreadCount);
-            unreadMessages.forEach(msg => {
-                let contentPreview = msg.content;
-                switch (msg.type) {
-                    case 'image': case 'picture_description': contentPreview = '[图片]'; break;
-                    case 'voice': contentPreview = '[语音消息]'; break;
-                    case 'red_packet': contentPreview = `[红包] ${msg.content.blessing}`; break;
-                }
-                allUnreadMessages.push({
-                    timestamp: msg.timestamp,
-                    text: `<div>${contact.name}: ${contentPreview}</div>`
-                });
-            });
-        }
-    });
-    if (allUnreadMessages.length > 0) {
-        allUnreadMessages.sort((a, b) => a.timestamp - b.timestamp);
-        const fullNotificationHTML = allUnreadMessages.map(msg => msg.text).join('');
-        notificationTextEl.innerHTML = fullNotificationHTML;
-        notificationWidget.style.display = 'flex';
-        const animationDuration = Math.max(8, allUnreadMessages.length * 4);
-        notificationTextEl.style.animationDuration = `${animationDuration}s`;
-    } else {
-        notificationWidget.style.display = 'none';
-    }
+async function updateLockScreenWidgets() {
+    return;
 }
 
 async function showLockScreen() {
@@ -24395,6 +24335,10 @@ function disableLockScreenCompletely() {
 }
 
 function hideLockScreen() {
+    return;
+}
+
+function resetInactivityTimer() {
     return;
 }
 // ==========================================================
@@ -36435,63 +36379,132 @@ function updatePreview(type, value, value2 = '') {
 // =========== ▲▲▲ 实时预览模块结束 ▲▲▲ ===================
 // ==========================================================
 // ▲▲▲ 粘贴到这里结束 ▲▲▲
+function safeExposeGlobal(name, fn) {
+    try {
+        if (typeof fn === 'function') {
+            window[name] = fn;
+        } else {
+            console.warn('[可选功能] 跳过未定义函数:', name);
+        }
+    } catch (e) {
+        console.warn('[可选功能] 挂载失败:', name, e);
+    }
+}
+
+function safeMountOptionalGlobals() {
+    safeExposeGlobal('openSurveyLibraryModal', typeof openSurveyLibraryModal !== 'undefined' ? openSurveyLibraryModal : null);
+    safeExposeGlobal('saveCurrentSurveyToLib', typeof saveCurrentSurveyToLib !== 'undefined' ? saveCurrentSurveyToLib : null);
+    safeExposeGlobal('loadSurveyFromLib', typeof loadSurveyFromLib !== 'undefined' ? loadSurveyFromLib : null);
+    safeExposeGlobal('deleteSurveyFromLib', typeof deleteSurveyFromLib !== 'undefined' ? deleteSurveyFromLib : null);
+    safeExposeGlobal('shareCpResultToChat', typeof shareCpResultToChat !== 'undefined' ? shareCpResultToChat : null);
+    safeExposeGlobal('switchCpSkin', typeof switchCpSkin !== 'undefined' ? switchCpSkin : null);
+    safeExposeGlobal('acceptAiSurvey', typeof acceptAiSurvey !== 'undefined' ? acceptAiSurvey : null);
+}
+
 async function forceEnterContactsHome() {
     try {
-        hideAllScreens();
+        const ids = [
+            'chat-screen',
+            'discover-screen',
+            'profile-screen',
+            'char-profile-screen',
+            'world-book-screen',
+            'api-settings-screen',
+            'contact-settings-screen',
+            'moments-screen',
+            'diary-screen',
+            'sms-chat-screen',
+            'favorites-screen',
+            'shopping-screen',
+            'product-detail-screen',
+            'schedule-screen',
+            'events-screen',
+            'relationship-network-screen',
+            'investment-center-screen',
+            'stock-market-screen'
+        ];
+
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
 
         const mainScreen = document.getElementById('main-screen');
-        if (mainScreen) {
-            mainScreen.style.display = 'flex';
-        }
+        if (mainScreen) mainScreen.style.display = 'flex';
 
-        if (typeof setActiveNav === 'function') {
-            setActiveNav('chat');
-        }
+        document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+
+        const chatNav = document.getElementById('nav-chat') || document.querySelector('[data-nav="chat"]');
+        if (chatNav) chatNav.classList.add('active');
 
         if (typeof renderContacts === 'function') {
             await renderContacts();
+        } else {
+            console.error('[启动] renderContacts 不存在');
         }
 
         console.log('[启动] 已强制进入联系人界面');
     } catch (e) {
-        console.error('[启动] 强制进入联系人界面失败:', e);
+        console.error('[启动] forceEnterContactsHome 失败:', e);
     }
 }
 
 function bindCoreNavigationFallback() {
-    const bind = (id, handler) => {
+    const bind = (id, handlerName, fallback) => {
         const el = document.getElementById(id);
         if (!el) return;
 
         const fresh = el.cloneNode(true);
         el.parentNode.replaceChild(fresh, el);
-        fresh.addEventListener('click', handler);
+
+        fresh.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            try {
+                if (typeof window[handlerName] === 'function') {
+                    window[handlerName]();
+                } else if (typeof fallback === 'function') {
+                    await fallback();
+                } else {
+                    console.warn('[导航] 找不到处理函数:', handlerName);
+                }
+            } catch (err) {
+                console.error('[导航] 点击失败:', id, err);
+            }
+        });
     };
 
-    bind('nav-chat', showMainScreen);
-    bind('nav-chat-2', showMainScreen);
-    bind('nav-chat-sms', showMainScreen);
+    bind('nav-chat', 'showMainScreen', forceEnterContactsHome);
+    bind('nav-chat-2', 'showMainScreen', forceEnterContactsHome);
+    bind('nav-chat-sms', 'showMainScreen', forceEnterContactsHome);
 
-    bind('nav-discover', showDiscoverScreen);
-    bind('nav-discover-2', showDiscoverScreen);
-    bind('nav-discover-sms', showDiscoverScreen);
+    bind('nav-discover', 'showDiscoverScreen');
+    bind('nav-discover-2', 'showDiscoverScreen');
+    bind('nav-discover-sms', 'showDiscoverScreen');
 
-    bind('nav-sms', showSmsScreen);
-    bind('nav-sms-sms', showSmsScreen);
+    bind('nav-sms', 'showSmsScreen');
+    bind('nav-sms-sms', 'showSmsScreen');
 
-    bind('nav-profile', showProfileScreen);
-    bind('nav-profile-2', showProfileScreen);
-    bind('nav-profile-sms', showProfileScreen);
+    bind('nav-profile', 'showProfileScreen');
+    bind('nav-profile-2', 'showProfileScreen');
+    bind('nav-profile-sms', 'showProfileScreen');
 
-    bind('add-contact-btn', () => {
-        const modal = document.getElementById('add-contact-modal');
-        if (modal) modal.style.display = 'flex';
-    });
+    const addBtn = document.getElementById('add-contact-btn');
+    if (addBtn) {
+        addBtn.onclick = () => {
+            const modal = document.getElementById('add-contact-modal');
+            if (modal) modal.style.display = 'flex';
+        };
+    }
 
-    bind('create-group-btn', () => {
-        const modal = document.getElementById('create-group-modal');
-        if (modal) modal.style.display = 'flex';
-    });
+    const groupBtn = document.getElementById('create-group-btn');
+    if (groupBtn) {
+        groupBtn.onclick = () => {
+            const modal = document.getElementById('create-group-modal');
+            if (modal) modal.style.display = 'flex';
+        };
+    }
 }
 
         async function initApp() {
@@ -43090,70 +43103,11 @@ attachGroupSettingsListeners();
 // 保存外观设置按钮
 document.getElementById('save-appearance-btn').addEventListener('click', saveAppearanceSettings);
 }
-attachEventListeners();
-// --- 紧急修复：重新绑定搜索按钮 ---
-    const searchBtnFix = document.getElementById('search-chat-btn');
-    if (searchBtnFix) {
-        // 先移除可能存在的旧监听器（以防万一）
-        const newSearchBtn = searchBtnFix.cloneNode(true);
-        searchBtnFix.parentNode.replaceChild(newSearchBtn, searchBtnFix);
-        // 重新绑定
-        newSearchBtn.addEventListener('click', showChatSearch);
-        console.log("已手动修复搜索按钮连接！");
-    }
-    // =========================================
-    // 🚑 搜索按钮紧急修复补丁 (手机专享版) 🚑
-    // =========================================
-    setTimeout(() => { // 延迟一点点执行，确保按钮肯定已经生出来了
-        const fixSearchBtn = document.getElementById('search-chat-btn');
-        if (fixSearchBtn) {
-            // 1. 用“克隆大法”清除所有可能坏掉的旧连接
-            const freshBtn = fixSearchBtn.cloneNode(true);
-            fixSearchBtn.parentNode.replaceChild(freshBtn, fixSearchBtn);
-
-            // 2. 重新接上正确的功能线
-            freshBtn.addEventListener('click', (e) => {
-                // 阻止任何可能的干扰
-                e.stopPropagation();
-                e.preventDefault();
-
-                // 🔔 如果你想确认按钮是否真的被点到了，可以把下面这行最前面的 // 删掉
-                // alert("按钮活啦！正在打开搜索...");
-
-                // 调用搜索界面
-                if (typeof showChatSearch === 'function') {
-                    showChatSearch();
-                } else {
-                    alert("糟糕！showChatSearch 功能函数不见了！");
-                }
-            });
-
-            console.log("✅ 搜索按钮已实施紧急修复！");
-        } else {
-            console.error("❌ 居然找不到搜索按钮，它可能被别的代码误删了！");
-        }
-    }, 1000); // 等待1秒再执行，非常保险
-    // =========================================
-    // =========================================
-    // 🚑 默契挑战 & 题库 功能紧急修复补丁 🚑
-    // 原因：将局部函数暴露给 HTML onclick 调用
-    // =========================================
-    
-    // 1. 题库相关
-    window.openSurveyLibraryModal = openSurveyLibraryModal;
-    window.saveCurrentSurveyToLib = saveCurrentSurveyToLib;
-    window.loadSurveyFromLib = loadSurveyFromLib;
-    window.deleteSurveyFromLib = deleteSurveyFromLib;
-
-    // 2. 游戏操作相关
-    window.shareCpResultToChat = shareCpResultToChat;
-    window.switchCpSkin = switchCpSkin;
-    
-    // 3. AI 邀请相关
-    window.acceptAiSurvey = acceptAiSurvey;
-
-    console.log("✅ 默契挑战功能已手动挂载到全局！");
-await initApp();
+try {
+    await initApp();
+} catch (e) {
+    console.error('[启动] initApp 外层失败:', e);
+}
 
 try {
     attachEventListeners();
@@ -43161,9 +43115,24 @@ try {
     console.error('[启动] attachEventListeners 绑定失败，继续执行核心导航兜底:', e);
 }
 
-bindCoreNavigationFallback();
-await forceEnterContactsHome();
-}); 
+try {
+    bindCoreNavigationFallback();
+} catch (e) {
+    console.error('[启动] 核心导航兜底绑定失败:', e);
+}
+
+try {
+    await forceEnterContactsHome();
+} catch (e) {
+    console.error('[启动] 强制进入联系人界面失败:', e);
+}
+
+try {
+    safeMountOptionalGlobals();
+} catch (e) {
+    console.warn('[启动] 可选功能挂载失败:', e);
+}
+});
 </script>
 <script>
   // PWA 缓存版本
