@@ -17059,29 +17059,36 @@ function isOrphanBracket(text) {
 
 function looksLikeOfflineAction(text) {
     const s = cleanOfflineEventContent(text);
-    if (!s || isOrphanBracket(s)) return false;
+    if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return false;
 
+    // 明确括号/星号完整包裹才是动作
     if ((s.startsWith('（') && s.endsWith('）')) ||
         (s.startsWith('(') && s.endsWith(')')) ||
-        (s.startsWith('*') && s.endsWith('*')) ||
-        (s.startsWith('【') && s.endsWith('】'))) return true;
+        (s.startsWith('【') && s.endsWith('】')) ||
+        (s.startsWith('*') && s.endsWith('*'))) return true;
 
-    if (/(走进|走到|走过去|靠近|抬眼|垂眸|低头|抬手|伸手|转身|坐下|站起|停下|停顿|沉默|看向|看了|扫过|盯着|轻笑|皱眉|挑眉|勾唇|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起|阳光|窗外|教室|空气|脚步声|桌面|书页|指尖|目光|神色|声音在.*响起)/.test(s)) {
-        return true;
-    }
+    // 含问号/叹号/冒号或明显对话语气，一定是台词
+    if (/[?？!！:：]/.test(s)) return false;
+    if (/(你|我|咱|我们|你们|林澈|沈逸).*(吗|呢|吧|啊|哦|嘛|喂|回话|别|要|给我|知道|听得见|怎么|是不是|还|可不|行不行)/.test(s)) return false;
 
-    if (/^(他|她|沈逸|林澈|少年|男人|老师|对方)/.test(s) && !/[“”„"]/.test(s)) {
-        if (!/(吗|呢|吧|啊|哦|？|\?)/.test(s)) return true;
-    }
-
-    return false;
+    // 只有明确第三人称 + 明确动词动作才判为动作
+    return /^(他|她|沈逸|林澈|少年|男人|老师|对方).*(走进|走到|走过去|靠近|抬眼|垂眸|低头|抬手|伸手|转身|坐下|站起|停下|沉默|看向|扫过|盯着|轻笑|皱眉|挑眉|勾唇|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起)/.test(s);
 }
 
 function normalizeOfflineEventType(rawType, content) {
     const t = String(rawType || '').toLowerCase();
-    if (looksLikeOfflineAction(content)) return 'offlineAction';
+    const s = cleanOfflineEventContent(content);
+
+    // type 已明确是 action 时，无条件转动作
     if (t === 'action' || t === 'offlineaction' || t === 'narrative-action') return 'offlineAction';
-    return 'offlineSpeech';
+
+    // type 已明确是 speech 时，只有完整括号/星号包裹才覆盖为动作
+    if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech') {
+        return looksLikeOfflineAction(s) ? 'offlineAction' : 'offlineSpeech';
+    }
+
+    // type 未知时走保守判断
+    return looksLikeOfflineAction(s) ? 'offlineAction' : 'offlineSpeech';
 }
 
 function parseOfflineAiResponseToEvents(raw) {
@@ -17151,7 +17158,10 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
         const cleaned = cleanOfflineEventContent(text);
         if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned)) return;
 
-        if (looksLikeOfflineAction(cleaned)) {
+        if ((cleaned.startsWith('（') && cleaned.endsWith('）')) ||
+            (cleaned.startsWith('(') && cleaned.endsWith(')')) ||
+            (cleaned.startsWith('【') && cleaned.endsWith('】')) ||
+            (cleaned.startsWith('*') && cleaned.endsWith('*'))) {
             pushAction(cleaned);
             return;
         }
@@ -17174,7 +17184,10 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
         function walk(node) {
             if (!node) return;
             if (node.nodeType === Node.TEXT_NODE) {
-                pushAction(node.textContent);
+                const t = String(node.textContent || '').trim();
+                if (!t) return;
+                if (looksLikeOfflineAction(t)) pushAction(t);
+                else pushSpeech(t);
                 return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -17204,10 +17217,15 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
         lastIndex = quoteRegex.lastIndex;
     }
 
-    pushAction(source.slice(lastIndex));
+    const tail = source.slice(lastIndex).trim();
+    if (tail) {
+        if (looksLikeOfflineAction(tail)) pushAction(tail);
+        else pushSpeech(tail);
+    }
     if (result.length > 0) return result;
 
-    pushAction(source);
+    // 最后兜底默认 speech，不默认 action
+    pushSpeech(source);
     return result;
 }
 
