@@ -12353,6 +12353,8 @@ function parseLyrics(lrc) {
             transactions: [],
             trendingTopics: [],
             activeChatId: null,
+            diaryReturnTarget: null,
+            diaryReturnChatId: null,
             activeFeedTab: 'recommended',
             activeFeedSubTab: 'daily',
             activePostId: null,
@@ -17130,6 +17132,55 @@ function parseOfflineAiResponseToEvents(raw) {
     return null;
 }
 
+function parseOfflineAiResponsePayload(raw) {
+    const source = String(raw || '').trim();
+    if (!source) return { events: [], heart_voice: null, diary: '' };
+
+    const parsed = tryJsonParseLoose(source);
+
+    if (!parsed) {
+        const looksLikeJson =
+            /```json/i.test(source) ||
+            /^\s*[\{\[]/.test(source) ||
+            /"events"\s*:/.test(source) ||
+            /"type"\s*:/.test(source) ||
+            /"content"\s*:/.test(source);
+        if (looksLikeJson) {
+            console.warn('[线下模式] 疑似 JSON 但解析失败，已拦截');
+            return null;
+        }
+        console.warn('[线下模式] AI 未返回 JSON payload，已拦截');
+        return null;
+    }
+
+    let rawEvents = [];
+    let heartVoice = null;
+    let diary = '';
+
+    if (Array.isArray(parsed)) {
+        rawEvents = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+        rawEvents = Array.isArray(parsed.events) ? parsed.events : [];
+        heartVoice = parsed.heart_voice || parsed.heartVoice || parsed.heart || null;
+        diary = parsed.diary || '';
+    }
+
+    const events = rawEvents.map(ev => {
+        if (!ev || typeof ev !== 'object') return null;
+        const type = String(ev.type || '').toLowerCase().trim();
+        const content = cleanOfflineEventContent(ev.content || ev.text || ev.message || '');
+        if (!content || isJsonGarbageFragment(content) || isOrphanBracket(content)) return null;
+        return {
+            type: (type === 'action' || type === 'narration' || type === 'scene') ? 'action' : 'speech',
+            characterId: ev.characterId || ev.character_id || ev.speakerId || '',
+            characterName: ev.characterName || ev.speaker || ev.name || '',
+            content
+        };
+    }).filter(Boolean);
+
+    return { events, heart_voice: heartVoice, diary };
+}
+
 function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
     const sender = String(ev?.sender || '').toLowerCase();
     if (sender === 'system') return 'system';
@@ -17246,9 +17297,9 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
 }
 
 async function processOfflineNarrativeAiReply(conversation, senderProfile, effectiveChatContext) {
-    const events = parseOfflineAiResponseToEvents(conversation);
+    const payload = parseOfflineAiResponsePayload(conversation);
 
-    if (events === null) {
+    if (payload === null) {
         await createAndAddMessage(
             { type: 'system_notification', content: '线下回复格式解析失败，请重试。' },
             'system', effectiveChatContext, true, 'chat'
@@ -17256,7 +17307,9 @@ async function processOfflineNarrativeAiReply(conversation, senderProfile, effec
         return;
     }
 
-    if (!events || !events.length) {
+    const events = payload.events || [];
+
+    if (!events.length) {
         await createAndAddMessage(
             { type: 'system_notification', content: '线下回复为空，请重试。' },
             'system', effectiveChatContext, true, 'chat'
@@ -17288,6 +17341,49 @@ async function processOfflineNarrativeAiReply(conversation, senderProfile, effec
         }
 
         await sleep(250 + Math.random() * 200);
+    }
+
+    await persistOfflineHeartVoiceAndDiary(senderProfile, payload, effectiveChatContext);
+}
+
+async function persistOfflineHeartVoiceAndDiary(senderProfile, payload, effectiveChatContext) {
+    if (!senderProfile || senderProfile.isGroup || !payload) return;
+
+    const contact = state.contacts.find(c => c.id === (effectiveChatContext?.id || senderProfile.id)) || senderProfile;
+    if (!contact) return;
+
+    const heartVoice = payload.heart_voice || payload.heartVoice || null;
+    const diaryText = String(payload.diary || '').trim();
+
+    if (heartVoice && typeof heartVoice === 'object') {
+        contact.history = contact.history || [];
+        // keep only the latest heart_voice; remove previous ones
+        contact.history = contact.history.filter(m => m.type !== 'heart_voice');
+        contact.history.push({
+            id: 'heart_voice_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+            type: 'heart_voice',
+            sender: contact.id,
+            content: {
+                emotion: heartVoice.emotion || '',
+                thoughts: heartVoice.thoughts || '',
+                heartRate: heartVoice.heartRate || heartVoice.heart_rate || '',
+                jealousy: heartVoice.jealousy || ''
+            },
+            timestamp: Date.now()
+        });
+    }
+
+    if (diaryText) {
+        contact.diary = contact.diary || [];
+        contact.diary.push({
+            id: 'diary_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+            content: diaryText,
+            timestamp: Date.now()
+        });
+    }
+
+    if (heartVoice || diaryText) {
+        await kokoMemory.put('contacts', contact);
     }
 }
 /**
@@ -19649,26 +19745,23 @@ const NARRATIVE_BASE_PROMPT = `
 - 黑甜的梦
 
 [！！！输出格式：绝对强制 JSON，违反即视为错误！！！]
-你的每一条回复，必须且只能是一个严格的 JSON 对象，格式如下：
-{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"角色ID","characterName":"角色名","content":"..."}]}
+你的每一条回复，必须且只能是一个严格的 JSON 对象，最外层包含 events、heart_voice、diary 三个字段。
 
 【严格规则，逐条遵守】
-1. 必须使用英文双引号 "，禁止使用中文弯引号 “ ”。
-2. 禁止输出 markdown 代码块。
-3. 禁止输出 JSON 之外的任何解释。
-4. 最外层必须是对象：{"events":[...]}。
-5. type 只能是 "action" 或 "speech"。
-6. action 只写动作、神态、环境、场景推进。
-7. speech 只写角色真正说出口的话。
-8. action 事件的 content：写第三人称动作、表情、环境描写、心理活动等一切非对话内容。不要加星号，不要加括号，直接写自然叙述文字。
-9. speech 事件的 content：只写角色实际说出口的台词，不含任何引号、不含说话动作描写。characterId 和 characterName 填写说话角色的 ID 和名字。
-10. 一段回复可以包含多个 events，动作和台词自由交替，顺序即为叙事顺序。
-11. content 字段的值必须是普通 JSON 字符串，不含嵌套 JSON、不含 markdown、不含代码块标记。
-12. 禁止在 JSON 之外输出任何文字，包括解释、前缀、后缀、markdown 代码块（\`\`\`json 等）。
-13. 整个回复就是且仅是一个合法 JSON 对象，可直接被 JSON.parse() 解析。
+1. 必须只返回严格 JSON 对象，禁止 markdown，禁止 \`\`\`json，禁止 JSON 外解释。
+2. 必须使用英文双引号 ". 禁止使用中文弯引号 “ ”。
+3. 最外层固定格式：{"events":[...],"heart_voice":{...},"diary":"..."}。
+4. events 里每项 type 只能是 "action" 或 "speech"。
+5. action 只写动作、神态、环境、场景推进。不要加星号，不要加括号，直接写自然叙述文字。
+6. speech 只写角色真正说出口的话，不含引号、不含说话动作。characterId 和 characterName 填写说话角色的 ID 和名字。
+7. 一段回复可以包含多个 events，动作和台词自由交替，顺序即为叙事顺序。
+8. heart_voice 必须是对象，包含四个字段：emotion（当前情绪）、thoughts（角色没说出口的真实想法）、heartRate（心率描述）、jealousy（醋意/占有欲，无则填 "无"）。
+9. diary 必须是字符串，写当前角色对这轮线下互动的日记，第一人称，简短有力。
+10. 不要再输出 [heart_voice] 或 [diary] 标签，所有内容必须在 JSON 字段里。
+11. 整个回复就是且仅是一个合法 JSON 对象，可直接被 JSON.parse() 解析。
 
 【示例（仅供格式参考，内容自行创作）】
-{"events":[{"type":"action","content":"他走到窗边，看着外面的雨滴，手指无意识地敲打着窗台。"},{"type":"speech","characterId":"he","characterName":"他","content":"下雨了呢。晚饭想吃什么？"},{"type":"action","content":"他转过身，对你露出一丝微笑，心里不禁想着不知道你喜不喜欢下雨天。"}]}
+{"events":[{"type":"action","content":"沈逸翻开那叠崭新的作业本，指尖捏着书页轻轻一抖。"},{"type":"speech","characterId":"shenyi","characterName":"沈逸","content":"顺。"}],"heart_voice":{"emotion":"无奈又带点好笑","thoughts":"这孩子明明听得见，却还要装睡，真是让人又气又想管。","heartRate":"略微加快","jealousy":"无"},"diary":"今天在教室里看见林澈又没写作业，嘴上训了他几句，心里却还是忍不住想把他拉回来。"}
 `;
 
 // --- (替换) 核心 AI 响应函数 (V3.1 - 支持 forceMessages "后门" ) ---
@@ -38610,7 +38703,18 @@ document.getElementById('back-from-chat').addEventListener('click', async () => 
         openChat(state.activeChatId);
         // ▲▲▲ 修复结束 ▲▲▲
     });
-    document.getElementById('back-from-diary').addEventListener('click', showCharProfileScreen);
+    document.getElementById('back-from-diary').addEventListener('click', () => {
+        document.getElementById('diary-screen').style.display = 'none';
+        if (state.diaryReturnTarget === 'chat' && state.diaryReturnChatId) {
+            openChat(state.diaryReturnChatId);
+        } else if (state.diaryReturnTarget === 'profile') {
+            showCharProfileScreen();
+        } else {
+            openChat(state.activeChatId);
+        }
+        state.diaryReturnTarget = null;
+        state.diaryReturnChatId = null;
+    });
     document.getElementById('back-from-post-detail').addEventListener('click', showFeedScreen);
     document.getElementById('back-from-trending-topic').addEventListener('click', showFeedScreen);
     // ▼▼▼ 这整段代码在新版本中都缺失了 ▼▼▼
@@ -38924,7 +39028,11 @@ document.getElementById('char-voice-id-input').value = contact.voiceId || '';
             alert('头像已恢复为你的全局默认头像。');
         });
         // ▲▲▲ 新增代码粘贴到这里结束 ▲▲▲
-    document.getElementById('view-char-diary-btn').addEventListener('click', showDiaryScreen);
+    document.getElementById('view-char-diary-btn').addEventListener('click', () => {
+        state.diaryReturnTarget = 'profile';
+        state.diaryReturnChatId = null;
+        showDiaryScreen();
+    });
     // ▼▼▼ 将这段完整的代码粘贴到 attachEventListeners 函数中 ▼▼▼
 document.getElementById('diary-content-list').addEventListener('click', async (e) => {
     // 检查点击的是不是删除按钮
@@ -43305,6 +43413,8 @@ document.addEventListener('click', function(event) {
             return;
         }
         // 切换到对应联系人再显示日记
+        state.diaryReturnTarget = 'chat';
+        state.diaryReturnChatId = state.activeChatId;
         showDiaryScreen();
     });
     // 打开菜单时，群聊隐藏此项
