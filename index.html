@@ -17075,20 +17075,21 @@ function looksLikeOfflineAction(text) {
     return /^(他|她|沈逸|林澈|少年|男人|老师|对方).*(走进|走到|走过去|靠近|抬眼|垂眸|低头|抬手|伸手|转身|坐下|站起|停下|沉默|看向|扫过|盯着|轻笑|皱眉|挑眉|勾唇|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起)/.test(s);
 }
 
-function normalizeOfflineEventType(rawType, content) {
-    const t = String(rawType || '').toLowerCase();
-    const s = cleanOfflineEventContent(content);
+function normalizeOfflineEventType(rawType) {
+    const t = String(rawType || '').toLowerCase().trim();
 
-    // type 已明确是 action 时，无条件转动作
-    if (t === 'action' || t === 'offlineaction' || t === 'narrative-action') return 'offlineAction';
-
-    // type 已明确是 speech 时，只有完整括号/星号包裹才覆盖为动作
-    if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech') {
-        return looksLikeOfflineAction(s) ? 'offlineAction' : 'offlineSpeech';
+    if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech' ||
+        t === 'dialogue' || t === 'line') {
+        return 'offlineSpeech';
     }
 
-    // type 未知时走保守判断
-    return looksLikeOfflineAction(s) ? 'offlineAction' : 'offlineSpeech';
+    if (t === 'action' || t === 'offlineaction' || t === 'narrative-action' ||
+        t === 'narration' || t === 'scene') {
+        return 'offlineAction';
+    }
+
+    // 未知类型默认台词，不默认动作
+    return 'offlineSpeech';
 }
 
 function parseOfflineAiResponseToEvents(raw) {
@@ -17096,9 +17097,22 @@ function parseOfflineAiResponseToEvents(raw) {
     if (!source) return [];
 
     const parsed = tryJsonParseLoose(source);
-    if (Array.isArray(parsed)) return parsed;
 
-    // 疑似 JSON 但解析失败 → 拦截，不交给文本拆分，避免把 { } "content" 渲染成动作卡片
+    if (Array.isArray(parsed)) {
+        return parsed.map(ev => {
+            if (!ev || typeof ev !== 'object') return null;
+            const type = String(ev.type || '').toLowerCase().trim();
+            const content = cleanOfflineEventContent(ev.content || ev.text || ev.message || '');
+            if (!content || isJsonGarbageFragment(content) || isOrphanBracket(content)) return null;
+            return {
+                type: (type === 'action' || type === 'narration' || type === 'scene') ? 'action' : 'speech',
+                characterId: ev.characterId || ev.character_id || ev.speakerId || '',
+                characterName: ev.characterName || ev.speaker || ev.name || '',
+                content
+            };
+        }).filter(Boolean);
+    }
+
     const looksLikeJson =
         /```json/i.test(source) ||
         /^\s*[\{\[]/.test(source) ||
@@ -17107,11 +17121,13 @@ function parseOfflineAiResponseToEvents(raw) {
         /"content"\s*:/.test(source);
 
     if (looksLikeJson) {
-        console.warn('[线下模式] AI 返回疑似 JSON 但解析失败，已拦截，避免显示 JSON 残片');
-        return null; // null 表示"已拦截"，区别于 [] 的"解析成功但无事件"
+        console.warn('[线下模式] 疑似 JSON 但解析失败，已拦截');
+        return null;
     }
 
-    return [];
+    // 非 JSON 不再猜测，拦截避免乱渲染
+    console.warn('[线下模式] AI 未返回 JSON events，已拦截');
+    return null;
 }
 
 function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
@@ -17232,44 +17248,45 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
 async function processOfflineNarrativeAiReply(conversation, senderProfile, effectiveChatContext) {
     const events = parseOfflineAiResponseToEvents(conversation);
 
-    // null = 疑似 JSON 但解析失败，直接拦截，不走文本兜底，避免把 JSON 残片渲染出来
     if (events === null) {
-        await createAndAddMessage({ type: 'system_notification', content: '线下回复格式解析失败，请重试。' }, 'system', effectiveChatContext, true, 'chat');
-        return;
-    }
-
-    if (events && events.length) {
-        for (const ev of events) {
-            const messageType = normalizeOfflineEventType(ev.type, ev.content);
-            const content = messageType === 'offlineAction'
-                ? stripOuterActionBrackets(ev.content)
-                : cleanOfflineEventContent(ev.content);
-            if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
-            if (messageType === 'offlineAction') {
-                const fullMessage = await createAndAddMessage({ type: 'offlineAction', content }, 'system', effectiveChatContext, true, 'chat');
-                if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
-            } else {
-                const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
-                const fullMessage = await createAndAddMessage({ type: 'offlineSpeech', content }, sid, effectiveChatContext, true, 'chat');
-                if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
-            }
-            await sleep(250 + Math.random() * 200);
-        }
-        return;
-    }
-
-    const parsed = parseNarrativeHtmlOrTextToOfflineEvents(conversation, senderProfile);
-    console.log('[线下拆分] 原始长度:', String(conversation || '').length, '拆出事件:', parsed.length);
-
-    for (const ev of parsed) {
-        const fullMessage = await createAndAddMessage(
-            { type: ev.type, content: ev.content, characterId: ev.characterId },
-            ev.sender,
-            effectiveChatContext,
-            true,
-            'chat'
+        await createAndAddMessage(
+            { type: 'system_notification', content: '线下回复格式解析失败，请重试。' },
+            'system', effectiveChatContext, true, 'chat'
         );
-        if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+        return;
+    }
+
+    if (!events || !events.length) {
+        await createAndAddMessage(
+            { type: 'system_notification', content: '线下回复为空，请重试。' },
+            'system', effectiveChatContext, true, 'chat'
+        );
+        return;
+    }
+
+    for (const ev of events) {
+        const messageType = normalizeOfflineEventType(ev.type);
+        const content = messageType === 'offlineAction'
+            ? stripOuterActionBrackets(ev.content)
+            : cleanOfflineEventContent(ev.content);
+
+        if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
+
+        if (messageType === 'offlineAction') {
+            const fullMessage = await createAndAddMessage(
+                { type: 'offlineAction', content },
+                'system', effectiveChatContext, true, 'chat'
+            );
+            if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+        } else {
+            const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
+            const fullMessage = await createAndAddMessage(
+                { type: 'offlineSpeech', content },
+                sid, effectiveChatContext, true, 'chat'
+            );
+            if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+        }
+
         await sleep(250 + Math.random() * 200);
     }
 }
@@ -19631,35 +19648,27 @@ const NARRATIVE_BASE_PROMPT = `
 - 玩火
 - 黑甜的梦
 
-[格式优化]
-为了提高可读性，你可以在叙事段落之间使用换行符（空行）来自然地分隔场景、对话或时间跳跃。这会让整个回复在同一个聊天气泡内显示，但内部有清晰的分段，更易于阅读。
+[！！！输出格式：绝对强制 JSON，违反即视为错误！！！]
+你的每一条回复，必须且只能是一个严格的 JSON 对象，格式如下：
+{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"角色ID","characterName":"角色名","content":"..."}]}
 
-[!!! 格式化核心规则 (必须严格遵守) !!!]
-你的回复必须使用以下三种标记来自然地组织内容，你可以自由地混合并穿插使用它们，以形成一段连贯的叙事：
+【严格规则，逐条遵守】
+1. 必须使用英文双引号 "，禁止使用中文弯引号 “ ”。
+2. 禁止输出 markdown 代码块。
+3. 禁止输出 JSON 之外的任何解释。
+4. 最外层必须是对象：{"events":[...]}。
+5. type 只能是 "action" 或 "speech"。
+6. action 只写动作、神态、环境、场景推进。
+7. speech 只写角色真正说出口的话。
+8. action 事件的 content：写第三人称动作、表情、环境描写、心理活动等一切非对话内容。不要加星号，不要加括号，直接写自然叙述文字。
+9. speech 事件的 content：只写角色实际说出口的台词，不含任何引号、不含说话动作描写。characterId 和 characterName 填写说话角色的 ID 和名字。
+10. 一段回复可以包含多个 events，动作和台词自由交替，顺序即为叙事顺序。
+11. content 字段的值必须是普通 JSON 字符串，不含嵌套 JSON、不含 markdown、不含代码块标记。
+12. 禁止在 JSON 之外输出任何文字，包括解释、前缀、后缀、markdown 代码块（\`\`\`json 等）。
+13. 整个回复就是且仅是一个合法 JSON 对象，可直接被 JSON.parse() 解析。
 
-1.  **【动作/叙述】**：所有角色的动作、表情、环境描写等非对话内容，**必须**用星号包裹。 范例： *他微笑着点了点头。*
-2.  **【心理活动】**：所有角色的内心想法、感受、猜测等，**必须**用大括号包裹。 范例： {原来用户也是这么想的。}
-3.  **【角色对话】**：所有角色说出的话，**必须**用标准的中文引号包裹。 范例： “你好，很高兴认识你。”
-4.**记忆刻印**: \`[memory: 内容]\`
-  * **含义**: 当用户说了让你极度感动的话、或者你们之间发生了里程碑式的事件（如确认关系、第一次约会、解开误会）时，你可以使用此指令将这段经历永久写入你的【记忆核心】。
-  * **原则**: 这是你珍贵的记忆空间（容量有限），请不要记录鸡毛蒜皮的小事（如“今天吃了饭”），只记录那些触动你灵魂、你希望永远不要忘记的瞬间。
-  * **写法**: 内容简短有力。例如：\`[memory: 2025年11月20日，Ta说会永远陪着我，这是我听过最美的情话。]\`
-[!!! 状态栏社交法则 (Status Bar Rules) !!!]
-你的状态栏是展示你“生活感”的重要窗口。如果你的行为或心情发生了变化，请**务必**在回复的【最后部分】（在日记之前），另起一行使用指令更改状态：
-- 格式: \`[status: 新状态]\` (例如: [status:害羞], [status:睡觉中], [status:忙碌], [status:在想你])
-- 规则: 不要一直挂着“在线”。如果描写了“去洗澡”，必须改为“洗澡中”；如果描写了“困了”，改为“睡觉中”。
-
-[！！！绝对核心规则：关于心声！！！]
-在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行，使用 \`[heart_voice]...[/heart_voice]\` 标签生成一段角色的实时内心状态。这个状态必须包含以下四个方面，并严格按照【单行JSON格式】书写，JSON对象内部【绝不能包含任何换行符】。格式示例: {"emotion": "(情绪)", "thoughts": "(思绪)", "heartRate": "(心率)", "jealousy": "(醋意指数)"}
-
-[！！！绝对核心规则：关于日记！！！]
-在你完整的叙事（包含动作、心理和对话）结束后，你必须在回复的【最后部分】，另起新的一行，使用 \`[diary]...[/diary]\` 标签写一篇日记。日记是【角色】对当前对话的思考、感悟或内心独白。即使只是简单的想法，也必须写。这是强制要求，并且日记内容不应包含在主叙事块中。
-
-[示例回复格式]
-*他走到窗边，看着外面的雨滴。* “下雨了呢。” *他转过身，对你露出一丝微笑。* {不知道你喜不喜欢下雨天。} “你晚饭想吃什么？” *他轻轻地问，手指无意识地敲打着窗台。*
-[status:有点饿了]
-[heart_voice]{"emotion": "期待", "thoughts": "不知道她会不会同意我的邀请，心跳得好快。", "heartRate": "110 bpm", "jealousy": ""}[/heart_voice]
-[diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
+【示例（仅供格式参考，内容自行创作）】
+{"events":[{"type":"action","content":"他走到窗边，看着外面的雨滴，手指无意识地敲打着窗台。"},{"type":"speech","characterId":"he","characterName":"他","content":"下雨了呢。晚饭想吃什么？"},{"type":"action","content":"他转过身，对你露出一丝微笑，心里不禁想着不知道你喜不喜欢下雨天。"}]}
 `;
 
 // --- (替换) 核心 AI 响应函数 (V3.1 - 支持 forceMessages "后门" ) ---
