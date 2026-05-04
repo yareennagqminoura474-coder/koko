@@ -16850,7 +16850,254 @@ window.showInsGiftModal = function(textEncoded) {
             if (!state.transactions) state.transactions = [];
             state.transactions.push(newTransaction);
             await kokoMemory.put('transactions', newTransaction);
+            return newTransaction;
         }
+
+async function recordOfflineMoneyToWallet(message, contact) {
+    if (!message || message.walletRecorded) return;
+    const content = String(message.content || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+    if (!content) return;
+
+    const amountMatch = content.match(/¥\s*([0-9]+(?:\.[0-9]{1,2})?)|([0-9]+(?:\.[0-9]{1,2})?)\s*(?:元|块)/i);
+    if (!amountMatch) {
+        return;
+    }
+
+    const amount = parseFloat(amountMatch[1] || amountMatch[2]);
+    if (isNaN(amount) || amount <= 0) {
+        message.walletRecorded = true;
+        if (contact) await kokoMemory.put('contacts', contact);
+        return;
+    }
+
+    const normalized = content.replace(/\s+/g, ' ').toLowerCase();
+    const expensePatterns = [
+        '我给', '我转给', '我买单', '我付款', '我付钱', '我转账', '我掏钱', '我付了', '我出钱', '我出账', '我买单了', '我付款了'
+    ];
+    const incomePatterns = [
+        '给我', '给了我', '转给我', '转账给我', '递给我', '还给我', '报销我', '报销给我', '给我转账', '给我红包'
+    ];
+    const neutralPatterns = [
+        '他自己买单', '她自己结账', '自己付钱', '自己买单', '自己付款', '自己结账', '自行买单', '自行付账'
+    ];
+
+    const matchesAny = (patterns) => patterns.some(p => normalized.includes(p));
+    let walletType = null;
+
+    if (matchesAny(neutralPatterns)) {
+        walletType = 'neutral';
+    } else if (matchesAny(incomePatterns)) {
+        walletType = 'income';
+    } else if (matchesAny(expensePatterns)) {
+        walletType = 'expense';
+    } else {
+        // 额外判断“我给了他”“他给了我”等常见句式
+        if (/我.*(?:给|转给|买单|付款|付钱|转账).*他|我.*(?:给|转给|买单|付款|付钱|转账).*她|我.*(?:给|转给|买单|付款|付钱|转账).*ta|给他.*我|转给他.*我/.test(normalized)) {
+            walletType = 'expense';
+        } else if (/他.*(?:给我|转给我|还给我)|她.*(?:给我|转给我|还给我)|给我.*(?:钱|红包|转账)|还给我/.test(normalized)) {
+            walletType = 'income';
+        }
+    }
+
+    if (!walletType || walletType === 'neutral') {
+        message.walletRecorded = true;
+        if (contact) await kokoMemory.put('contacts', contact);
+        return;
+    }
+
+    const description = content;
+    const transaction = await addTransaction(walletType, amount, description, contact?.id);
+
+    if (walletType === 'expense') {
+        state.myProfile.balance = (state.myProfile.balance || 0) - amount;
+    } else if (walletType === 'income') {
+        state.myProfile.balance = (state.myProfile.balance || 0) + amount;
+    }
+
+    await kokoMemory.put('myProfile', state.myProfile);
+    renderMyProfile();
+    if (document.getElementById('wallet-screen').style.display === 'flex') {
+        renderWalletScreen();
+    }
+
+    message.walletRecorded = true;
+    if (transaction) {
+        message.walletTransactionId = transaction.id;
+    }
+    if (contact) await kokoMemory.put('contacts', contact);
+}
+
+function isContactOfflineNarrativeStyle(contact) {
+    if (!contact) return false;
+    if (!contact.isGroup) return !!contact.isNarrativeMode;
+    if (contact.isNarrativeMode) return true;
+    const members = [];
+    if (Array.isArray(contact.npcMembers)) {
+        members.push(...contact.npcMembers);
+    }
+    if (Array.isArray(contact.members)) {
+        contact.members.forEach(memberId => {
+            if (memberId === 'myProfile' || memberId === 'user') return;
+            const profile = state.contacts.find(c => c.id === memberId);
+            if (profile) members.push(profile);
+        });
+    }
+    return members.some(member => member && member.isNarrativeMode === true);
+}
+
+function parseOfflineAiResponseToEvents(raw) {
+    const source = String(raw || '').trim();
+    if (!source) return [];
+    try {
+        const parsed = JSON.parse(source);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && Array.isArray(parsed.events)) return parsed.events;
+    } catch (e) {
+        // 解析失败则返回空数组，后续将尝试 HTML/引号拆分
+    }
+    return [];
+}
+
+function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
+    const sender = String(ev?.sender || '').toLowerCase();
+    if (sender === 'system') return 'system';
+    if (sender === 'me' || sender === 'user' || sender === senderProfile?.id?.toLowerCase()) return senderProfile.id;
+    if (sender === 'them' || sender === 'other' || sender === 'npc') {
+        return effectiveChatContext?.id || senderProfile.id;
+    }
+    return senderProfile?.id || 'system';
+}
+
+function splitActionSentences(text) {
+    return String(text || '').split(/(?<=[。！？!?；;])\s*/).map(s => s.trim()).filter(Boolean);
+}
+
+function splitLongSpeech(text) {
+    return String(text || '').split(/(?<=[。！？!?])\s*/).map(s => s.trim()).filter(Boolean);
+}
+
+function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
+    const result = [];
+    const source = String(raw || '').trim();
+    if (!source) return result;
+
+    function pushAction(text) {
+        const cleaned = String(text || '')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&nbsp;/g, ' ')
+            .trim();
+        if (!cleaned) return;
+
+        splitActionSentences(cleaned).forEach(piece => {
+            if (piece) {
+                result.push({
+                    type: 'offlineAction',
+                    sender: 'system',
+                    characterId: senderProfile.id,
+                    content: piece,
+                    timestamp: Date.now()
+                });
+            }
+        });
+    }
+
+    function pushSpeech(text) {
+        const cleaned = String(text || '')
+            .replace(/<[^>]+>/g, '')
+            .replace(/^['“]|['”]$/g, '')
+            .trim();
+        if (!cleaned) return;
+
+        splitLongSpeech(cleaned).forEach(piece => {
+            if (piece) {
+                result.push({
+                    type: 'offlineSpeech',
+                    sender: senderProfile.id,
+                    characterId: senderProfile.id,
+                    content: piece,
+                    timestamp: Date.now()
+                });
+            }
+        });
+    }
+
+    if (/<[a-z][\s\S]*>/i.test(source)) {
+        const doc = new DOMParser().parseFromString(source, 'text/html');
+        function walk(node) {
+            if (!node) return;
+            if (node.nodeType === Node.TEXT_NODE) {
+                pushAction(node.textContent);
+                return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            const el = node;
+            if (el.classList.contains('narrative-speech')) {
+                pushSpeech(el.textContent);
+                return;
+            }
+            if (el.classList.contains('narrative-action') || el.classList.contains('narrative-psychology')) {
+                pushAction(el.textContent);
+                return;
+            }
+            Array.from(el.childNodes).forEach(walk);
+        }
+        Array.from(doc.body.childNodes).forEach(walk);
+        if (result.length > 0) return result;
+    }
+
+    const quoteRegex = /[“"]([^”"]+)[”"]/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = quoteRegex.exec(source)) !== null) {
+        const before = source.slice(lastIndex, match.index);
+        pushAction(before);
+        pushSpeech(match[1]);
+        lastIndex = quoteRegex.lastIndex;
+    }
+
+    pushAction(source.slice(lastIndex));
+    if (result.length > 0) return result;
+
+    pushAction(source);
+    return result;
+}
+
+async function processOfflineNarrativeAiReply(conversation, senderProfile, effectiveChatContext) {
+    const events = parseOfflineAiResponseToEvents(conversation);
+    if (events && events.length) {
+        for (const ev of events) {
+            const t = String(ev.type || '').toLowerCase();
+            const content = String(ev.content || '').trim();
+            if (!content) continue;
+            if (t === 'action') {
+                const fullMessage = await createAndAddMessage({ type: 'offlineAction', content }, 'system', effectiveChatContext, true, 'chat');
+                if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+            } else {
+                const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
+                const fullMessage = await createAndAddMessage({ type: 'offlineSpeech', content }, sid, effectiveChatContext, true, 'chat');
+                if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+            }
+            await sleep(250 + Math.random() * 200);
+        }
+        return;
+    }
+
+    const parsed = parseNarrativeHtmlOrTextToOfflineEvents(conversation, senderProfile);
+    console.log('[线下拆分] 原始长度:', String(conversation || '').length, '拆出事件:', parsed.length);
+
+    for (const ev of parsed) {
+        const fullMessage = await createAndAddMessage(
+            { type: ev.type, content: ev.content, characterId: ev.characterId },
+            ev.sender,
+            effectiveChatContext,
+            true,
+            'chat'
+        );
+        if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+        await sleep(250 + Math.random() * 200);
+    }
+}
 /**
  * (V5 扩容版) 获取完整的字符配置库
  * 包含 60+ 个精选单词
@@ -22476,26 +22723,12 @@ if (fullDialogue) {
             }
 
 
-            if (contextMode === 'chat' && effectiveChatContext.isNarrativeMode) {
+            if (contextMode === 'chat' && isContactOfflineNarrativeStyle(effectiveChatContext)) {
                 if (conversation) {
-                    await sleep(400 + Math.random() * 400);
-                    
-                    // ▼▼▼ 核心修改开始 ▼▼▼
-                    // 只要内容里包含 HTML 标签（比如 <div, <span, <style），就标记为 'html' 类型
-                    // 这样 createMessageElement 就会用 innerHTML 渲染它，
-                    // 同时配合第二步的修改，它会被包裹在同一个气泡里。
-                    const hasHtmlTags = /<[a-z][\s\S]*>/i.test(conversation);
-                    
-                    if (hasHtmlTags) {
-                        await createAndAddMessage({ type: 'html', content: conversation }, senderProfile.id, effectiveChatContext, false, 'chat');
-                    } else {
-                        await createAndAddMessage({ type: 'text', content: conversation }, senderProfile.id, effectiveChatContext, false, 'chat');
-                    }
-                    // ▲▲▲ 修改结束 ▲▲▲
+                    await processOfflineNarrativeAiReply(conversation, senderProfile, effectiveChatContext);
                 }
-// ▼▼▼ 使用这个【V4 - 延迟修正版】替换旧的 "else if (contextMode === 'chat') { ... }" 完整代码块 ▼▼▼
-
-    } else if (contextMode === 'chat') {
+                return;
+            } else if (contextMode === 'chat') {
         
         // --- 智能缓冲循环 V4 (Koko特供版) 开始 ---
         
