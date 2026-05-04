@@ -17009,6 +17009,51 @@ async function processOfflineNarrativeAiReply(conversation, senderProfile, effec
     const payload = parseOfflineAiResponsePayload(conversation);
 
     if (payload === null) {
+        const source = String(conversation || '').trim();
+        const looksLikeJson =
+            /```json/i.test(source) ||
+            /^\s*[\{\[]/.test(source) ||
+            /"events"\s*:/.test(source) ||
+            /"type"\s*:/.test(source) ||
+            /"content"\s*:/.test(source);
+
+        if (looksLikeJson) {
+            await createAndAddMessage(
+                { type: 'system_notification', content: '线下回复格式解析失败，请重试。' },
+                'system', effectiveChatContext, true, 'chat'
+            );
+            return;
+        }
+
+        // AI 返回了普通文本，用文本兜底渲染，保证消息能出来
+        const fallbackEvents = parseNarrativeHtmlOrTextToOfflineEvents(source, senderProfile);
+        if (fallbackEvents && fallbackEvents.length) {
+            console.warn('[线下模式] AI 未返回 JSON，已使用文本兜底渲染');
+            for (const ev of fallbackEvents) {
+                const messageType = normalizeOfflineEventType(ev.type);
+                const content = messageType === 'offlineAction'
+                    ? stripOuterActionBrackets(ev.content)
+                    : cleanOfflineEventContent(ev.content);
+                if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
+                if (messageType === 'offlineAction') {
+                    const fullMessage = await createAndAddMessage(
+                        { type: 'offlineAction', content },
+                        'system', effectiveChatContext, true, 'chat'
+                    );
+                    if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+                } else {
+                    const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
+                    const fullMessage = await createAndAddMessage(
+                        { type: 'offlineSpeech', content },
+                        sid, effectiveChatContext, true, 'chat'
+                    );
+                    if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+                }
+                await sleep(250 + Math.random() * 200);
+            }
+            return;
+        }
+
         await createAndAddMessage(
             { type: 'system_notification', content: '线下回复格式解析失败，请重试。' },
             'system', effectiveChatContext, true, 'chat'
@@ -19057,8 +19102,9 @@ MESSAGE_END
 
         // 群聊当前轮次边界规则
         let _grpLatestUserMsgId = null;
+        let _grpLastUserMsg = null;
         try {
-            const _grpLastUserMsg = group.history.filter(m => m.sender === 'user' && !['system_notification', 'loading', 'error'].includes(m.type)).slice(-1)[0];
+            _grpLastUserMsg = group.history.filter(m => m.sender === 'user' && !['system_notification', 'loading', 'error'].includes(m.type)).slice(-1)[0];
             _grpLatestUserMsgId = _grpLastUserMsg ? _grpLastUserMsg.id : null;
             const _grpLatestInput = _grpLastUserMsg ? (typeof _grpLastUserMsg.content === 'string' ? _grpLastUserMsg.content : '') : '';
             const _grpAllowPrev = doesCurrentInputReferToPrevious(_grpLatestInput);
@@ -19130,6 +19176,21 @@ MESSAGE_END
         // ============================================================
         if (currentUserMessageParts.length > 0) {
             messages.push({ role: 'user', content: currentUserMessageParts });
+            currentUserMessageParts = [];
+        }
+
+        // 关键修复：latest user input 被 recentHistory 排除了，必须作为最后一条 user message 重新加入
+        try {
+            const latestGroupParts = buildPromptPartsFromLatestUserMessage(_grpLastUserMsg, group);
+            if (latestGroupParts && latestGroupParts.length) {
+                messages.push({ role: 'user', content: latestGroupParts });
+            }
+            console.log('[群聊 Prompt] 已追加当前用户最新输入', {
+                latestUserMessageId: _grpLatestUserMsgId,
+                hasLatestParts: !!(latestGroupParts && latestGroupParts.length)
+            });
+        } catch (_e) {
+            console.warn('[群聊 Prompt] 追加当前用户最新输入失败:', _e);
         }
 
         const finalRequestMessages = [
@@ -19361,6 +19422,67 @@ function buildPromptHistoryExcludingLatest(history, latestUserMessageId, limit) 
             return true;
         })
         .slice(-(limit || 20));
+}
+
+function buildPromptPartsFromLatestUserMessage(msg, contact) {
+    if (!msg) return [];
+    const parts = [];
+
+    if (msg.type === 'uploaded_image' && msg.content && msg.content.base64) {
+        parts.push({ type: 'image_url', image_url: { url: msg.content.base64 } });
+        return parts;
+    }
+
+    let textContent = '';
+    switch (msg.type) {
+        case 'text':
+        case 'video_call_text':
+            textContent = typeof msg.content === 'string'
+                ? msg.content
+                : (msg.content && msg.content.text ? msg.content.text : '');
+            break;
+        case 'image':
+            textContent = msg.isEmoticon && msg.emoticonName
+                ? `[用户发送了表情包: ${msg.emoticonName}]`
+                : '[用户发送了一张图片]';
+            break;
+        case 'picture_description':
+            textContent = `[picture:${msg.content && msg.content.description ? msg.content.description : ''}]`;
+            break;
+        case 'voice':
+            textContent = `[voice:${msg.content && msg.content.text ? msg.content.text : '语音内容'}]`;
+            break;
+        case 'red_packet':
+            textContent = `[red_packet:${msg.content && msg.content.blessing ? msg.content.blessing : ''}, ${msg.content && msg.content.amount ? msg.content.amount : ''}]`;
+            break;
+        case 'transfer':
+            textContent = `[transfer:${msg.content && msg.content.amount ? msg.content.amount : ''}]`;
+            break;
+        case 'music_share':
+            textContent = `(分享了一首音乐: 《${msg.content && msg.content.title ? msg.content.title : ''}》 - ${msg.content && msg.content.artist ? msg.content.artist : ''})`;
+            break;
+        case 'location_share':
+            textContent = `(发送了一个位置，地点是："${msg.content && msg.content.name ? msg.content.name : ''}")`;
+            break;
+        default:
+            if (typeof msg.content === 'string') {
+                textContent = msg.content;
+            } else if (msg.content && msg.content.text) {
+                textContent = msg.content.text;
+            } else {
+                textContent = `[用户发送了 ${msg.type || '未知'} 类型消息]`;
+            }
+    }
+
+    if (msg.quote && textContent) {
+        textContent = `[用户回复"${msg.quote.senderName || '某人'}"说的"${String(msg.quote.content || '').substring(0, 50)}..."] ` + textContent;
+    }
+
+    if (textContent && String(textContent).trim()) {
+        parts.push({ type: 'text', text: String(textContent).trim() });
+    }
+
+    return parts;
 }
 // --- 辅助函数结束 ---
 
@@ -20463,10 +20585,12 @@ ${qzoneContextText}
 
                 // 当前轮次边界规则：阻止 AI 继续回应上一轮
                 let _latestUserMsgId = null;
+                let _lastUserMsg = null;
+                let _latestInputText = '';
                 try {
-                    const _lastUserMsg = history.filter(m => m.sender === 'user' && !['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type)).slice(-1)[0];
+                    _lastUserMsg = history.filter(m => m.sender === 'user' && !['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type)).slice(-1)[0];
                     _latestUserMsgId = _lastUserMsg ? _lastUserMsg.id : null;
-                    const _latestInputText = _lastUserMsg
+                    _latestInputText = _lastUserMsg
                         ? (typeof _lastUserMsg.content === 'string' ? _lastUserMsg.content : (_lastUserMsg.content?.text || ''))
                         : '';
                     const _allowPrev = doesCurrentInputReferToPrevious(_latestInputText);
@@ -20629,7 +20753,24 @@ ${qzoneContextText}
                 if (currentUserMessageParts.length > 0) {
                     messages.push({ role: 'user', content: currentUserMessageParts });
                 }
-                
+
+                // 关键修复：latest user input 被 recentHistory 排除了，必须作为最后一条 user message 重新加入
+                try {
+                    const latestParts = buildPromptPartsFromLatestUserMessage(_lastUserMsg, contact);
+                    if (latestParts && latestParts.length) {
+                        messages.push({ role: 'user', content: latestParts });
+                    } else if (_latestInputText && String(_latestInputText).trim()) {
+                        messages.push({ role: 'user', content: [{ type: 'text', text: String(_latestInputText).trim() }] });
+                    }
+                    console.log('[AI Prompt] 已追加当前用户最新输入', {
+                        latestUserMessageId: _latestUserMsgId,
+                        hasLatestParts: !!(latestParts && latestParts.length),
+                        isNarrativeMode: !!isNarrativeMode
+                    });
+                } catch (_e) {
+                    console.warn('[AI Prompt] 追加当前用户最新输入失败:', _e);
+                }
+
                 // (你原来的 requestMessages 赋值)
                 requestMessages = [{ role: 'system', content: systemContent }, ...messages];
             
@@ -20655,12 +20796,17 @@ ${qzoneContextText}
             // ▲▲▲ 修改结束 ▲▲▲
             
             // (你原来的 fetch 和 API 调用逻辑，完全保持不变)
+            console.log('[AI Prompt 检查]', {
+                messageCount: requestMessages.length,
+                lastRole: requestMessages[requestMessages.length - 1]?.role,
+                lastContent: requestMessages[requestMessages.length - 1]?.content
+            });
             try {
                 let data;
                 if (endpoint.includes('generativelanguage.googleapis.com')) {
                   data = await handleGeminiTranslation(bodyPayload, apiKey);
                 } else {
-                    const cleanEndpoint = normalizeApiEndpoint(endpoint); 
+                    const cleanEndpoint = normalizeApiEndpoint(endpoint);
                     const chatEndpoint = `${cleanEndpoint}/v1/chat/completions`;
                     const response = await fetch(chatEndpoint, {
                         method: 'POST',
