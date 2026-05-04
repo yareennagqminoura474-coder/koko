@@ -11,7 +11,8 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./icon.svg">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -63,9 +64,11 @@
 } 
         
         html, body {
+            width: 100%;
             height: 100%;
             margin: 0;
             padding: 0;
+            overflow: hidden;
         }
 
         * {
@@ -2169,6 +2172,28 @@
         position: relative; 
     }
 }
+/* PWA 全屏/独立模式：取消桌面手机框，占满整个应用窗口 */
+@media all and (display-mode: fullscreen),
+       all and (display-mode: standalone) {
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+    }
+    #app-container {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100% !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+    }
+    #screen {
+        width: 100% !important;
+        height: 100% !important;
+        border-radius: 0 !important;
+    }
+}
+
 /* --- V-Final 新增: 购物中心样式 V3 (修正版) --- */
 .product-list {
     display: grid;
@@ -17160,46 +17185,100 @@ async function triggerPrivateFreeChat(contact) {
             }
         });
         
-        // 步骤3: 收集【群聊】历史 (这是我 V8 忘加的)
+        // 步骤3: 收集【群聊】历史（独立流，不参与 memoryLimit 挤压）
+        let groupMemoryStream = [];
         if (contact && !contact.isGroup) {
             const allGroups = state.contacts.filter(c => c.isGroup);
-            const sharedMemoryGroups = allGroups.filter(g => 
+            const sharedMemoryGroups = allGroups.filter(g =>
                 g.memoryShared && g.members.includes(contact.id)
             );
 
+            console.log(`[记忆互通] 私聊"${contact.name}" 找到 ${sharedMemoryGroups.length} 个共享群聊:`, sharedMemoryGroups.map(g => g.name));
+
             for (const group of sharedMemoryGroups) {
-                group.history.slice(-20).forEach(msg => {
-                    if (msg.type !== 'text') return;
-                    // (使用一个临时的查找器)
-                    const getProfileInGroup = (id) => {
-                        if (id === 'myProfile' || id === 'user') return myProfile;
-                        let profile = state.contacts.find(c => c.id === id);
+                const getProfileInGroup = (id) => {
+                    if (id === 'myProfile' || id === 'user') return myProfile;
+                    let profile = state.contacts.find(c => c.id === id);
+                    if (profile) return profile;
+                    if (group.npcMembers) {
+                        profile = group.npcMembers.find(npc => npc.id === id);
                         if (profile) return profile;
-                        if (group.npcMembers) {
-                            profile = group.npcMembers.find(npc => npc.id === id);
-                            if (profile) return profile;
-                        }
-                        return null; 
-                    };
+                    }
+                    return null;
+                };
+
+                group.history.slice(-50).forEach(msg => {
+                    if (msg.sender === 'system_instruction') return;
                     const authorProfile = getProfileInGroup(msg.sender);
                     if (!authorProfile) return;
-                    
-                    unifiedMemoryStream.push({
-                        timestamp: msg.timestamp,
-                        type: `群聊[${group.name}]`,
-                        author: authorProfile.name,
-                        content: msg.content
-                    });
+
+                    let content = '';
+                    switch (msg.type) {
+                        case 'text':
+                        case 'html':
+                            content = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : String(msg.content);
+                            if (msg.quote) {
+                                content = `[回复"${msg.quote.senderName}"说的"${msg.quote.content.substring(0, 20)}..."] ` + content;
+                            }
+                            break;
+                        case 'uploaded_image':
+                        case 'image':
+                            content = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片)`;
+                            break;
+                        case 'picture_description':
+                            content = `(发送了图片，描述："${msg.content.description}")`;
+                            break;
+                        case 'voice':
+                            content = `(语音："${msg.content.text}")`;
+                            break;
+                        case 'red_packet':
+                            content = `(发了红包："${msg.content.blessing || '恭喜发财'}")`;
+                            break;
+                        case 'transfer':
+                            content = `(转账 ${msg.content.amount}元)`;
+                            break;
+                        case 'location_share':
+                            content = `(分享了位置: ${msg.content.name})`;
+                            break;
+                        case 'music_share':
+                            content = `(分享了音乐: 《${msg.content.title}》 - ${msg.content.artist})`;
+                            break;
+                        case 'post_share':
+                            content = `(分享了帖子)`;
+                            break;
+                        case 'system_notification':
+                            content = `(系统消息：${msg.content})`;
+                            break;
+                        case 'recall_ai':
+                            content = `(撤回了一条消息)`;
+                            break;
+                        default:
+                            if (typeof msg.content === 'string' && msg.content) {
+                                content = msg.content.replace(/<[^>]+>/g, '');
+                            }
+                    }
+
+                    if (content) {
+                        groupMemoryStream.push({
+                            timestamp: msg.timestamp,
+                            type: `群聊[${group.name}]`,
+                            author: authorProfile.name,
+                            content: content
+                        });
+                    }
                 });
             }
+
+            groupMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
+            console.log(`[记忆互通] 共收集到 ${groupMemoryStream.length} 条群聊记忆`);
         }
-        
+
         // 步骤4: 收集【短信】历史 (这是我 V8 忘加的)
         if (contact && contact.smsHistory) {
             const recentSmsHistory = contact.smsHistory.slice(-30);
             recentSmsHistory.forEach(msg => {
                 if (msg.type === 'text') {
-                    const authorName = msg.sender === 'user' ? myProfile.name : contact.name;
+                    const authorName = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile.name : contact.name;
                     unifiedMemoryStream.push({
                         timestamp: msg.timestamp,
                         type: '短信',
@@ -17209,15 +17288,23 @@ async function triggerPrivateFreeChat(contact) {
                 }
             });
         }
-        
-        // 1f. 排序并格式化
+
+        // 1f. 排序并格式化（私聊/论坛/短信流用 memoryLimit 截断，群聊独立保留）
         unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
-        
-        const finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
+
+        const formatMemEntry = (mem) => {
             const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
             const timeTag = (contact && contact.isTimeAware === true) ? formatHybridTimeForAI(mem.timestamp) : '';
             return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
-        }).join('\n') || "(还没有任何记忆)";
+        };
+
+        const finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(formatMemEntry).join('\n') || "(还没有任何记忆)";
+
+        // 群聊记忆独立区块：至少保留最近 30 条，不被 memoryLimit 挤压
+        const groupMemoryLimit = 30;
+        const finalGroupMemoryString = groupMemoryStream.length > 0
+            ? groupMemoryStream.slice(-groupMemoryLimit).map(formatMemEntry).join('\n')
+            : null;
 
         // 1g. 构建角色档案
         const userPersona = contact.userPersona || myProfile.signature || '(用户未设置特定人设)';
@@ -17260,6 +17347,15 @@ async function triggerPrivateFreeChat(contact) {
             baseSystemPrompt = baseSystemPrompt.replace('{{music_library_list}}', musicListString ? `- ${musicListString}` : '（曲库为空）');
         }
 
+        const groupMemorySection = finalGroupMemoryString ? `
+
+【相关群聊记忆】
+---
+以下是你与对方所在的共享群聊中最近发生的事情，你必须参考这些记忆。如果用户在私聊中提到群聊里发生过的事，你要自然承接，不要装作不知道：
+${finalGroupMemoryString}
+---
+` : '';
+
         const finalSystemPrompt = baseSystemPrompt + `
 [额外背景资料：角色档案]
 ---
@@ -17270,7 +17366,7 @@ ${characterDossiersPrompt}
 ---
 ${worldBookContextString}
 ---
-`;
+${groupMemorySection}`;
 
         // (Part B: 这是 contents，只包含任务)
         // (使用 V8 版修正后的叙事任务)
@@ -17506,26 +17602,70 @@ async function triggerGroupFreeChat(group) {
             }
         });
         
-        // 步骤2: 【条件性】收集AI成员与您的【私聊】历史 (这就是你说的“互通”！)
+        // 步骤2: 【条件性】收集AI成员与用户的【私聊】历史（memoryShared 互通）
         if (group.memoryShared) {
+            let privateMsgCount = 0;
+            let memberWithHistoryCount = 0;
             unmutedAiMembers.forEach(memberId => {
-                // 必须从 state.contacts (主联系人列表) 里找私聊对象
                 const contact = state.contacts.find(c => c.id === memberId);
                 if (contact && contact.history && contact.history.length > 0) {
-                    contact.history.slice(-30).forEach(msg => { // 抓取最近30条私聊
-                        // (只抓取最简单的文本消息用于互通，防止刷屏)
-                        if (msg.type === 'text' && msg.sender !== 'system_instruction') {
-                            const authorProfile = (msg.sender === 'user') ? myProfile : contact;
+                    memberWithHistoryCount++;
+                    contact.history.slice(-50).forEach(msg => {
+                        if (msg.sender === 'system_instruction') return;
+                        const authorProfile = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile : contact;
+                        let content = '';
+                        switch (msg.type) {
+                            case 'text':
+                            case 'html':
+                                content = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : String(msg.content);
+                                if (msg.quote) content = `[回复”${msg.quote.senderName}”说的”${msg.quote.content.substring(0, 20)}...”] ` + content;
+                                break;
+                            case 'uploaded_image': case 'image':
+                                content = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片)`;
+                                break;
+                            case 'picture_description':
+                                content = `(发送了图片，描述：”${msg.content.description}”)`;
+                                break;
+                            case 'voice':
+                                content = `(语音：”${msg.content.text}”)`;
+                                break;
+                            case 'red_packet':
+                                content = `(发了红包：”${msg.content.blessing || '恭喜发财'}”)`;
+                                break;
+                            case 'transfer':
+                                content = `(转账 ${msg.content.amount}元)`;
+                                break;
+                            case 'location_share':
+                                content = `(分享了位置: ${msg.content.name})`;
+                                break;
+                            case 'music_share':
+                                content = `(分享了音乐: 《${msg.content.title}》 - ${msg.content.artist})`;
+                                break;
+                            case 'post_share':
+                                content = `(分享了帖子)`;
+                                break;
+                            case 'system_notification':
+                                content = `(系统消息：${msg.content})`;
+                                break;
+                            case 'recall_ai':
+                                content = `(撤回了一条消息)`;
+                                break;
+                            default:
+                                if (typeof msg.content === 'string' && msg.content) content = msg.content.replace(/<[^>]+>/g, '');
+                        }
+                        if (content) {
                             unifiedMemoryStream.push({
                                 timestamp: msg.timestamp,
-                                type: `私聊[${contact.name}]`, // 明确标记为“私聊”
+                                type: `私聊[${contact.name}]`,
                                 author: authorProfile.name,
-                                content: msg.content
+                                content: content
                             });
+                            privateMsgCount++;
                         }
                     });
                 }
             });
+            console.log(`[记忆互通] 群聊自由聊天”${group.name}” 读取到 ${memberWithHistoryCount} 个成员的私聊记忆，共 ${privateMsgCount} 条`);
         }
 
         // 步骤3: 排序并格式化
@@ -17537,26 +17677,44 @@ async function triggerGroupFreeChat(group) {
             return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
         }).join('\n') || "(还没有任何记忆)";
 
-        // 1g. 构建角色档案（包含私聊参考，因为V7现在有私聊记忆了）
+        // 1g. 构建角色档案（包含私聊参考）
         let characterDossiersPrompt = allMemberProfiles.map(profile => {
-                // (从 triggerGroupChatAiReply 复制过来的逻辑)
                 let recentChatHistory = '(最近没有与用户的私聊记录)';
                 if (group.memoryShared) {
                     const contactProfile = state.contacts.find(c => c.id === profile.id);
                     if (contactProfile && contactProfile.history && contactProfile.history.length > 0) {
-                        recentChatHistory = contactProfile.history
-                            .filter(msg => msg.type === 'text' && msg.sender !== 'system_instruction')
+                        const lines = [];
+                        contactProfile.history
+                            .filter(msg => msg.sender !== 'system_instruction')
                             .slice(-30)
-                            .map(msg => `    ${msg.sender === 'user' ? myProfile.name : profile.name}: ${msg.content}`)
-                            .join('\n');
+                            .forEach(msg => {
+                                const senderName = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile.name : profile.name;
+                                let text = '';
+                                switch (msg.type) {
+                                    case 'text': case 'html':
+                                        text = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : String(msg.content); break;
+                                    case 'uploaded_image': case 'image':
+                                        text = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片)`; break;
+                                    case 'picture_description': text = `(发送了图片，描述：”${msg.content.description}”)`; break;
+                                    case 'voice': text = `(语音：”${msg.content.text}”)`; break;
+                                    case 'red_packet': text = `(发了红包：”${msg.content.blessing || '恭喜发财'}”)`; break;
+                                    case 'transfer': text = `(转账 ${msg.content.amount}元)`; break;
+                                    case 'location_share': text = `(分享了位置: ${msg.content.name})`; break;
+                                    case 'music_share': text = `(分享了音乐: 《${msg.content.title}》 - ${msg.content.artist})`; break;
+                                    default:
+                                        if (typeof msg.content === 'string' && msg.content) text = msg.content.replace(/<[^>]+>/g, '');
+                                }
+                                if (text) lines.push(`    ${senderName}: ${text}`);
+                            });
+                        if (lines.length > 0) recentChatHistory = lines.join('\n');
                     }
                 }
-                
+
                 return `
 - 角色名: ${profile.name}
   - 核心人设: ${profile.persona.replace(/\n/g, ' ')}
   ${group.memoryShared ? `
-  - [与用户“${myProfile.name}”的近期私聊参考 (重要)]
+  - [与用户”${myProfile.name}”的近期私聊参考 (重要)]
     \`\`\`
 ${recentChatHistory}
     \`\`\`
@@ -17841,23 +17999,70 @@ case 'chat_history_share': {
             }
         });
 
-        // 步骤2: (保持不变) 【条件性】收集AI成员与您的私聊历史
+        // 步骤2: 【条件性】收集AI成员与用户的私聊历史（memoryShared 互通）
         if (group.memoryShared) {
-            unmutedAiMembers.forEach(member => {
-                const contact = state.contacts.find(c => c.id === member.id); // 私聊只存在于state.contacts
+            let privateMsgCount = 0;
+            let memberWithHistoryCount = 0;
+            unmutedAiMembers.forEach(memberId => {
+                const contact = state.contacts.find(c => c.id === memberId);
                 if (contact && contact.history && contact.history.length > 0) {
-                    contact.history.slice(-30).forEach(msg => {
-                        if (msg.type !== 'text' || msg.sender === 'system_instruction') return;
-                        const authorProfile = (msg.sender === 'user') ? myProfile : contact;
-                        unifiedMemoryStream.push({
-                            timestamp: msg.timestamp,
-                            type: `私聊[${contact.name}]`,
-                            author: authorProfile.name,
-                            content: msg.content
-                        });
+                    memberWithHistoryCount++;
+                    contact.history.slice(-50).forEach(msg => {
+                        if (msg.sender === 'system_instruction') return;
+                        const authorProfile = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile : contact;
+                        let content = '';
+                        switch (msg.type) {
+                            case 'text':
+                            case 'html':
+                                content = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : String(msg.content);
+                                if (msg.quote) content = `[回复"${msg.quote.senderName}"说的"${msg.quote.content.substring(0, 20)}..."] ` + content;
+                                break;
+                            case 'uploaded_image': case 'image':
+                                content = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片)`;
+                                break;
+                            case 'picture_description':
+                                content = `(发送了图片，描述："${msg.content.description}")`;
+                                break;
+                            case 'voice':
+                                content = `(语音："${msg.content.text}")`;
+                                break;
+                            case 'red_packet':
+                                content = `(发了红包："${msg.content.blessing || '恭喜发财'}")`;
+                                break;
+                            case 'transfer':
+                                content = `(转账 ${msg.content.amount}元)`;
+                                break;
+                            case 'location_share':
+                                content = `(分享了位置: ${msg.content.name})`;
+                                break;
+                            case 'music_share':
+                                content = `(分享了音乐: 《${msg.content.title}》 - ${msg.content.artist})`;
+                                break;
+                            case 'post_share':
+                                content = `(分享了帖子)`;
+                                break;
+                            case 'system_notification':
+                                content = `(系统消息：${msg.content})`;
+                                break;
+                            case 'recall_ai':
+                                content = `(撤回了一条消息)`;
+                                break;
+                            default:
+                                if (typeof msg.content === 'string' && msg.content) content = msg.content.replace(/<[^>]+>/g, '');
+                        }
+                        if (content) {
+                            unifiedMemoryStream.push({
+                                timestamp: msg.timestamp,
+                                type: `私聊[${contact.name}]`,
+                                author: authorProfile.name,
+                                content: content
+                            });
+                            privateMsgCount++;
+                        }
                     });
                 }
             });
+            console.log(`[记忆互通] 群聊"${group.name}" 读取到 ${memberWithHistoryCount} 个成员的私聊记忆，共 ${privateMsgCount} 条`);
         }
 
         // 步骤3: (保持不变) 排序并截取，形成最终的线性记忆字符串
@@ -17877,24 +18082,42 @@ case 'chat_history_share': {
             return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
         }).join('\n') || "(还没有任何记忆)";
 
-        // 步骤4: (保持不变) 【条件性】构建角色档案
+        // 步骤4: 【条件性】构建角色档案
         let characterDossiersPrompt = '';
         if (group.memoryShared) {
             characterDossiersPrompt = allMemberProfiles.map(profile => {
                 let recentChatHistory = '(最近没有与用户的私聊记录)';
-                // 私聊历史只存在于“真实联系人”中
                 const contactProfile = state.contacts.find(c => c.id === profile.id);
                 if (contactProfile && contactProfile.history && contactProfile.history.length > 0) {
-                    recentChatHistory = contactProfile.history
-                        .filter(msg => msg.type === 'text' && msg.sender !== 'system_instruction')
-                        .slice(-40)
-                        .map(msg => `    ${msg.sender === 'user' ? myProfile.name : profile.name}: ${msg.content}`)
-                        .join('\n');
+                    const lines = [];
+                    contactProfile.history
+                        .filter(msg => msg.sender !== 'system_instruction')
+                        .slice(-30)
+                        .forEach(msg => {
+                            const senderName = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile.name : profile.name;
+                            let text = '';
+                            switch (msg.type) {
+                                case 'text': case 'html':
+                                    text = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : String(msg.content); break;
+                                case 'uploaded_image': case 'image':
+                                    text = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片)`; break;
+                                case 'picture_description': text = `(发送了图片，描述：”${msg.content.description}”)`; break;
+                                case 'voice': text = `(语音：”${msg.content.text}”)`; break;
+                                case 'red_packet': text = `(发了红包：”${msg.content.blessing || '恭喜发财'}”)`; break;
+                                case 'transfer': text = `(转账 ${msg.content.amount}元)`; break;
+                                case 'location_share': text = `(分享了位置: ${msg.content.name})`; break;
+                                case 'music_share': text = `(分享了音乐: 《${msg.content.title}》 - ${msg.content.artist})`; break;
+                                default:
+                                    if (typeof msg.content === 'string' && msg.content) text = msg.content.replace(/<[^>]+>/g, '');
+                            }
+                            if (text) lines.push(`    ${senderName}: ${text}`);
+                        });
+                    if (lines.length > 0) recentChatHistory = lines.join('\n');
                 }
                 return `
 - 角色名: ${profile.name}
   - 核心人设: ${profile.persona.replace(/\n/g, ' ')}
-  - [与用户“${myProfile.name}”的近期私聊参考 (重要)]
+  - [与用户”${myProfile.name}”的近期私聊参考 (重要)]
     \`\`\`
 ${recentChatHistory}
     \`\`\`
@@ -18716,26 +18939,92 @@ case 'takeout':
                     }
                 });
                 
-                // (你原来的群聊记忆互通逻辑)
+                // 群聊记忆互通（独立流，不参与 memoryLimit 挤压）
+                let groupMemoryStream = [];
                 if (contact && !contact.isGroup) {
                     const allGroups = state.contacts.filter(c => c.isGroup);
-                    const sharedMemoryGroups = allGroups.filter(g => 
+                    const sharedMemoryGroups = allGroups.filter(g =>
                         g.memoryShared && g.members.includes(contact.id)
                     );
 
+                    console.log(`[记忆互通] 私聊"${contact.name}" 找到 ${sharedMemoryGroups.length} 个共享群聊:`, sharedMemoryGroups.map(g => g.name));
+
                     for (const group of sharedMemoryGroups) {
-                        group.history.slice(-20).forEach(msg => {
-                            if (msg.type !== 'text') return;
-                            const authorProfile = (msg.sender === 'myProfile') ? state.myProfile : state.contacts.find(c => c.id === msg.sender);
+                        const getProfileInGroup = (id) => {
+                            if (id === 'myProfile' || id === 'user') return myProfile;
+                            let profile = state.contacts.find(c => c.id === id);
+                            if (profile) return profile;
+                            if (group.npcMembers) {
+                                profile = group.npcMembers.find(npc => npc.id === id);
+                                if (profile) return profile;
+                            }
+                            return null;
+                        };
+
+                        group.history.slice(-50).forEach(msg => {
+                            if (msg.sender === 'system_instruction') return;
+                            const authorProfile = getProfileInGroup(msg.sender);
                             if (!authorProfile) return;
-                            unifiedMemoryStream.push({
-                                timestamp: msg.timestamp,
-                                type: `群聊[${group.name}]`,
-                                author: authorProfile.name,
-                                content: msg.content
-                            });
+
+                            let content = '';
+                            switch (msg.type) {
+                                case 'text':
+                                case 'html':
+                                    content = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : String(msg.content);
+                                    if (msg.quote) {
+                                        content = `[回复"${msg.quote.senderName}"说的"${msg.quote.content.substring(0, 20)}..."] ` + content;
+                                    }
+                                    break;
+                                case 'uploaded_image':
+                                case 'image':
+                                    content = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片)`;
+                                    break;
+                                case 'picture_description':
+                                    content = `(发送了图片，描述："${msg.content.description}")`;
+                                    break;
+                                case 'voice':
+                                    content = `(语音："${msg.content.text}")`;
+                                    break;
+                                case 'red_packet':
+                                    content = `(发了红包："${msg.content.blessing || '恭喜发财'}")`;
+                                    break;
+                                case 'transfer':
+                                    content = `(转账 ${msg.content.amount}元)`;
+                                    break;
+                                case 'location_share':
+                                    content = `(分享了位置: ${msg.content.name})`;
+                                    break;
+                                case 'music_share':
+                                    content = `(分享了音乐: 《${msg.content.title}》 - ${msg.content.artist})`;
+                                    break;
+                                case 'post_share':
+                                    content = `(分享了帖子)`;
+                                    break;
+                                case 'system_notification':
+                                    content = `(系统消息：${msg.content})`;
+                                    break;
+                                case 'recall_ai':
+                                    content = `(撤回了一条消息)`;
+                                    break;
+                                default:
+                                    if (typeof msg.content === 'string' && msg.content) {
+                                        content = msg.content.replace(/<[^>]+>/g, '');
+                                    }
+                            }
+
+                            if (content) {
+                                groupMemoryStream.push({
+                                    timestamp: msg.timestamp,
+                                    type: `群聊[${group.name}]`,
+                                    author: authorProfile.name,
+                                    content: content
+                                });
+                            }
                         });
                     }
+
+                    groupMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
+                    console.log(`[记忆互通] 共收集到 ${groupMemoryStream.length} 条群聊记忆`);
                 }
                 
                 // (你原来的短信记忆逻辑)
@@ -19038,6 +19327,18 @@ ${npcBriefs ? `[相关人物简报]\n${npcBriefs}` : ''}
                 if (worldBookContextString) { systemContent += worldBookContextString; }
                 if (snoopedDataContextString) { systemContent += snoopedDataContextString; }
                 if (relationshipContextString) { systemContent += relationshipContextString; }
+
+                // 群聊记忆独立区块：保留最近 30 条，不被 memoryLimit 挤压
+                if (groupMemoryStream.length > 0) {
+                    const groupMemoryLimit = 30;
+                    const showTimeTags = contact && contact.isTimeAware === true;
+                    const groupMemoryLines = groupMemoryStream.slice(-groupMemoryLimit).map(mem => {
+                        const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
+                        const timeTag = showTimeTags ? formatHybridTimeForAI(mem.timestamp) : '';
+                        return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
+                    }).join('\n');
+                    systemContent += `\n\n【相关群聊记忆】\n---\n以下是你与对方所在的共享群聊中最近发生的事情，你必须参考这些记忆。如果用户在私聊中提到群聊里发生过的事，你要自然承接，不要装作不知道：\n${groupMemoryLines}\n---`;
+                }
 
                 // (你原来的日程提醒逻辑)
                 if (timeGapInstruction) {
