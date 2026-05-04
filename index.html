@@ -61,8 +61,40 @@
 .narrative-action {
     font-style: normal;
     color: #517655; /* 深一点的青苹果色 (来自您已有的 --theme-primary-hover 变量) */
-} 
-        
+}
+
+.offline-action-card {
+    align-self: center;
+    width: calc(100% - 36px);
+    max-width: 520px;
+    margin: 10px auto;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.88);
+    border: 1px solid rgba(129, 199, 132, 0.28);
+    border-left: 4px solid var(--theme-primary);
+    color: #4c6251;
+    box-shadow: 0 4px 14px var(--shadow-color);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    line-height: 1.65;
+    font-size: 14px;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+.offline-action-card span {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.offline-action-card i {
+    color: var(--theme-primary);
+    font-style: normal;
+    flex-shrink: 0;
+}
+
         html, body {
             width: 100%;
             height: 100%;
@@ -16706,7 +16738,17 @@ case 'music_share':
                         </div>`;
                     break;
                 }
-                default: 
+                case 'offlineAction': {
+                    const actionWrapper = document.createElement('div');
+                    actionWrapper.className = 'offline-action-card';
+                    actionWrapper.dataset.messageId = message.id;
+                    const safeDiv = document.createElement('div');
+                    safeDiv.textContent = stripOuterActionBrackets(message.content);
+                    actionWrapper.innerHTML = `<span>${safeDiv.innerHTML}</span><i aria-hidden="true">✦</i>`;
+                    actionWrapper.addEventListener('click', () => handleMessageSelection(actionWrapper, message));
+                    return actionWrapper;
+                }
+                default:
                     let formattedContent = message.content;
                     const tempDiv = document.createElement('div');
                     tempDiv.textContent = formattedContent;
@@ -16945,6 +16987,62 @@ function isContactOfflineNarrativeStyle(contact) {
     return members.some(member => member && member.isNarrativeMode === true);
 }
 
+function cleanOfflineEventContent(text) {
+    return String(text || '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/^[\s“”‘’"']+|[\s“”‘’"']+$/g, '')
+        .trim();
+}
+
+function stripOuterActionBrackets(text) {
+    let s = cleanOfflineEventContent(text);
+    let changed = true;
+    while (changed) {
+        changed = false;
+        if ((s.startsWith('（') && s.endsWith('）')) ||
+            (s.startsWith('(') && s.endsWith(')')) ||
+            (s.startsWith('【') && s.endsWith('】')) ||
+            (s.startsWith('*') && s.endsWith('*'))) {
+            s = s.slice(1, -1).trim();
+            changed = true;
+        }
+    }
+    return s;
+}
+
+function isOrphanBracket(text) {
+    const s = String(text || '').trim();
+    return s === ')' || s === '）' || s === '(' || s === '（';
+}
+
+function looksLikeOfflineAction(text) {
+    const s = cleanOfflineEventContent(text);
+    if (!s || isOrphanBracket(s)) return false;
+
+    if ((s.startsWith('（') && s.endsWith('）')) ||
+        (s.startsWith('(') && s.endsWith(')')) ||
+        (s.startsWith('*') && s.endsWith('*')) ||
+        (s.startsWith('【') && s.endsWith('】'))) return true;
+
+    if (/(走进|走到|走过去|靠近|抬眼|垂眸|低头|抬手|伸手|转身|坐下|站起|停下|停顿|沉默|看向|看了|扫过|盯着|轻笑|皱眉|挑眉|勾唇|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起|阳光|窗外|教室|空气|脚步声|桌面|书页|指尖|目光|神色|声音在.*响起)/.test(s)) {
+        return true;
+    }
+
+    if (/^(他|她|沈逸|林澈|少年|男人|老师|对方)/.test(s) && !/[“”„"]/.test(s)) {
+        if (!/(吗|呢|吧|啊|哦|？|\?)/.test(s)) return true;
+    }
+
+    return false;
+}
+
+function normalizeOfflineEventType(rawType, content) {
+    const t = String(rawType || '').toLowerCase();
+    if (looksLikeOfflineAction(content)) return 'offlineAction';
+    if (t === 'action' || t === 'offlineaction' || t === 'narrative-action') return 'offlineAction';
+    return 'offlineSpeech';
+}
+
 function parseOfflineAiResponseToEvents(raw) {
     const source = String(raw || '').trim();
     if (!source) return [];
@@ -16982,42 +17080,41 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     if (!source) return result;
 
     function pushAction(text) {
-        const cleaned = String(text || '')
-            .replace(/<[^>]+>/g, '')
-            .replace(/&nbsp;/g, ' ')
-            .trim();
-        if (!cleaned) return;
+        const cleaned = stripOuterActionBrackets(text);
+        if (!cleaned || isOrphanBracket(cleaned)) return;
 
         splitActionSentences(cleaned).forEach(piece => {
-            if (piece) {
-                result.push({
-                    type: 'offlineAction',
-                    sender: 'system',
-                    characterId: senderProfile.id,
-                    content: piece,
-                    timestamp: Date.now()
-                });
-            }
+            piece = stripOuterActionBrackets(piece);
+            if (!piece || isOrphanBracket(piece)) return;
+            result.push({
+                type: 'offlineAction',
+                sender: 'system',
+                characterId: senderProfile.id,
+                content: piece,
+                timestamp: Date.now()
+            });
         });
     }
 
     function pushSpeech(text) {
-        const cleaned = String(text || '')
-            .replace(/<[^>]+>/g, '')
-            .replace(/^['“]|['”]$/g, '')
-            .trim();
-        if (!cleaned) return;
+        const cleaned = cleanOfflineEventContent(text);
+        if (!cleaned || isOrphanBracket(cleaned)) return;
+
+        if (looksLikeOfflineAction(cleaned)) {
+            pushAction(cleaned);
+            return;
+        }
 
         splitLongSpeech(cleaned).forEach(piece => {
-            if (piece) {
-                result.push({
-                    type: 'offlineSpeech',
-                    sender: senderProfile.id,
-                    characterId: senderProfile.id,
-                    content: piece,
-                    timestamp: Date.now()
-                });
-            }
+            piece = cleanOfflineEventContent(piece);
+            if (!piece || isOrphanBracket(piece)) return;
+            result.push({
+                type: 'offlineSpeech',
+                sender: senderProfile.id,
+                characterId: senderProfile.id,
+                content: piece,
+                timestamp: Date.now()
+            });
         });
     }
 
@@ -17067,10 +17164,12 @@ async function processOfflineNarrativeAiReply(conversation, senderProfile, effec
     const events = parseOfflineAiResponseToEvents(conversation);
     if (events && events.length) {
         for (const ev of events) {
-            const t = String(ev.type || '').toLowerCase();
-            const content = String(ev.content || '').trim();
-            if (!content) continue;
-            if (t === 'action') {
+            const messageType = normalizeOfflineEventType(ev.type, ev.content);
+            const content = messageType === 'offlineAction'
+                ? stripOuterActionBrackets(ev.content)
+                : cleanOfflineEventContent(ev.content);
+            if (!content || isOrphanBracket(content)) continue;
+            if (messageType === 'offlineAction') {
                 const fullMessage = await createAndAddMessage({ type: 'offlineAction', content }, 'system', effectiveChatContext, true, 'chat');
                 if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
             } else {
