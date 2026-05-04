@@ -14508,6 +14508,9 @@ function setActiveNav(activeNavId) {
         async function showMainScreen() { hideAllScreens(); document.getElementById('main-screen').style.display = 'flex'; setActiveNav('chat'); await renderContacts(); }
         function showDiscoverScreen() { hideAllScreens(); document.getElementById('discover-screen').style.display = 'flex'; setActiveNav('discover'); }
         async function showProfileScreen() { hideAllScreens(); document.getElementById('profile-screen').style.display = 'flex'; setActiveNav('profile'); await renderMyProfile(); }
+        window.showMainScreen = showMainScreen;
+        window.showDiscoverScreen = showDiscoverScreen;
+        window.showProfileScreen = showProfileScreen;
         // ▼▼▼ 把这个新函数，和你其他的 show...Screen 函数放在一起 ▼▼▼
 async function showSmsScreen() {
     hideAllScreens();
@@ -14517,8 +14520,9 @@ async function showSmsScreen() {
     // ✨ 新增调用：渲染短信会话列表 ✨
     await renderSmsConversations();
     // ✨ 确保处理页签切换（如果用户在窥探模式下） ✨
-    handleSmsTabClick({ target: smsScreen.querySelector('.feed-tab-btn[data-tab="my-sms"]') }); // 默认显示“我的短信”
+    handleSmsTabClick({ target: smsScreen.querySelector('.feed-tab-btn[data-tab=”my-sms”]') }); // 默认显示”我的短信”
 }
+window.showSmsScreen = showSmsScreen;
 // ▲▲▲ 粘贴到这里结束 ▲▲▲
         
         async function showFeedScreen() { 
@@ -36450,45 +36454,35 @@ async function forceEnterContactsHome() {
 }
 
 function bindCoreNavigationFallback() {
-    const bind = (id, handlerName, fallback) => {
+    const bind = (id, handler) => {
         const el = document.getElementById(id);
         if (!el) return;
 
-        const fresh = el.cloneNode(true);
-        el.parentNode.replaceChild(fresh, el);
-
-        fresh.addEventListener('click', async (e) => {
+        el.onclick = async (e) => {
             e.preventDefault();
             e.stopPropagation();
-
             try {
-                if (typeof window[handlerName] === 'function') {
-                    window[handlerName]();
-                } else if (typeof fallback === 'function') {
-                    await fallback();
-                } else {
-                    console.warn('[导航] 找不到处理函数:', handlerName);
-                }
+                await handler();
             } catch (err) {
                 console.error('[导航] 点击失败:', id, err);
             }
-        });
+        };
     };
 
-    bind('nav-chat', 'showMainScreen', forceEnterContactsHome);
-    bind('nav-chat-2', 'showMainScreen', forceEnterContactsHome);
-    bind('nav-chat-sms', 'showMainScreen', forceEnterContactsHome);
+    bind('nav-chat',     async () => window.showMainScreen ? window.showMainScreen() : forceEnterContactsHome());
+    bind('nav-chat-2',   async () => window.showMainScreen ? window.showMainScreen() : forceEnterContactsHome());
+    bind('nav-chat-sms', async () => window.showMainScreen ? window.showMainScreen() : forceEnterContactsHome());
 
-    bind('nav-discover', 'showDiscoverScreen');
-    bind('nav-discover-2', 'showDiscoverScreen');
-    bind('nav-discover-sms', 'showDiscoverScreen');
+    bind('nav-discover',     async () => window.showDiscoverScreen && window.showDiscoverScreen());
+    bind('nav-discover-2',   async () => window.showDiscoverScreen && window.showDiscoverScreen());
+    bind('nav-discover-sms', async () => window.showDiscoverScreen && window.showDiscoverScreen());
 
-    bind('nav-sms', 'showSmsScreen');
-    bind('nav-sms-sms', 'showSmsScreen');
+    bind('nav-sms',     async () => window.showSmsScreen && window.showSmsScreen());
+    bind('nav-sms-sms', async () => window.showSmsScreen && window.showSmsScreen());
 
-    bind('nav-profile', 'showProfileScreen');
-    bind('nav-profile-2', 'showProfileScreen');
-    bind('nav-profile-sms', 'showProfileScreen');
+    bind('nav-profile',     async () => window.showProfileScreen && window.showProfileScreen());
+    bind('nav-profile-2',   async () => window.showProfileScreen && window.showProfileScreen());
+    bind('nav-profile-sms', async () => window.showProfileScreen && window.showProfileScreen());
 
     const addBtn = document.getElementById('add-contact-btn');
     if (addBtn) {
