@@ -168,15 +168,15 @@
             padding: 8px 8px;
             display: flex;
             align-items: center;
-            gap: 8px;
             border-top: 1px solid var(--border-color);
             flex-shrink: 0;
             position: relative;
+            gap: 0;
         }
         
         .message-input-wrap {
             position: relative;
-            flex: 1;
+            flex: 1 1 auto;
             display: flex;
             align-items: center;
             min-width: 0;
@@ -185,16 +185,16 @@
         #message-input {
             flex: 1;
             width: 100%;
+            min-width: 0;
             background-color: white;
             border: 1px solid #ddd;
             border-radius: 20px;
-            padding: 8px 44px 8px 15px;
+            padding: 8px 36px 8px 15px;
             font-size: 15px;
             outline: none;
             resize: none;
             max-height: 100px;
             overflow-y: auto;
-            align-self: flex-end;
             min-height: 34px;
             line-height: 1.4;
         }
@@ -221,18 +221,18 @@
         /* 括号按钮 */
         .bracket-btn {
             position: absolute;
-            right: 10px;
+            right: 7px;
             top: 50%;
             transform: translateY(-50%);
             border: none;
             background: transparent;
             color: #444;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             letter-spacing: -1px;
-            width: 28px;
-            height: 28px;
-            border-radius: 14px;
+            width: 24px;
+            height: 24px;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -240,7 +240,6 @@
             margin: 0;
             padding: 0;
             z-index: 2;
-            transition: background-color 0.2s ease;
         }
         .bracket-btn:hover { 
             background: rgba(0, 0, 0, 0.05);
