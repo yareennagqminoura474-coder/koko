@@ -168,17 +168,27 @@
             padding: 8px 8px;
             display: flex;
             align-items: center;
+            gap: 8px;
             border-top: 1px solid var(--border-color);
             flex-shrink: 0;
             position: relative;
         }
         
+        .message-input-wrap {
+            position: relative;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            min-width: 0;
+        }
+        
         #message-input {
-            flex-grow: 1;
+            flex: 1;
+            width: 100%;
             background-color: white;
             border: 1px solid #ddd;
             border-radius: 20px;
-            padding: 8px 15px;
+            padding: 8px 44px 8px 15px;
             font-size: 15px;
             outline: none;
             resize: none;
@@ -186,6 +196,7 @@
             overflow-y: auto;
             align-self: flex-end;
             min-height: 34px;
+            line-height: 1.4;
         }
 
         .input-action-btn {
@@ -209,15 +220,31 @@
 
         /* 括号按钮 */
         .bracket-btn {
-            background-color: #f0f0f0;
-            color: #555;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            border: none;
+            background: transparent;
+            color: #444;
             font-size: 13px;
             font-weight: 600;
             letter-spacing: -1px;
-            width: 36px;
-            height: 36px;
+            width: 28px;
+            height: 28px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin: 0;
+            padding: 0;
+            z-index: 2;
+            transition: background-color 0.2s ease;
         }
-        .bracket-btn:hover { background-color: #e0e0e0; }
+        .bracket-btn:hover { 
+            background: rgba(0, 0, 0, 0.05);
+        }
 
         /* 账单编辑模式 */
         .txn-edit-actions {
@@ -7699,10 +7726,14 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                 <div id="attachment-menu"></div>
                 <div id="reply-preview-bar" style="display: none;"></div>
                 <div class="chat-input-area" id="chat-input-area">
-<div class="emoji-btn" id="emoji-btn"><i class="far fa-smile"></i></div>
+                    <div class="emoji-btn" id="emoji-btn"><i class="far fa-smile"></i></div>
                     <button class="attachment-btn" id="attachment-btn"><i class="fas fa-plus"></i></button>
-                    <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
-                    <button id="bracket-btn" class="input-action-btn bracket-btn" title="插入括号">（）</button>
+                    
+                    <div class="message-input-wrap">
+                        <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
+                        <button id="bracket-btn" class="bracket-btn" type="button" title="插入括号">()</button>
+                    </div>
+                    
                     <button id="send-btn" class="input-action-btn" title="发送消息"><i class="fas fa-arrow-up"></i></button>
                     <button id="request-reply-btn" class="input-action-btn" title="请求AI回复"><i class="fas fa-apple-whole"></i></button>
                 </div>
@@ -43396,23 +43427,27 @@ document.addEventListener('click', function(event) {
     function insertBracketToMessageInput() {
         const input = document.getElementById('message-input');
         if (!input) return;
+        
         const start = input.selectionStart || 0;
-        const end   = input.selectionEnd   || 0;
-        const before   = input.value.slice(0, start);
+        const end = input.selectionEnd || 0;
+        const before = input.value.slice(0, start);
         const selected = input.value.slice(start, end);
-        const after    = input.value.slice(end);
+        const after = input.value.slice(end);
+        
         if (selected) {
-            input.value = before + '（' + selected + '）' + after;
+            input.value = before + '(' + selected + ')' + after;
             const pos = before.length + selected.length + 2;
             input.setSelectionRange(pos, pos);
         } else {
-            input.value = before + '（）' + after;
+            input.value = before + '()' + after;
             const pos = before.length + 1;
             input.setSelectionRange(pos, pos);
         }
+        
         input.focus();
         input.dispatchEvent(new Event('input', { bubbles: true }));
     }
+    
     const bracketBtn = document.getElementById('bracket-btn');
     if (bracketBtn) bracketBtn.addEventListener('click', insertBracketToMessageInput);
 })();
