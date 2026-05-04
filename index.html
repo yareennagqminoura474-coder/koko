@@ -165,7 +165,7 @@
         
         .chat-input-area {
             background-color: #f8f9fa;
-            padding: 8px 8px;
+            padding: 7px 6px;
             display: flex;
             align-items: center;
             border-top: 1px solid var(--border-color);
@@ -173,43 +173,43 @@
             position: relative;
             gap: 0;
         }
-        
+
         .message-input-wrap {
             position: relative;
             flex: 1 1 auto;
+            min-width: 0;
             display: flex;
             align-items: center;
-            min-width: 0;
         }
-        
+
         #message-input {
             flex: 1;
             width: 100%;
             min-width: 0;
             background-color: white;
             border: 1px solid #ddd;
-            border-radius: 20px;
-            padding: 8px 36px 8px 15px;
-            font-size: 15px;
+            border-radius: 19px;
+            padding: 7px 32px 7px 13px;
+            font-size: 14px;
             outline: none;
             resize: none;
             max-height: 100px;
             overflow-y: auto;
-            min-height: 34px;
+            min-height: 32px;
             line-height: 1.4;
         }
 
         .input-action-btn {
             border: none;
             border-radius: 50%;
-            width: 36px;
-            height: 36px;
+            width: 32px;
+            height: 32px;
             display: flex;
             justify-content: center;
             align-items: center;
-            margin-left: 8px;
+            margin-left: 6px;
             cursor: pointer;
-            font-size: 18px;
+            font-size: 16px;
             flex-shrink: 0;
             transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
             align-self: flex-end;
@@ -221,7 +221,7 @@
         /* 括号按钮 */
         .bracket-btn {
             position: absolute;
-            right: 7px;
+            right: 5px;
             top: 50%;
             transform: translateY(-50%);
             border: none;
@@ -230,9 +230,9 @@
             font-size: 12px;
             font-weight: 600;
             letter-spacing: -1px;
-            width: 24px;
-            height: 24px;
-            border-radius: 12px;
+            width: 22px;
+            height: 22px;
+            border-radius: 11px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -327,15 +327,21 @@
         #send-btn {
             background-color: var(--theme-primary);
             color: var(--text-on-primary);
-            width: auto;
-            padding: 0 18px;
-            border-radius: 22px;
+            width: 38px;
+            min-width: 38px;
+            height: 32px;
+            padding: 0;
+            border-radius: 18px;
         }
         #send-btn .fa-paper-plane {
-            font-size: 18px;
+            font-size: 15px;
         }
 
         #request-reply-btn {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            padding: 0;
             background-color: var(--theme-secondary);
             color: var(--text-on-primary);
         }
@@ -445,39 +451,33 @@
 /* ▲▲▲ 修复结束 ▲▲▲ */
 /* ▼▼▼ 新的、统一风格的左侧按钮 ▼▼▼ */
         .emoji-btn, .attachment-btn {
-            /* 1. 复制 .input-action-btn 的核心样式 */
             border: none;
-            border-radius: 50%; /* 变成圆圈 */
-            width: 34px;       /* 统一宽度 */
-            height: 34px;      /* 统一高度 */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
             display: flex;
             justify-content: center;
             align-items: center;
             cursor: pointer;
             flex-shrink: 0;
             transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
-            align-self: flex-end; /* 保持垂直对齐 */
-            
-            /* 2. 赋予它们新的样式 */
-            font-size: 16px; /* 统一下图标大小 */
-            background-color: #f0f2f5; /* 一个中性的灰色背景 */
-            color: var(--text-gray); /* 灰色图标 */
+            align-self: flex-end;
+            font-size: 14px;
+            background-color: #f0f2f5;
+            color: var(--text-gray);
         }
-        
-        /* 3. 单独调整间距 */
+
         .emoji-btn {
-            margin-right: 8px; /* 表情按钮和附件按钮之间的间距 */
-            /* 注意：我们不设置 margin-left，让它贴着左边 */
+            margin-right: 5px;
         }
-        
+
         .attachment-btn {
-            margin-right: 10px; /* 附件按钮和输入框之间的间距 */
+            margin-right: 6px;
         }
-        
-        /* 4. (可选) 悬浮效果 */
+
         .emoji-btn:hover, .attachment-btn:hover {
             transform: scale(1.1);
-            background-color: #e0e0e0; /* 悬浮时变深一点 */
+            background-color: #e0e0e0;
         }
         /* ▲▲▲ 替换结束 ▲▲▲ */
         #edit-mode-bar, #moments-edit-mode-bar, #diary-edit-mode-bar { display: none; padding: 10px 15px; background-color: #f0f0f0; border-top: 1px solid #ddd; justify-content: space-between; align-items: center; flex-shrink: 0; }
@@ -14514,13 +14514,24 @@ function setActiveNav(activeNavId) {
         // ▼▼▼ 把这个新函数，和你其他的 show...Screen 函数放在一起 ▼▼▼
 async function showSmsScreen() {
     hideAllScreens();
+
     const smsScreen = document.getElementById('sms-screen');
+    if (!smsScreen) {
+        console.error('[短信] sms-screen 不存在');
+        return;
+    }
+
     smsScreen.style.display = 'flex';
     setActiveNav('sms');
-    // ✨ 新增调用：渲染短信会话列表 ✨
-    await renderSmsConversations();
-    // ✨ 确保处理页签切换（如果用户在窥探模式下） ✨
-    handleSmsTabClick({ target: smsScreen.querySelector('.feed-tab-btn[data-tab=”my-sms”]') }); // 默认显示”我的短信”
+
+    if (typeof renderSmsConversations === 'function') {
+        await renderSmsConversations();
+    }
+
+    const defaultTab = smsScreen.querySelector('.feed-tab-btn[data-tab="my-sms"]');
+    if (defaultTab && typeof handleSmsTabClick === 'function') {
+        handleSmsTabClick({ target: defaultTab });
+    }
 }
 window.showSmsScreen = showSmsScreen;
 // ▲▲▲ 粘贴到这里结束 ▲▲▲
@@ -19044,12 +19055,20 @@ MESSAGE_END
 
         let finalGroupChatPrompt = groupChatPrompt.replace('{{emoticon_list}}', state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）');
 
+        // 群聊当前轮次边界规则
+        let _grpLatestUserMsgId = null;
+        try {
+            const _grpLastUserMsg = group.history.filter(m => m.sender === 'user' && !['system_notification', 'loading', 'error'].includes(m.type)).slice(-1)[0];
+            _grpLatestUserMsgId = _grpLastUserMsg ? _grpLastUserMsg.id : null;
+            const _grpLatestInput = _grpLastUserMsg ? (typeof _grpLastUserMsg.content === 'string' ? _grpLastUserMsg.content : '') : '';
+            const _grpAllowPrev = doesCurrentInputReferToPrevious(_grpLatestInput);
+            finalGroupChatPrompt += '\n\n' + buildCurrentTurnBoundaryRules('group', _grpAllowPrev);
+        } catch (_e) { /* 静默忽略 */ }
+
         // 步骤6：构建图文混合消息 (这部分逻辑保持不变)
         const messages = [];
         const contextLength = state.apiSettings.contextLength || 20;
-        const recentHistory = group.history
-            .filter(msg => msg.sender !== 'system_instruction' && msg.type !== 'system_notification')
-            .slice(-contextLength); 
+        const recentHistory = buildPromptHistoryExcludingLatest(group.history, _grpLatestUserMsgId, contextLength); 
 
         let currentUserMessageParts = [];
         
@@ -19297,6 +19316,53 @@ async function handleGeminiTranslation(openAiRequestBody, apiKey) {
 
     return openAIResponse;
 }    
+
+// --- 当前轮次边界辅助函数 ---
+function doesCurrentInputReferToPrevious(text) {
+    const s = String(text || '');
+    return /(刚刚|刚才|上一句|上一轮|前面|继续|接着|你还没回答|那个问题|刚说的|刚才那个|刚刚那个|前面那个)/.test(s);
+}
+
+function buildCurrentTurnBoundaryRules(mode, allowPreviousCallback) {
+    const lines = [
+        '【Z0. 当前轮次边界 — 极高优先级】',
+        '本轮唯一需要直接回应的是【对话历史中最后一条用户消息】。',
+        '历史消息、上一轮用户发言、上一轮角色回复、群聊余波、心声、记忆流、世界书，只能作为背景，不能当成本轮问题继续回答。',
+        '禁止把上一轮用户的问题和当前用户的问题合并回答。',
+        '第一条回复必须直接接住当前用户最新输入。',
+        '后续回复可以带出关系余波，但不能偏离当前输入。',
+        '输出前自检：每条回复是否能对应当前用户最新输入？如果不能，就删掉或改写。',
+    ];
+
+    if (!allowPreviousCallback) {
+        lines.push('当前用户没有明确提到上一轮，禁止主动补答上一轮、解释上一轮、追问上一轮、总结上一轮。');
+        lines.push('禁止出现：你刚刚/你刚才/刚才那句/上一句/你前面说/从你刚刚/刚刚那种/刚才那个 等追旧账句式。');
+    } else {
+        lines.push('当前用户明确提到了上一轮内容，允许承接上一轮。');
+    }
+
+    if (mode === 'offline') {
+        lines.push('线下模式：action 可以承接场景连续性，但 speech 必须优先回应当前用户最新输入，不要反复追旧账。');
+    } else if (mode === 'group') {
+        lines.push('群聊模式：所有可控角色都必须优先接住当前用户最新输入，不要所有人都继续上一轮话题。');
+    }
+
+    return lines.join('\n');
+}
+
+function buildPromptHistoryExcludingLatest(history, latestUserMessageId, limit) {
+    const list = Array.isArray(history) ? history : [];
+    return list
+        .filter(msg => {
+            if (!msg) return false;
+            if (latestUserMessageId && msg.id === latestUserMessageId) return false;
+            if (msg.sender === 'system_instruction') return false;
+            if (['system_notification', 'loading', 'error', 'heart_voice'].includes(msg.type)) return false;
+            return true;
+        })
+        .slice(-(limit || 20));
+}
+// --- 辅助函数结束 ---
 
 const NORMAL_BASE_PROMPT = `
 [重要指令：你将进行深度角色扮演。你的所有输出都是纯文本，但可以包含用方括号[]包裹的特殊指令。]
@@ -20394,12 +20460,22 @@ ${qzoneContextText}
                 // (你原来的动态指令逻辑)
                 const dynamicInstructions = history.filter(msg => msg.sender === 'system_instruction').map(msg => msg.content).join('\n');
                 if (dynamicInstructions) { systemContent += `\n\n[附加临时指令]\n${dynamicInstructions}`; }
-                
+
+                // 当前轮次边界规则：阻止 AI 继续回应上一轮
+                let _latestUserMsgId = null;
+                try {
+                    const _lastUserMsg = history.filter(m => m.sender === 'user' && !['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type)).slice(-1)[0];
+                    _latestUserMsgId = _lastUserMsg ? _lastUserMsg.id : null;
+                    const _latestInputText = _lastUserMsg
+                        ? (typeof _lastUserMsg.content === 'string' ? _lastUserMsg.content : (_lastUserMsg.content?.text || ''))
+                        : '';
+                    const _allowPrev = doesCurrentInputReferToPrevious(_latestInputText);
+                    systemContent += '\n\n' + buildCurrentTurnBoundaryRules(isNarrativeMode ? 'offline' : 'private', _allowPrev);
+                } catch (_e) { /* 静默忽略，不影响主流程 */ }
+
                 // (你原来的 history 转换 messages 逻辑，这里是图文支持的关键)
                 const messages = [];
-                const recentHistory = history
-                    .filter(msg => msg.sender !== 'system_instruction' && msg.type !== 'system_notification')
-                    .slice(-(contextLength || 20));
+                const recentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, contextLength || 20);
 
                 let currentUserMessageParts = [];
                 for (const msg of recentHistory) {
