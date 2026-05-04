@@ -175,6 +175,97 @@
             transform: scale(1.1);
         }
 
+        /* 括号按钮 */
+        .bracket-btn {
+            background-color: #f0f0f0;
+            color: #555;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: -1px;
+            width: 36px;
+            height: 36px;
+        }
+        .bracket-btn:hover { background-color: #e0e0e0; }
+
+        /* 账单编辑模式 */
+        .txn-edit-actions {
+            display: flex;
+            gap: 6px;
+            margin-left: 8px;
+            flex-shrink: 0;
+        }
+        .txn-edit-btn, .txn-delete-btn {
+            border: none;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .txn-edit-btn   { background: var(--theme-primary); color: #fff; }
+        .txn-delete-btn { background: #ff6b6b; color: #fff; }
+
+        /* ===== 出去玩 ===== */
+        .outing-home { padding: 0; }
+        .outing-section-title { font-size: 13px; color: #888; font-weight: 600; padding: 8px 4px 4px; letter-spacing: .5px; text-transform: uppercase; }
+        .outing-mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+        .outing-mode-card { background: var(--card-background); border-radius: 14px; padding: 18px 14px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; box-shadow: 0 2px 8px var(--shadow-color); border: 2px solid transparent; transition: border-color .2s, box-shadow .2s; }
+        .outing-mode-card:hover, .outing-mode-card.selected { border-color: var(--theme-primary); box-shadow: 0 4px 14px rgba(129,199,132,.35); }
+        .outing-mode-card .omc-icon { font-size: 28px; }
+        .outing-mode-card .omc-name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+        .outing-mode-card .omc-desc { font-size: 12px; color: #888; text-align: center; line-height: 1.4; }
+        .outing-companion-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+        .outing-companion-item { display: flex; align-items: center; gap: 10px; background: var(--card-background); border-radius: 12px; padding: 10px 12px; cursor: pointer; border: 2px solid transparent; transition: border-color .2s; }
+        .outing-companion-item.selected { border-color: var(--theme-primary); }
+        .outing-companion-item .oci-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; font-size: 20px; display: flex; align-items: center; justify-content: center; background: #e8f5e9; }
+        .outing-companion-item .oci-name { font-size: 14px; font-weight: 600; flex: 1; }
+        .outing-companion-item .oci-check { color: var(--theme-primary); opacity: 0; transition: opacity .2s; }
+        .outing-companion-item.selected .oci-check { opacity: 1; }
+        .outing-place-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+        .outing-place-card { background: var(--card-background); border-radius: 12px; padding: 14px 12px; cursor: pointer; border: 2px solid transparent; transition: border-color .2s; box-shadow: 0 2px 6px var(--shadow-color); }
+        .outing-place-card:hover, .outing-place-card.selected { border-color: var(--theme-primary); }
+        .outing-place-card .opc-emoji { font-size: 26px; margin-bottom: 6px; }
+        .outing-place-card .opc-name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+        .outing-place-card .opc-desc { font-size: 11px; color: #888; margin-top: 2px; line-height: 1.3; }
+        .outing-place-card .opc-price { font-size: 11px; color: var(--theme-primary); margin-top: 4px; }
+        .outing-start-btn { width: 100%; padding: 13px; background: var(--theme-primary); color: #fff; border: none; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 8px; transition: opacity .2s; }
+        .outing-start-btn:disabled { opacity: .5; cursor: not-allowed; }
+        /* active session */
+        .outing-active-header { background: var(--card-background); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px var(--shadow-color); }
+        .outing-active-header .oah-left { display: flex; flex-direction: column; gap: 2px; }
+        .outing-active-header .oah-title { font-size: 15px; font-weight: 700; }
+        .outing-active-header .oah-sub { font-size: 12px; color: #888; }
+        .outing-active-header .oah-end-btn { background: #ff6b6b; color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .outing-stream { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+        .outing-event { display: flex; gap: 8px; align-items: flex-start; }
+        .outing-event.user-event { flex-direction: row-reverse; }
+        .outing-event .oe-avatar { width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; object-fit: cover; font-size: 18px; display: flex; align-items: center; justify-content: center; background: #e8f5e9; }
+        .outing-event .oe-bubble { max-width: 75%; background: var(--card-background); border-radius: 12px; padding: 8px 12px; font-size: 13px; line-height: 1.5; box-shadow: 0 1px 4px var(--shadow-color); }
+        .outing-event.user-event .oe-bubble { background: var(--theme-primary); color: #fff; }
+        .outing-event .oe-name { font-size: 11px; color: #888; margin-bottom: 2px; }
+        .outing-event.action-event .oe-bubble { background: rgba(129,199,132,.15); font-style: italic; color: #555; font-size: 12px; width: 100%; max-width: 100%; text-align: center; border-radius: 8px; }
+        .outing-input-bar { display: flex; gap: 8px; align-items: center; background: var(--card-background); border-radius: 12px; padding: 8px 10px; box-shadow: 0 2px 6px var(--shadow-color); margin-bottom: 6px; }
+        .outing-input-bar textarea { flex: 1; border: none; background: transparent; resize: none; font-size: 14px; outline: none; max-height: 80px; line-height: 1.4; }
+        .outing-input-bar .oib-send { background: var(--theme-primary); color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+        .outing-purchase-btn { background: #fff8e1; color: #f9a825; border: 1px solid #f9a825; border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+        /* purchase modal */
+        .outing-buy-modal { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,.55); z-index: 9100; display: none; justify-content: center; align-items: flex-end; }
+        .outing-buy-modal.open { display: flex; }
+        .outing-buy-sheet { background: var(--card-background); border-radius: 18px 18px 0 0; width: 100%; padding: 20px 16px 30px; }
+        .outing-buy-sheet h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+        .outing-buy-sheet .obs-row { display: flex; gap: 8px; margin-bottom: 10px; }
+        .outing-buy-sheet input { flex: 1; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+        .outing-buy-sheet select { border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; font-size: 14px; background: #fff; }
+        .outing-buy-sheet .obs-confirm { width: 100%; padding: 12px; background: var(--theme-primary); color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 6px; }
+        /* history */
+        .outing-history-card { background: var(--card-background); border-radius: 12px; padding: 14px; margin-bottom: 10px; box-shadow: 0 2px 6px var(--shadow-color); cursor: pointer; }
+        .outing-history-card .ohc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .outing-history-card .ohc-title { font-size: 14px; font-weight: 700; }
+        .outing-history-card .ohc-date { font-size: 12px; color: #888; }
+        .outing-history-card .ohc-companions { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .outing-history-card .ohc-spend { font-size: 13px; color: #f9a825; font-weight: 600; }
+        .outing-typing { font-size: 13px; color: #888; font-style: italic; padding: 6px 0; text-align: center; }
+
         #send-btn {
             background-color: var(--theme-primary);
             color: var(--text-on-primary);
@@ -7542,6 +7633,8 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                     <div class="chat-option-item" id="summarize-chat-btn-menu"><i class="fas fa-feather-alt fa-fw"></i> <span>总结对话</span></div>
                     <div class="chat-option-item" id="toggle-chat-pet-btn-menu"><i class="fas fa-paw fa-fw"></i> <span>显示/隐藏宠物</span></div>
 <div class="chat-option-item" id="delete-history-btn-menu"><i class="fas fa-trash-alt fa-fw"></i> <span>编辑消息</span></div>
+<div class="chat-option-item" id="view-diary-btn-menu"><i class="fas fa-book fa-fw"></i> <span>他的日记</span></div>
+<div class="chat-option-item" id="outing-with-contact-btn-menu"><i class="fas fa-map-marked-alt fa-fw"></i> <span>和TA出去玩</span></div>
 <div class="chat-option-divider"></div>
 <div class="chat-option-item" id="block-contact-btn-menu"><i class="fas fa-ban fa-fw"></i> <span>拉黑TA</span></div>
 <div class="chat-option-item" id="contact-settings-btn-menu"><i class="fas fa-cog fa-fw"></i> <span>联系人设置</span></div>
@@ -7577,6 +7670,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 <div class="emoji-btn" id="emoji-btn"><i class="far fa-smile"></i></div>
                     <button class="attachment-btn" id="attachment-btn"><i class="fas fa-plus"></i></button>
                     <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
+                    <button id="bracket-btn" class="input-action-btn bracket-btn" title="插入括号">（）</button>
                     <button id="send-btn" class="input-action-btn" title="发送消息"><i class="fas fa-arrow-up"></i></button>
                     <button id="request-reply-btn" class="input-action-btn" title="请求AI回复"><i class="fas fa-apple-whole"></i></button>
                 </div>
@@ -7835,6 +7929,18 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                             <div class="discover-arrow">
                                 <i class="fas fa-chevron-right"></i>
                             </div>
+                        </div>
+                    </div>
+                    <div class="discover-section">
+                        <div class="discover-item" id="outing-discover-btn">
+                            <div class="discover-icon" style="background-color:#e8f5e9;">
+                                <i class="fas fa-map-marked-alt" style="color:var(--theme-primary);"></i>
+                            </div>
+                            <div class="discover-info">
+                                <div class="discover-name">出去玩</div>
+                                <div class="discover-desc">和TA一起去探索新地方</div>
+                            </div>
+                            <div class="discover-arrow"><i class="fas fa-chevron-right"></i></div>
                         </div>
                     </div>
                     <div class="discover-section">
@@ -10471,18 +10577,61 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
     </div>
     
     <div id="wallet-screen" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: #f0f2f5; display: none; flex-direction: column;">
-        <div class="api-header"> 
+        <div class="api-header">
             <div class="back-btn" id="back-from-wallet">
                 <i class="fas fa-arrow-left"></i>
             </div>
             <div class="api-title">收支明细</div>
-            <div style="width:40px;"></div>
+            <div id="edit-transactions-btn" style="width:40px;text-align:center;cursor:pointer;font-size:14px;color:var(--theme-primary);font-weight:600;line-height:40px;">编辑</div>
         </div>
         <div class="api-content" style="padding: 0;">
             <div id="transaction-list">
                 </div>
             <div id="no-transaction-message" style="text-align: center; padding: 50px 20px; color: #888; display: none;">
                 <p>还没有任何收支记录哦。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 出去玩页面 -->
+    <div id="outing-screen" style="position:absolute;top:0;left:0;width:100%;height:100%;background:#f0f2f5;display:none;flex-direction:column;z-index:200;">
+        <div class="api-header">
+            <div class="back-btn" id="back-from-outing"><i class="fas fa-arrow-left"></i></div>
+            <div class="api-title" id="outing-screen-title">出去玩</div>
+            <div id="outing-history-btn" style="width:40px;text-align:center;cursor:pointer;font-size:14px;color:var(--theme-primary);font-weight:600;line-height:40px;">记录</div>
+        </div>
+        <div id="outing-content" style="flex:1;overflow-y:auto;padding:12px;"></div>
+    </div>
+
+    <!-- 账单编辑弹窗 -->
+    <div id="edit-transaction-modal" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9000;justify-content:center;align-items:center;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">编辑账单</div>
+                <div class="close-btn" id="close-edit-transaction-modal"><i class="fas fa-times"></i></div>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-txn-id">
+                <div class="contact-form-group">
+                    <label class="contact-form-label">类型</label>
+                    <select id="edit-txn-type" class="contact-form-input">
+                        <option value="income">收入</option>
+                        <option value="expense">支出</option>
+                    </select>
+                </div>
+                <div class="contact-form-group">
+                    <label class="contact-form-label">金额</label>
+                    <input type="number" id="edit-txn-amount" class="contact-form-input" min="0.01" step="0.01" placeholder="请输入金额">
+                </div>
+                <div class="contact-form-group">
+                    <label class="contact-form-label">描述</label>
+                    <input type="text" id="edit-txn-desc" class="contact-form-input" placeholder="请输入描述">
+                </div>
+                <div class="contact-form-group">
+                    <label class="contact-form-label">时间</label>
+                    <input type="datetime-local" id="edit-txn-time" class="contact-form-input">
+                </div>
+                <button id="save-edit-transaction-btn" class="form-button" style="margin-top:12px;">保存</button>
             </div>
         </div>
     </div>
@@ -11867,10 +12016,10 @@ const dbConfig = {
     stockEvents: { keyPath: 'id' },
     forumCategories: { keyPath: 'id' },
     surveyLibrary: { keyPath: 'id' },
-    themePresets: { keyPath: 'id' }
+    themePresets: { keyPath: 'id' },
+    outings: { keyPath: 'id' }
 };
-// ▼▼▼ 把这里的版本号数字加 1 (例如 13 -> 19) ▼▼▼
-const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 24, dbConfig);
+const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 25, dbConfig);
 // ▲▲▲ 版本号修改结束 ▲▲▲
 
     // --------------------------------------------------------------------
@@ -14060,10 +14209,15 @@ function renderEmoticonPicker() {
 }
 // ▲▲▲ 替换结束 ▲▲▲
 
+        let walletEditMode = false;
+
         function renderWalletScreen() {
             const listEl = document.getElementById('transaction-list');
             const noTransactionMsg = document.getElementById('no-transaction-message');
+            const editBtn = document.getElementById('edit-transactions-btn');
             listEl.innerHTML = '';
+
+            if (editBtn) editBtn.textContent = walletEditMode ? '完成' : '编辑';
 
             if (!state.transactions || state.transactions.length === 0) {
                 noTransactionMsg.style.display = 'block';
@@ -14076,22 +14230,482 @@ function renderEmoticonPicker() {
             sortedTransactions.forEach(tx => {
                 const item = document.createElement('div');
                 item.className = 'transaction-item';
+                item.style.display = 'flex';
+                item.style.alignItems = 'center';
                 const amountClass = tx.type === 'income' ? 'income' : 'expense';
                 const amountSign = tx.type === 'income' ? '+' : '-';
 
+                const editActionsHtml = walletEditMode ? `
+                    <div class="txn-edit-actions">
+                        <button class="txn-edit-btn" data-id="${tx.id}">编辑</button>
+                        <button class="txn-delete-btn" data-id="${tx.id}">删除</button>
+                    </div>` : '';
+
                 item.innerHTML = `
-                    <div class="transaction-info">
+                    <div class="transaction-info" style="flex:1;min-width:0;">
                         <div class="desc">${tx.description}</div>
                         <div class="time">${new Date(tx.timestamp).toLocaleString()}</div>
                     </div>
-                    <div class="transaction-amount ${amountClass}">
+                    <div class="transaction-amount ${amountClass}" style="flex-shrink:0;">
                         ${amountSign}${tx.amount.toFixed(2)}
                     </div>
+                    ${editActionsHtml}
                 `;
+
+                if (walletEditMode) {
+                    item.querySelector('.txn-edit-btn').addEventListener('click', () => openEditTransactionModal(tx.id));
+                    item.querySelector('.txn-delete-btn').addEventListener('click', () => confirmDeleteTransaction(tx.id));
+                }
+
                 listEl.appendChild(item);
             });
         }
 
+        function openEditTransactionModal(txId) {
+            const tx = state.transactions.find(t => t.id === txId);
+            if (!tx) return;
+            document.getElementById('edit-txn-id').value = tx.id;
+            document.getElementById('edit-txn-type').value = tx.type;
+            document.getElementById('edit-txn-amount').value = tx.amount;
+            document.getElementById('edit-txn-desc').value = tx.description;
+            // datetime-local 需要本地时间字符串
+            const d = new Date(tx.timestamp);
+            const pad = n => String(n).padStart(2, '0');
+            const localStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            document.getElementById('edit-txn-time').value = localStr;
+            document.getElementById('edit-transaction-modal').style.display = 'flex';
+        }
+
+        async function saveEditTransaction() {
+            const txId = document.getElementById('edit-txn-id').value;
+            const newType = document.getElementById('edit-txn-type').value;
+            const newAmount = parseFloat(document.getElementById('edit-txn-amount').value);
+            const newDesc = document.getElementById('edit-txn-desc').value.trim();
+            const newTime = new Date(document.getElementById('edit-txn-time').value).getTime();
+
+            if (!newAmount || newAmount <= 0) { alert('金额必须大于 0'); return; }
+            if (!newDesc) { alert('描述不能为空'); return; }
+            if (isNaN(newTime)) { alert('时间格式有误'); return; }
+
+            const idx = state.transactions.findIndex(t => t.id === txId);
+            if (idx === -1) return;
+
+            const oldTx = state.transactions[idx];
+            const oldEffect = oldTx.type === 'income' ? oldTx.amount : -oldTx.amount;
+            const newEffect = newType === 'income' ? newAmount : -newAmount;
+            state.myProfile.balance = (state.myProfile.balance || 0) - oldEffect + newEffect;
+
+            const updated = { ...oldTx, type: newType, amount: newAmount, description: newDesc, timestamp: newTime };
+            state.transactions[idx] = updated;
+
+            await kokoMemory.put('transactions', updated);
+            await kokoMemory.put('myProfile', state.myProfile);
+
+            document.getElementById('edit-transaction-modal').style.display = 'none';
+            renderWalletScreen();
+            renderMyProfile();
+        }
+
+        async function confirmDeleteTransaction(txId) {
+            if (!confirm('确定删除这条账单？')) return;
+            const idx = state.transactions.findIndex(t => t.id === txId);
+            if (idx === -1) return;
+
+            const tx = state.transactions[idx];
+            const oldEffect = tx.type === 'income' ? tx.amount : -tx.amount;
+            state.myProfile.balance = (state.myProfile.balance || 0) - oldEffect;
+
+            state.transactions.splice(idx, 1);
+            await kokoMemory.delete('transactions', txId);
+            await kokoMemory.put('myProfile', state.myProfile);
+
+            renderWalletScreen();
+            renderMyProfile();
+        }
+
+
+        // ===== 出去玩 =====
+        const OUTING_PLACES = [
+            { id: 'cafe',        name: '咖啡馆',   emoji: '☕',  desc: '安静惬意，适合聊天',     priceLevel: 1, activities: ['点咖啡','聊天','看书','听音乐'] },
+            { id: 'park',        name: '公园',     emoji: '🌳',  desc: '空气清新，漫步赏景',     priceLevel: 0, activities: ['散步','野餐','拍照','聊天'] },
+            { id: 'cinema',      name: '电影院',   emoji: '🎬',  desc: '一起看场好电影',         priceLevel: 2, activities: ['看电影','买爆米花','讨论剧情'] },
+            { id: 'restaurant',  name: '餐厅',     emoji: '🍜',  desc: '品尝美食，享受美好时光', priceLevel: 2, activities: ['点餐','聊天','分享菜肴'] },
+            { id: 'aquarium',    name: '水族馆',   emoji: '🐠',  desc: '神秘的海洋世界',         priceLevel: 3, activities: ['观赏鱼类','拍照','了解海洋生物'] },
+            { id: 'bookstore',   name: '书店',     emoji: '📚',  desc: '在书海中徜徉',           priceLevel: 1, activities: ['逛书架','互相推荐书','买书'] },
+            { id: 'beach',       name: '海边',     emoji: '🏖️', desc: '感受海风与浪花',         priceLevel: 0, activities: ['散步','捡贝壳','看日落','聊天'] },
+            { id: 'amusement',   name: '游乐园',   emoji: '🎡',  desc: '刺激好玩的亲子乐园',     priceLevel: 3, activities: ['坐过山车','旋转木马','玩游戏','吃小食'] },
+            { id: 'museum',      name: '博物馆',   emoji: '🏛️', desc: '探索历史与文化',         priceLevel: 2, activities: ['参观展览','拍照','了解历史'] },
+            { id: 'supermarket', name: '超市',     emoji: '🛒',  desc: '一起逛超市买东西',       priceLevel: 1, activities: ['选购食材','试吃','买零食'] },
+            { id: 'night_market',name: '夜市',     emoji: '🏮',  desc: '热闹的夜晚街头美食',     priceLevel: 1, activities: ['逛摊位','吃小吃','买纪念品'] },
+            { id: 'ktv',         name: 'KTV',      emoji: '🎤',  desc: '一起欢唱，释放自我',     priceLevel: 3, activities: ['唱歌','点歌','喝饮料'] },
+            { id: 'hiking',      name: '爬山',     emoji: '⛰️', desc: '挑战自我，感受大自然',   priceLevel: 0, activities: ['爬山','看风景','休息','拍照'] },
+            { id: 'gallery',     name: '艺术画廊', emoji: '🎨',  desc: '欣赏艺术，陶冶情操',     priceLevel: 2, activities: ['参观展品','讨论艺术','拍照'] },
+            { id: 'spa',         name: '温泉SPA',  emoji: '♨️', desc: '放松身心，享受宁静',     priceLevel: 3, activities: ['泡温泉','做按摩','休息'] },
+            { id: 'convenience', name: '便利店',   emoji: '🏪',  desc: '随意逛逛，买点小吃',     priceLevel: 1, activities: ['买零食','买饮料','聊天'] },
+            { id: 'garden',      name: '植物园',   emoji: '🌺',  desc: '花海中的悠闲时光',       priceLevel: 1, activities: ['赏花','拍照','漫步'] },
+            { id: 'rooftop',     name: '观景台',   emoji: '🌆',  desc: '俯瞰城市夜景',           priceLevel: 0, activities: ['看夜景','聊天','拍照'] },
+        ];
+
+        const outingFlowState = {
+            mode: null,
+            selectedIds: [],
+            npcName: '',
+            npcPersonality: '',
+            selectedPlaceId: null,
+            presetContactId: null,
+        };
+
+        function openOutingScreen(presetContactId) {
+            document.getElementById('outing-screen').style.display = 'flex';
+            outingFlowState.mode = null;
+            outingFlowState.selectedIds = [];
+            outingFlowState.npcName = '';
+            outingFlowState.npcPersonality = '';
+            outingFlowState.selectedPlaceId = null;
+            outingFlowState.presetContactId = presetContactId || null;
+            renderOutingHomeView();
+        }
+
+        async function renderOutingHomeView() {
+            const content = document.getElementById('outing-content');
+            document.getElementById('outing-screen-title').textContent = '出去玩';
+            document.getElementById('outing-history-btn').style.display = '';
+            const activeOuting = await getCurrentOuting();
+            if (activeOuting) { renderOutingActiveView(activeOuting); return; }
+            content.innerHTML = `
+                <div class="outing-home">
+                    <div class="outing-section-title">选择模式</div>
+                    <div class="outing-mode-cards">
+                        <div class="outing-mode-card" data-mode="npc"><div class="omc-icon">🤖</div><div class="omc-name">NPC同行</div><div class="omc-desc">AI随机生成一位陌生人陪你出行</div></div>
+                        <div class="outing-mode-card" data-mode="character"><div class="omc-icon">💫</div><div class="omc-name">带TA出行</div><div class="omc-desc">选择一位联系人一起出去玩</div></div>
+                        <div class="outing-mode-card" data-mode="multi-character" style="grid-column:1/-1;"><div class="omc-icon">👥</div><div class="omc-name">多人同行</div><div class="omc-desc">带上多位联系人一起出发</div></div>
+                    </div>
+                </div>`;
+            content.querySelectorAll('.outing-mode-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const mode = card.dataset.mode;
+                    outingFlowState.mode = mode;
+                    if (mode === 'npc') renderOutingNpcSetupView();
+                    else renderOutingCompanionPickView(mode === 'multi-character');
+                });
+            });
+            if (outingFlowState.presetContactId) {
+                outingFlowState.mode = 'character';
+                outingFlowState.selectedIds = [outingFlowState.presetContactId];
+                renderOutingPlacePickView();
+            }
+        }
+
+        function renderOutingNpcSetupView() {
+            const content = document.getElementById('outing-content');
+            document.getElementById('outing-screen-title').textContent = 'NPC设定';
+            content.innerHTML = `
+                <div class="outing-home">
+                    <div class="outing-section-title">设定NPC同伴</div>
+                    <div class="contact-form-group"><label class="contact-form-label">NPC名字（可留空自动生成）</label><input type="text" id="npc-name-input" class="contact-form-input" placeholder="例如：小明"></div>
+                    <div class="contact-form-group"><label class="contact-form-label">性格描述（可留空）</label><textarea id="npc-personality-input" class="contact-form-input" rows="3" placeholder="例如：开朗活泼的大学生，喜欢摄影"></textarea></div>
+                    <button id="npc-next-btn" class="outing-start-btn">下一步：选地点</button>
+                </div>`;
+            document.getElementById('npc-next-btn').addEventListener('click', () => {
+                outingFlowState.npcName = document.getElementById('npc-name-input').value.trim();
+                outingFlowState.npcPersonality = document.getElementById('npc-personality-input').value.trim();
+                renderOutingPlacePickView();
+            });
+        }
+
+        function renderOutingCompanionPickView(multi) {
+            const content = document.getElementById('outing-content');
+            document.getElementById('outing-screen-title').textContent = multi ? '选择同伴（可多选）' : '选择同伴';
+            const contacts = state.contacts.filter(c => !c.isGroup && c.id !== 'system');
+            content.innerHTML = `
+                <div class="outing-home">
+                    <div class="outing-section-title">选择同伴</div>
+                    <div class="outing-companion-list" id="companion-list"></div>
+                    <button id="companion-next-btn" class="outing-start-btn" ${outingFlowState.selectedIds.length ? '' : 'disabled'}>下一步：选地点</button>
+                </div>`;
+            const list = document.getElementById('companion-list');
+            contacts.forEach(c => {
+                const item = document.createElement('div');
+                item.className = 'outing-companion-item' + (outingFlowState.selectedIds.includes(c.id) ? ' selected' : '');
+                item.dataset.id = c.id;
+                const avatarHtml = c.avatar ? `<img src="${c.avatar}" class="oci-avatar" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">` : `<div class="oci-avatar">${(c.name||'?')[0]}</div>`;
+                item.innerHTML = `${avatarHtml}<div class="oci-name">${c.name}</div><i class="fas fa-check-circle oci-check"></i>`;
+                item.addEventListener('click', () => {
+                    if (multi) {
+                        item.classList.toggle('selected');
+                        outingFlowState.selectedIds = Array.from(list.querySelectorAll('.outing-companion-item.selected')).map(el => el.dataset.id);
+                    } else {
+                        list.querySelectorAll('.outing-companion-item').forEach(el => el.classList.remove('selected'));
+                        item.classList.add('selected');
+                        outingFlowState.selectedIds = [c.id];
+                    }
+                    document.getElementById('companion-next-btn').disabled = outingFlowState.selectedIds.length === 0;
+                });
+                list.appendChild(item);
+            });
+            document.getElementById('companion-next-btn').addEventListener('click', () => { if (outingFlowState.selectedIds.length > 0) renderOutingPlacePickView(); });
+        }
+
+        function renderOutingPlacePickView() {
+            const content = document.getElementById('outing-content');
+            document.getElementById('outing-screen-title').textContent = '选择地点';
+            const priceLabels = ['免费','￥','￥￥','￥￥￥'];
+            content.innerHTML = `
+                <div class="outing-home">
+                    <div class="outing-section-title">去哪里玩？</div>
+                    <div class="outing-place-grid" id="place-grid"></div>
+                    <button id="place-start-btn" class="outing-start-btn" disabled>出发！🎉</button>
+                </div>`;
+            const grid = document.getElementById('place-grid');
+            OUTING_PLACES.forEach(place => {
+                const card = document.createElement('div');
+                card.className = 'outing-place-card';
+                card.dataset.id = place.id;
+                card.innerHTML = `<div class="opc-emoji">${place.emoji}</div><div class="opc-name">${place.name}</div><div class="opc-desc">${place.desc}</div><div class="opc-price">${priceLabels[place.priceLevel]}</div>`;
+                card.addEventListener('click', () => {
+                    grid.querySelectorAll('.outing-place-card').forEach(el => el.classList.remove('selected'));
+                    card.classList.add('selected');
+                    outingFlowState.selectedPlaceId = place.id;
+                    document.getElementById('place-start-btn').disabled = false;
+                });
+                grid.appendChild(card);
+            });
+            document.getElementById('place-start-btn').addEventListener('click', doStartOuting);
+        }
+
+        async function doStartOuting() {
+            const place = OUTING_PLACES.find(p => p.id === outingFlowState.selectedPlaceId);
+            if (!place) return;
+            let companions;
+            if (outingFlowState.mode === 'npc') {
+                companions = [{ id: 'npc_' + Date.now(), name: outingFlowState.npcName || '陌生人', personality: outingFlowState.npcPersonality || '', isNpc: true }];
+            } else {
+                companions = outingFlowState.selectedIds.map(id => state.contacts.find(c => c.id === id)).filter(Boolean).map(c => ({ id: c.id, name: c.name, avatar: c.avatar || '' }));
+            }
+            const outing = { id: 'outing_' + Date.now(), mode: outingFlowState.mode, companions, placeId: place.id, placeName: place.name, placeEmoji: place.emoji, placeActivities: place.activities, events: [], purchases: [], spentTotal: 0, status: 'active', memorySynced: false, startTime: Date.now() };
+            await saveOutingData(outing);
+            await setCurrentOuting(outing.id);
+            renderOutingActiveView(outing);
+            setTimeout(() => triggerOutingAI(outing, 'start'), 400);
+        }
+
+        async function renderOutingActiveView(outing) {
+            const content = document.getElementById('outing-content');
+            document.getElementById('outing-screen-title').textContent = (outing.placeEmoji || '') + ' ' + outing.placeName;
+            document.getElementById('outing-history-btn').style.display = 'none';
+            const companionNames = outing.companions.map(c => c.name).join('、');
+            content.innerHTML = `
+                <div class="outing-active-header">
+                    <div class="oah-left"><div class="oah-title">${outing.placeEmoji||''} ${outing.placeName}</div><div class="oah-sub">同行：${companionNames}</div></div>
+                    <button class="oah-end-btn" id="outing-end-btn">结束</button>
+                </div>
+                <div class="outing-stream" id="outing-stream"></div>
+                <div class="outing-input-bar">
+                    <textarea id="outing-user-input" placeholder="说点什么…" rows="1"></textarea>
+                    <button class="outing-purchase-btn" id="outing-buy-btn">🛒</button>
+                    <button class="oib-send" id="outing-send-btn">发送</button>
+                </div>`;
+            const stream = document.getElementById('outing-stream');
+            outing.events.forEach(evt => appendOutingEventToDOM(stream, evt, outing));
+            scrollOutingStream();
+            document.getElementById('outing-end-btn').addEventListener('click', () => doEndOuting(outing));
+            document.getElementById('outing-send-btn').addEventListener('click', () => doOutingUserInput(outing));
+            document.getElementById('outing-user-input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doOutingUserInput(outing); } });
+            document.getElementById('outing-buy-btn').addEventListener('click', () => openOutingBuyModal(outing));
+        }
+
+        async function doOutingUserInput(outing) {
+            const input = document.getElementById('outing-user-input');
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = '';
+            const evt = { type: 'user', speaker: state.myProfile?.name || '我', content: text, time: Date.now() };
+            outing.events.push(evt);
+            const stream = document.getElementById('outing-stream');
+            appendOutingEventToDOM(stream, evt, outing);
+            scrollOutingStream();
+            await saveOutingData(outing);
+            triggerOutingAI(outing, 'user');
+        }
+
+        async function triggerOutingAI(outing, trigger) {
+            const stream = document.getElementById('outing-stream');
+            const typingEl = document.createElement('div');
+            typingEl.className = 'outing-typing';
+            typingEl.id = 'outing-typing-indicator';
+            typingEl.textContent = '同伴正在回应…';
+            if (stream) stream.appendChild(typingEl);
+            scrollOutingStream();
+
+            const userName = state.myProfile?.name || '用户';
+            const companionDescs = outing.companions.map(c => {
+                if (c.isNpc) return `NPC「${c.name}」${c.personality ? '：' + c.personality : '，性格待生成'}`;
+                const contact = state.contacts.find(ct => ct.id === c.id);
+                return `「${c.name}」${contact?.persona ? '：' + contact.persona.slice(0,100) : ''}`;
+            }).join('\n');
+
+            const recentEvents = outing.events.slice(-20).map(e => {
+                if (e.type === 'user') return `[用户] ${userName}：${e.content}`;
+                if (e.type === 'action') return `[旁白] ${e.content}`;
+                return `[${e.speaker}] ${e.content}`;
+            }).join('\n');
+
+            const systemPrompt = `你是一个互动出行叙事引擎。用户「${userName}」正在「${outing.placeName}」和同伴出去玩。
+同伴信息：
+${companionDescs}
+可进行的活动：${outing.placeActivities.join('、')}
+${trigger === 'start' ? '请生成出行开场，描述到达场景，让同伴打招呼并展示性格。' : '请根据用户最新的输入，生成自然的互动回应。'}
+你的输出必须是合法JSON（不要有任何其他文字）：{"events":[{"type":"action","speaker":"","content":"旁白描述"},{"type":"character","speaker":"同伴名字","content":"对话内容"}]}
+type只能是"action"或"character"，action的speaker必须是空字符串，每次输出1~3条事件。`;
+
+            const messages = [{ role: 'user', content: recentEvents || '出发！' }];
+            try {
+                const result = await generateAiResponse(null, [], systemPrompt, false, 'chat', messages);
+                document.getElementById('outing-typing-indicator')?.remove();
+                let parsed = null;
+                try { const m = result.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); } catch(e) {}
+                const eventsToAdd = parsed?.events?.length ? parsed.events : [{ type: 'character', speaker: outing.companions[0]?.name || '同伴', content: result.slice(0,300) }];
+                for (const evt of eventsToAdd) {
+                    const e = { ...evt, time: Date.now() };
+                    outing.events.push(e);
+                    if (stream) appendOutingEventToDOM(stream, e, outing);
+                }
+                scrollOutingStream();
+                await saveOutingData(outing);
+            } catch(err) {
+                document.getElementById('outing-typing-indicator')?.remove();
+                console.error('[Outing AI]', err);
+            }
+        }
+
+        function appendOutingEventToDOM(stream, evt, outing) {
+            const el = document.createElement('div');
+            if (evt.type === 'action') {
+                el.className = 'outing-event action-event';
+                el.innerHTML = `<div class="oe-bubble">${evt.content}</div>`;
+            } else if (evt.type === 'user') {
+                el.className = 'outing-event user-event';
+                const mp = state.myProfile || {};
+                const av = mp.avatar ? `<img src="${mp.avatar}" class="oe-avatar">` : `<div class="oe-avatar">${(mp.name||'我')[0]}</div>`;
+                el.innerHTML = `${av}<div class="oe-bubble">${evt.content}</div>`;
+            } else {
+                el.className = 'outing-event';
+                const companion = outing.companions.find(c => c.name === evt.speaker);
+                let av;
+                if (companion && !companion.isNpc && companion.avatar) {
+                    av = `<img src="${companion.avatar}" class="oe-avatar">`;
+                } else {
+                    av = `<div class="oe-avatar">${companion?.isNpc ? '🤖' : (evt.speaker||'?')[0]}</div>`;
+                }
+                el.innerHTML = `${av}<div style="display:flex;flex-direction:column;gap:2px;max-width:75%;"><div class="oe-name">${evt.speaker}</div><div class="oe-bubble">${evt.content}</div></div>`;
+            }
+            stream.appendChild(el);
+        }
+
+        function scrollOutingStream() {
+            const content = document.getElementById('outing-content');
+            if (content) content.scrollTop = content.scrollHeight;
+        }
+
+        function openOutingBuyModal(outing) {
+            let modal = document.getElementById('outing-buy-modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'outing-buy-modal';
+                modal.className = 'outing-buy-modal';
+                document.getElementById('app-container').appendChild(modal);
+            }
+            const payerOpts = [`<option value="user">我自己</option>`].concat(
+                outing.companions.filter(c => !c.isNpc).map(c => `<option value="${c.id}">${c.name}</option>`)
+            ).join('');
+            modal.innerHTML = `<div class="outing-buy-sheet"><h3>🛒 记录消费</h3><div class="obs-row"><input type="text" id="oby-item" placeholder="消费项目（如：两杯咖啡）"><input type="number" id="oby-amount" placeholder="金额" min="0.01" step="0.01" style="width:90px;"></div><div class="obs-row"><select id="oby-payer">${payerOpts}</select></div><button class="obs-confirm" id="oby-confirm-btn">确认记录</button><button class="obs-confirm" id="oby-cancel-btn" style="background:#aaa;margin-top:6px;">取消</button></div>`;
+            modal.classList.add('open');
+            document.getElementById('oby-cancel-btn').addEventListener('click', () => modal.classList.remove('open'));
+            document.getElementById('oby-confirm-btn').addEventListener('click', () => doOutingPurchase(outing, modal));
+        }
+
+        async function doOutingPurchase(outing, modal) {
+            const item = document.getElementById('oby-item').value.trim() || '消费';
+            const amount = parseFloat(document.getElementById('oby-amount').value) || 0;
+            const payerId = document.getElementById('oby-payer').value;
+            if (amount <= 0) { alert('请输入有效金额'); return; }
+            const purchase = { item, amount, payerId, time: Date.now() };
+            outing.purchases.push(purchase);
+            if (payerId === 'user') {
+                outing.spentTotal = (outing.spentTotal || 0) + amount;
+                state.myProfile.balance = (state.myProfile.balance || 0) - amount;
+                await kokoMemory.put('myProfile', state.myProfile);
+                const tx = { id: 'tx_outing_' + Date.now(), type: 'expense', amount, description: `出去玩·${outing.placeName}·${item}`, timestamp: Date.now() };
+                state.transactions.unshift(tx);
+                await kokoMemory.put('transactions', tx);
+            }
+            await saveOutingData(outing);
+            modal.classList.remove('open');
+            const payerName = payerId === 'user' ? (state.myProfile?.name || '我') : (outing.companions.find(c => c.id === payerId)?.name || payerId);
+            const stream = document.getElementById('outing-stream');
+            const evt = { type: 'action', speaker: '', content: `${payerName} 花费了 ¥${amount.toFixed(2)}（${item}）`, time: Date.now() };
+            outing.events.push(evt);
+            if (stream) appendOutingEventToDOM(stream, evt, outing);
+            scrollOutingStream();
+            await saveOutingData(outing);
+        }
+
+        async function doEndOuting(outing) {
+            if (!confirm('确定结束本次出行吗？')) return;
+            outing.status = 'ended';
+            outing.endTime = Date.now();
+            await saveOutingData(outing);
+            await setCurrentOuting(null);
+            await syncOutingMemoryToContacts(outing);
+            document.getElementById('outing-history-btn').style.display = '';
+            alert('出行结束！记忆已同步到联系人。');
+            renderOutingHomeView();
+        }
+
+        async function syncOutingMemoryToContacts(outing) {
+            if (outing.memorySynced) return;
+            const duration = outing.endTime ? Math.round((outing.endTime - outing.startTime) / 60000) : '?';
+            const eventSummary = outing.events.filter(e => e.type !== 'action').slice(-10).map(e => `${e.speaker}：${e.content}`).join('；').slice(0, 200);
+            const memEntry = `[出去玩] 一起去了${outing.placeName}，约${duration}分钟。${eventSummary ? '途中：' + eventSummary : ''}`;
+            for (const companion of outing.companions) {
+                if (companion.isNpc) continue;
+                const contact = state.contacts.find(c => c.id === companion.id);
+                if (!contact) continue;
+                if (!Array.isArray(contact.memories)) contact.memories = [];
+                contact.memories.push({ content: memEntry, timestamp: outing.endTime || Date.now() });
+                await kokoMemory.put('contacts', contact);
+            }
+            outing.memorySynced = true;
+            await saveOutingData(outing);
+        }
+
+        async function getOutingData(id) { return await kokoMemory.get('outings', id); }
+        async function saveOutingData(outing) { await kokoMemory.put('outings', outing); }
+        async function getCurrentOuting() {
+            const ref = await kokoMemory.get('userSettings', 'currentOutingId');
+            if (!ref?.value) return null;
+            return await kokoMemory.get('outings', ref.value);
+        }
+        async function setCurrentOuting(id) {
+            if (id) await kokoMemory.put('userSettings', { id: 'currentOutingId', value: id });
+            else await kokoMemory.delete('userSettings', 'currentOutingId');
+        }
+
+        async function renderOutingHistoryView() {
+            const content = document.getElementById('outing-content');
+            document.getElementById('outing-screen-title').textContent = '出行记录';
+            content.innerHTML = '<div class="outing-typing">加载中…</div>';
+            const all = await kokoMemory.getAll('outings') || [];
+            const ended = all.filter(o => o.status === 'ended').sort((a, b) => b.startTime - a.startTime);
+            if (!ended.length) { content.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;">还没有出行记录哦</div>'; return; }
+            content.innerHTML = ended.map(o => {
+                const date = new Date(o.startTime).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+                const companions = o.companions.map(c => c.name).join('、');
+                const spent = o.spentTotal ? `¥${o.spentTotal.toFixed(2)}` : '未消费';
+                return `<div class="outing-history-card"><div class="ohc-header"><div class="ohc-title">${o.placeEmoji||''} ${o.placeName}</div><div class="ohc-date">${date}</div></div><div class="ohc-companions">同行：${companions}</div><div class="ohc-spend">${spent}</div></div>`;
+            }).join('');
+        }
+        // ===== END 出去玩 =====
 
         async function updateUserPersonaPresetSelect() {
             const selectUserPersonaPreset = document.getElementById('select-user-persona-preset');
@@ -37929,22 +38543,27 @@ document.getElementById('clear-chat-history-btn').addEventListener('click', asyn
         const contact = state.contacts.find(c => c.id === state.activeChatId);
         if (!contact) return;
         
-        // (确认弹窗逻辑不变)
-        const confirmed = await showCustomConfirm('清空所有记录', `确定要清空与 "${contact.name}" 的所有记录吗？\n\n这将同时删除：\n1. App内的聊天记录\n2. 短信对话记录\n\n此操作不可恢复！`, true);
-        
+        const confirmed = await showCustomConfirm('清空所有记录', `确定要清空与 “${contact.name}” 的所有记录吗？\n\n这将同时删除：\n1. App 内聊天记录\n2. 短信对话记录\n3. 他的日记\n4. 珍藏的瞬间/共同记忆记录\n\n此操作不可恢复！`, true);
+
         if (confirmed) {
             contact.history = [];
-            contact.smsHistory = []; 
-            
+            contact.smsHistory = [];
+            contact.diary = [];
+            contact.memories = [];
+            contact.firstChatDate = Date.now();
+            // 清除各类摘要/缓存字段，防止清空后重新渲染旧内容
+            contact.chatSummary = null;
+            contact.memorySummary = null;
+            contact.shortTermMemory = null;
+            contact.longTermMemory = null;
+            contact.generatedDiaryCache = null;
+            contact.lastDiaryGeneratedAt = null;
+
             await kokoMemory.put('contacts', contact);
-            alert('聊天和短信记录已全部清空。');
-            
-            // ▼▼▼ 核心修复就在这两行 ▼▼▼
-            // 1. 关闭当前的“设置”页面
+            alert('聊天、短信、日记和共同记忆已全部清空。');
+
             document.getElementById('contact-settings-screen').style.display = 'none';
-            // 2. 强制重新打开（刷新）聊天页面，而不是返回角色资料页！
-            openChat(contact.id); 
-            // ▲▲▲ 修复结束 ▲▲▲
+            openChat(contact.id);
         }
     });
     document.getElementById('char-profile-screen').addEventListener('click', async (e) => {
@@ -42229,6 +42848,118 @@ document.addEventListener('click', function(event) {
         document.getElementById('chat-options-menu').style.display = 'none';
     });
     // ▲▲▲ 替换结束 ▲▲▲
+
+// --- 括号按钮 ---
+(function() {
+    function insertBracketToMessageInput() {
+        const input = document.getElementById('message-input');
+        if (!input) return;
+        const start = input.selectionStart || 0;
+        const end   = input.selectionEnd   || 0;
+        const before   = input.value.slice(0, start);
+        const selected = input.value.slice(start, end);
+        const after    = input.value.slice(end);
+        if (selected) {
+            input.value = before + '（' + selected + '）' + after;
+            const pos = before.length + selected.length + 2;
+            input.setSelectionRange(pos, pos);
+        } else {
+            input.value = before + '（）' + after;
+            const pos = before.length + 1;
+            input.setSelectionRange(pos, pos);
+        }
+        input.focus();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const bracketBtn = document.getElementById('bracket-btn');
+    if (bracketBtn) bracketBtn.addEventListener('click', insertBracketToMessageInput);
+})();
+
+// --- 他的日记（三点菜单） ---
+(function() {
+    const diaryMenuItem = document.getElementById('view-diary-btn-menu');
+    if (!diaryMenuItem) return;
+    diaryMenuItem.addEventListener('click', () => {
+        document.getElementById('chat-options-menu').style.display = 'none';
+        const contact = state.contacts.find(c => c.id === state.activeChatId);
+        if (!contact) return;
+        if (contact.isGroup) {
+            alert('群聊没有个人日记');
+            return;
+        }
+        // 切换到对应联系人再显示日记
+        showDiaryScreen();
+    });
+    // 打开菜单时，群聊隐藏此项
+    const moreBtn = document.getElementById('more-chat-options-btn');
+    if (moreBtn) {
+        moreBtn.addEventListener('click', () => {
+            const contact = state.contacts.find(c => c.id === state.activeChatId);
+            diaryMenuItem.style.display = (contact && contact.isGroup) ? 'none' : '';
+        }, true); // capture，先于菜单显隐执行
+    }
+})();
+
+// --- 出去玩 事件监听 ---
+(function() {
+    // 返回按钮
+    document.getElementById('back-from-outing')?.addEventListener('click', () => {
+        document.getElementById('outing-screen').style.display = 'none';
+    });
+    // 记录按钮
+    document.getElementById('outing-history-btn')?.addEventListener('click', renderOutingHistoryView);
+    // 发现页入口
+    document.getElementById('outing-discover-btn')?.addEventListener('click', () => openOutingScreen(null));
+    // 聊天三点菜单入口
+    const outingMenuBtn = document.getElementById('outing-with-contact-btn-menu');
+    if (outingMenuBtn) {
+        outingMenuBtn.addEventListener('click', () => {
+            document.getElementById('chat-options-menu').style.display = 'none';
+            const contact = state.contacts.find(c => c.id === state.activeChatId);
+            if (!contact || contact.isGroup) { alert('群聊不支持出去玩'); return; }
+            openOutingScreen(contact.id);
+        });
+        // 群聊时隐藏
+        const moreBtn = document.getElementById('more-chat-options-btn');
+        if (moreBtn) {
+            moreBtn.addEventListener('click', () => {
+                const contact = state.contacts.find(c => c.id === state.activeChatId);
+                outingMenuBtn.style.display = (contact && contact.isGroup) ? 'none' : '';
+            }, true);
+        }
+    }
+})();
+
+// --- 账单编辑模式切换 ---
+(function() {
+    const editBtn = document.getElementById('edit-transactions-btn');
+    if (editBtn) {
+        editBtn.addEventListener('click', () => {
+            walletEditMode = !walletEditMode;
+            renderWalletScreen();
+        });
+    }
+
+    // 编辑弹窗：关闭
+    const closeModal = document.getElementById('close-edit-transaction-modal');
+    if (closeModal) {
+        closeModal.addEventListener('click', () => {
+            document.getElementById('edit-transaction-modal').style.display = 'none';
+        });
+    }
+    // 编辑弹窗：保存
+    const saveBtn = document.getElementById('save-edit-transaction-btn');
+    if (saveBtn) saveBtn.addEventListener('click', saveEditTransaction);
+
+    // 点弹窗背景关闭
+    const modal = document.getElementById('edit-transaction-modal');
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.style.display = 'none';
+        });
+    }
+})();
+
 // --- ▼▼▼ 新增：视频通话界面的事件绑定 ▼▼▼ ---
 document.getElementById('hang-up-btn').addEventListener('click', () => {
     endVideoCall('user');
