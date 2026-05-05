@@ -16925,9 +16925,9 @@ function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
 }
 
 function mergeShortOfflinePieces(pieces, options = {}) {
-    const minLen = options.minLen || 24;
-    const maxLen = options.maxLen || 80;
-    const maxSentences = options.maxSentences || 3;
+    const minLen = options.minLen || 14;
+    const maxLen = options.maxLen || 46;
+    const maxSentences = options.maxSentences || 2;
 
     const result = [];
     let buffer = '';
@@ -16988,9 +16988,9 @@ function splitOfflineSpeechForRender(text) {
         .filter(s => !isOrphanBracket(s) && !isJsonGarbageFragment(s));
 
     return mergeShortOfflinePieces(rawPieces, {
-        minLen: 22,
-        maxLen: 75,
-        maxSentences: 3
+        minLen: 12,
+        maxLen: 42,
+        maxSentences: 2
     });
 }
 
@@ -17004,9 +17004,9 @@ function splitOfflineActionForRender(text) {
         .filter(s => !isOrphanBracket(s) && !isJsonGarbageFragment(s));
 
     return mergeShortOfflinePieces(rawPieces, {
-        minLen: 30,
-        maxLen: 95,
-        maxSentences: 3
+        minLen: 18,
+        maxLen: 55,
+        maxSentences: 2
     });
 }
 
@@ -17041,7 +17041,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
     }
 
     if (messageType === 'offlineAction') {
-        const pieces = rawLen <= 90
+        const pieces = rawLen <= 55
             ? [stripOuterActionBrackets(rawContent)].filter(Boolean)
             : splitOfflineActionForRender(rawContent);
         pieces.forEach(piece => {
@@ -17054,7 +17054,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
             });
         });
     } else {
-        const pieces = rawLen <= 70
+        const pieces = rawLen <= 42
             ? [cleanOfflineEventContent(rawContent)].filter(Boolean)
             : splitOfflineSpeechForRender(rawContent);
         pieces.forEach(piece => {
@@ -19759,8 +19759,8 @@ ${isNarrativeMode ? `
 1. events 不要把所有动作和台词塞进一个超长 content。
 2. 也不要把一句话就分成一条。
 3. 每个 content 不要太短。
-4. speech 每条建议 18 到 70 字，可以包含 1 到 3 句自然台词。
-5. action 每条建议 25 到 90 字，可以包含 1 到 3 个连续动作。
+4. speech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。
+5. action 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。
 6. 不要把"嗯、哦、啧"之外的正常回复拆成几个字一条。
 7. 自然分组，在这个长度范围内，不是无脑短拆，也不是全塞一个。
 ` : `
@@ -21003,7 +21003,7 @@ ${qzoneContextText}
                         privateUserTask += `【最近聊天，仅供语气和关系背景，不是本轮要继续回答的问题】\n${recentHistoryText}\n\n`;
                     }
                     if (isNarrativeMode) {
-                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"${contact.id || ''}","characterName":"${contact.name || '角色'}","content":"..."}],"heart_voice":{"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"无"},"diary":"..."}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\nspeech 每条建议 18 到 70 字，可以包含 1 到 3 句自然台词。\naction 每条建议 25 到 90 字，可以包含 1 到 3 个连续动作。\n不要把"嗯、哦、啧"之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"${contact.id || ''}","characterName":"${contact.name || '角色'}","content":"..."}],"heart_voice":{"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"无"},"diary":"..."}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把"嗯、哦、啧"之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
                     } else {
                         privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n只回应上面这一句。\n如果用户没有明确说"刚刚/继续/上一句/前面那个/你还没回答"，不要主动回到上一轮话题。\n可以保留上一轮情绪余温，但不要继续上一轮具体内容。\n第一条回复必须直接接住当前用户最新输入。`;
                     }
