@@ -19392,6 +19392,47 @@ function removePreviousTurnCallbackIfNotAllowed(text, latestUserInput) {
     return s.trim();
 }
 
+// 私聊轻量记忆摘要：只用 permanent_memories，不用完整聊天历史
+function formatPrivateMemoryForPrompt(contact, options) {
+    const maxItems = (options && options.maxItems) || 8;
+    const memories = [];
+    if (contact && contact.permanent_memories && Array.isArray(contact.permanent_memories)) {
+        contact.permanent_memories.slice(-maxItems).forEach(function(m) {
+            if (!m) return;
+            const text = String(m.content || m.text || '').slice(0, 120);
+            if (text) memories.push('- ' + text);
+        });
+    }
+    return memories.length > 0 ? memories.join('\n') : '（暂无长期记忆）';
+}
+
+// 把最近 N 条消息格式化为纯文本，用于放进 userTask 的背景区
+function formatRecentHistoryForPrompt(recentHistory, myProfile, contact) {
+    if (!recentHistory || recentHistory.length === 0) return '';
+    const lines = [];
+    recentHistory.forEach(function(msg) {
+        const senderName = (msg.sender === 'user' || msg.sender === 'myProfile')
+            ? (myProfile && myProfile.name ? myProfile.name : '用户')
+            : (contact && contact.name ? contact.name : 'AI');
+        let text = '';
+        switch (msg.type) {
+            case 'text': text = typeof msg.content === 'string' ? msg.content.slice(0, 100) : ''; break;
+            case 'voice': text = '[语音: ' + (msg.content && msg.content.text ? msg.content.text : '') + ']'; break;
+            case 'image':
+            case 'uploaded_image': text = msg.isEmoticon && msg.emoticonName ? '[表情: ' + msg.emoticonName + ']' : '[图片]'; break;
+            case 'picture_description': text = '[图片: ' + (msg.content && msg.content.description ? msg.content.description : '') + ']'; break;
+            case 'red_packet': text = '[红包: ' + (msg.content && msg.content.blessing ? msg.content.blessing : '') + ']'; break;
+            case 'transfer': text = '[转账: ¥' + (msg.content && msg.content.amount ? msg.content.amount : '') + ']'; break;
+            case 'music_share': text = '[音乐: ' + (msg.content && msg.content.title ? msg.content.title : '') + ']'; break;
+            default:
+                if (typeof msg.content === 'string') text = msg.content.slice(0, 80);
+                break;
+        }
+        if (text) lines.push(senderName + ': ' + text);
+    });
+    return lines.join('\n');
+}
+
 function buildCurrentTurnBoundaryRules(mode, allowPreviousCallback) {
     const lines = [
         '【Z0. 当前轮次边界 — 极高优先级】',
@@ -19425,6 +19466,68 @@ function buildCurrentTurnBoundaryRules(mode, allowPreviousCallback) {
     }
 
     return lines.join('\n');
+}
+
+function buildCleanPrivateSystemContent(options) {
+    const contact = options.contact || {};
+    const myProfile = options.myProfile || {};
+    const thoughtPresetContent = options.thoughtPresetContent || '(无特殊思维准则)';
+    const worldBookContextString = options.worldBookContextString || '';
+    const snoopedDataContextString = options.snoopedDataContextString || '';
+    const relationshipContextString = options.relationshipContextString || '';
+    const emoticonListString = options.emoticonListString || '（无可用表情）';
+    const musicListString = options.musicListString || '（曲库为空）';
+    const isNarrativeMode = !!options.isNarrativeMode;
+
+    return `【角色身份】
+你不是 AI、助手、机器人、系统或旁白工具。你就是角色本人。
+
+【角色人设】
+角色名：${contact.name || '角色'}
+${contact.persona || '(未设置角色人设)'}
+
+【用户设定】
+用户名：${myProfile.name || '用户'}
+${contact.userPersona || myProfile.signature || '(用户未设置人设)'}
+
+【思维预设】
+${thoughtPresetContent}
+${worldBookContextString ? `\n【世界书】\n${worldBookContextString}` : ''}
+${snoopedDataContextString ? `\n【额外背景】\n${snoopedDataContextString}` : ''}
+${relationshipContextString ? `\n【关系与状态】\n${relationshipContextString}` : ''}
+
+【可用表情】
+${emoticonListString}
+
+【曲库】
+${musicListString}
+
+【背景使用规则】
+1. 以上内容只用于保持角色身份、人设、关系和世界观。
+2. 这里没有本轮要回答的问题。
+3. 不要主动复述背景、记忆、人设、世界书。
+4. 不要把任何旧记忆当成当前用户输入。
+5. 本轮真正要回应的内容只在下一条 user message 的【当前用户最新输入】里。
+
+【私聊轮次规则】
+1. 每一轮都是新的当前输入。
+2. 可以保留情绪余温，比如别扭、生气、冷淡、亲近。
+3. 但不能继续上一轮具体话题。
+4. 如果当前用户没有明确说"刚刚/继续/上一句/前面那个/你还没回答"，禁止主动补答上一轮。
+5. 第一条回复必须直接回应当前用户最新输入。
+${isNarrativeMode ? `
+【线下叙事规则】
+必须返回合法 JSON 数组。
+events 里的 speech 必须回应当前用户最新输入。
+action 可以承接地点、姿势、气氛，但不能继续上一轮具体问题。
+` : `
+【普通私聊输出规则】
+输出多条自然聊天气泡。
+不要写说明文。
+不要总结设定。
+不要重新开场。
+不要突然复盘上一轮。
+`}`;
 }
 
 function buildPromptHistoryExcludingLatest(history, latestUserMessageId, limit) {
@@ -20084,20 +20187,18 @@ case 'takeout':
                 unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
                 
                 const memoryLimit = longTermMemoryLength || 30;
-// (这是新代码)
-                const finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
-                    const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
-                    
-                    // ✨ 核心修改：在这里加入判断！ ✨
-                    // 1. 检查这个 contact 对象是否存在，以及它的 "isTimeAware" 是否为 true
-                    const showTimeTags = contact && contact.isTimeAware === true;
-                    
-                    // 2. 只有在开关打开时才生成时间标签，否则给一个空字符串
-                    const timeTag = showTimeTags ? formatHybridTimeForAI(mem.timestamp) : '';
-                    
-                    // 3. 拼接字符串 (如果 timeTag 为空，timeTag + ' ' 也会被优雅地处理)
-                    return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
-                }).join('\n') || "(还没有任何记忆)";
+                // 私聊只用轻量永久记忆摘要；群聊/其他保持原有完整历史流
+                let finalMemoryString;
+                if (contact && !contact.isGroup) {
+                    finalMemoryString = formatPrivateMemoryForPrompt(contact, { maxItems: 8 });
+                } else {
+                    finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
+                        const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
+                        const showTimeTags = contact && contact.isTimeAware === true;
+                        const timeTag = showTimeTags ? formatHybridTimeForAI(mem.timestamp) : '';
+                        return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
+                    }).join('\n') || "(还没有任何记忆)";
+                }
                 
                 // (Prompt 组装逻辑 - 记忆核心增强版)
                 const isNarrativeMode = contact?.isNarrativeMode;
@@ -20160,7 +20261,10 @@ ${memoriesList}
 
                 let personaDirectives = "";
                 if (contact?.persona) { personaDirectives += `\n\n# 核心角色指令 (Your Core Role Directive)\n---\n这是你的核心身份，你必须严格、完全地代入以下角色进行对话：\n${contact.persona}\n---`; }
-                personaDirectives += `\n\n# 角色的最新心声 (Your Last Recorded Heart Voice)\n---\n【上一轮角色回复心声，仅用于避免重复】\n这不是本轮要继续回答的内容。不要顺着心声继续上一轮话题。只用它避免重复措辞、保持角色情感状态。当前用户没提上一轮时，不要引用里面的具体话题。\n${lastHeartVoiceString}\n---`;
+                // 私聊不注入上一轮心声，防止 AI 把旧心声当成本轮要延续的内容
+                if (!contact || contact.isGroup) {
+                    personaDirectives += `\n\n# 角色的最新心声 (Your Last Recorded Heart Voice)\n---\n这是你上次回复时的内心状态，请参考此状态以保持情感连贯性：\n${lastHeartVoiceString}\n---`;
+                }
                 if (contact?.userPersona) { personaDirectives += `\n\n# 对话者信息 (Your Counterpart's Information)\n---\n与你对话的用户的角色设定如下，请将TA视为真实存在的角色并进行互动：\n${contact.userPersona}\n---`; }
                 
                 const firstLineEndIndex = finalSystemPrompt.indexOf(']');
@@ -20366,8 +20470,8 @@ ${npcBriefs ? `[相关人物简报]\n${npcBriefs}` : ''}
                 if (snoopedDataContextString) { systemContent += snoopedDataContextString; }
                 if (relationshipContextString) { systemContent += relationshipContextString; }
 
-                // 群聊记忆独立区块：保留最近 30 条，不被 memoryLimit 挤压
-                if (groupMemoryStream.length > 0) {
+                // 群聊记忆独立区块（私聊使用新双层结构，不注入群聊余波）
+                if (groupMemoryStream.length > 0 && !(contact && !contact.isGroup)) {
                     const groupMemoryLimit = 30;
                     const showTimeTags = contact && contact.isTimeAware === true;
                     const groupMemoryLines = groupMemoryStream.slice(-groupMemoryLimit).map(mem => {
@@ -20596,9 +20700,9 @@ ${qzoneContextText}
 `;
             }
                 
-                // (你原来的动态指令逻辑)
+                // 动态指令：私聊放进 userTask，群聊/其他放进 systemContent
                 const dynamicInstructions = history.filter(msg => msg.sender === 'system_instruction').map(msg => msg.content).join('\n');
-                if (dynamicInstructions) { systemContent += `\n\n[附加临时指令]\n${dynamicInstructions}`; }
+                if (dynamicInstructions && !(contact && !contact.isGroup)) { systemContent += `\n\n[附加临时指令]\n${dynamicInstructions}`; }
 
                 // 当前轮次边界规则：阻止 AI 继续回应上一轮
                 let _latestUserMsgId = null;
@@ -20611,14 +20715,80 @@ ${qzoneContextText}
                         ? (typeof _lastUserMsg.content === 'string' ? _lastUserMsg.content : (_lastUserMsg.content?.text || ''))
                         : '';
                     const _allowPrev = doesCurrentInputReferToPrevious(_latestInputText);
-                    systemContent += '\n\n' + buildCurrentTurnBoundaryRules(isNarrativeMode ? 'offline' : 'private', _allowPrev);
+                    // 私聊的边界规则写进 userTask，不写进 systemContent
+                    if (!contact || contact.isGroup) {
+                        systemContent += '\n\n' + buildCurrentTurnBoundaryRules(isNarrativeMode ? 'offline' : 'private', _allowPrev);
+                    }
                     console.log('[私聊当前输入]', {
                         latestUserInput: _latestInputText,
                         allowPreviousCallback: _allowPrev
                     });
                 } catch (_e) { /* 静默忽略，不影响主流程 */ }
 
-                // (你原来的 history 转换 messages 逻辑，这里是图文支持的关键)
+                if (contact && !contact.isGroup) {
+                    // ===== 私聊：干净的 [system, user] 双层结构 =====
+                    // privateSystemContent 从 basePrompt 重新构建，不复用 finalSystemPrompt/memoryCoreContext/记忆流
+
+                    // 用干净函数构建 privateSystemContent，完全不接触 basePrompt/finalSystemPrompt/memoryCoreContext
+                    const privateSystemContent = buildCleanPrivateSystemContent({
+                        contact,
+                        myProfile: myProfile,
+                        thoughtPresetContent,
+                        worldBookContextString,
+                        snoopedDataContextString,
+                        relationshipContextString,
+                        emoticonListString,
+                        musicListString,
+                        isNarrativeMode
+                    });
+
+                    // === 构建 userTask ===
+                    const safeRecentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, 6);
+                    const recentHistoryText = formatRecentHistoryForPrompt(safeRecentHistory, myProfile, contact);
+                    const latestInputText = _latestInputText || '';
+
+                    let privateUserTask = '';
+
+                    // 长期记忆摘要（最多 5 条，放进 userTask 而非 system，避免 AI 把记忆当本轮要延续的剧情）
+                    const _privateMems = formatPrivateMemoryForPrompt(contact, { maxItems: 5 });
+                    if (_privateMems && _privateMems !== '（暂无长期记忆）') {
+                        privateUserTask += `【长期记忆摘要，仅供关系背景，不是本轮话题】\n${_privateMems}\n\n`;
+                    }
+
+                    if (recentHistoryText) {
+                        privateUserTask += `【最近聊天，仅供语气和关系背景，不是本轮要继续回答的问题】\n${recentHistoryText}\n\n`;
+                    }
+                    if (isNarrativeMode) {
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【输出要求】\n必须返回合法 JSON。\nevents 里的 speech 必须回应当前用户最新输入。\naction 可以承接地点、姿势、气氛，但不能继续上一轮具体问题。`;
+                    } else {
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n只回应上面这一句。\n如果用户没有明确说"刚刚/继续/上一句/前面那个/你还没回答"，不要主动回到上一轮话题。\n可以保留上一轮情绪余温，但不要继续上一轮具体内容。\n第一条回复必须直接接住当前用户最新输入。`;
+                    }
+                    if (dynamicInstructions) privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
+
+                    const _latestParts = buildPromptPartsFromLatestUserMessage(_lastUserMsg, contact);
+                    const _hasImage = _latestParts && _latestParts.some(p => p.type === 'image_url');
+                    if (_hasImage) {
+                        const _imgParts = _latestParts.filter(p => p.type === 'image_url');
+                        requestMessages = [
+                            { role: 'system', content: privateSystemContent },
+                            { role: 'user', content: [..._imgParts, { type: 'text', text: privateUserTask }] }
+                        ];
+                    } else {
+                        requestMessages = [
+                            { role: 'system', content: privateSystemContent },
+                            { role: 'user', content: privateUserTask }
+                        ];
+                    }
+                    console.log('[私聊最终请求-干净版]', {
+                        usingFinalSystemPrompt: false,
+                        usingBasePrompt: privateSystemContent.includes('{{memory_stream}}') || privateSystemContent.includes('统一时序记忆流') || privateSystemContent.includes('上一轮角色回复'),
+                        systemPreview: privateSystemContent.slice(0, 800),
+                        userTaskPreview: privateUserTask.slice(0, 1000),
+                        latestUserInput: latestInputText,
+                        recentHistoryCount: safeRecentHistory.length
+                    });
+                } else {
+                // (群聊/其他：保持原有多轮消息结构，不改动)
                 const messages = [];
                 const recentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, contextLength || 20);
 
@@ -20794,7 +20964,8 @@ ${qzoneContextText}
 
                 // (你原来的 requestMessages 赋值)
                 requestMessages = [{ role: 'system', content: systemContent }, ...messages];
-            
+                } // end else (群聊/其他：多轮结构)
+
             // ▼▼▼ 6. 'else' 逻辑的结尾 ▼▼▼
             }
             // ▲▲▲ 'else' 逻辑结束 ▲▲▲
