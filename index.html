@@ -11440,8 +11440,6 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 <input type="file" id="character-avatar-uploader" accept="image/*" style="display: none;">
 <input type="file" id="journal-sticker-uploader" accept="image/*" style="display: none;">
 <div id="relationship-network-screen" style="display: none; flex-direction: column; background-color: #f0f2f5;">
-<input type="file" id="journal-sticker-uploader" accept="image/*" style="display: none;">
-<div id="relationship-network-screen" style="display: none; flex-direction: column; background-color: #f0f2f5;">
     <div class="api-header">
         <div class="back-btn" id="back-from-relationship-network"><i class="fas fa-arrow-left"></i></div>
         <div class="api-title" id="relationship-network-title">关系网络</div>
@@ -11498,6 +11496,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
         <h3 class="mask-editor-title">现有关系列表</h3>
         <div id="relationship-list" class="preset-list" style="gap: 0;"></div>
     </div>
+</div>
 </div>
 
 <div id="character-modal" style="display: none; justify-content: center; align-items: center; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 200;">
@@ -14376,6 +14375,7 @@ ${companionDescs}
 可进行的活动：${(outing.placeActivities || []).join('、')}
 ${outing.isCustomPlace ? '这是用户自定义场景，不要按固定模板写，要根据用户输入的地点、氛围和活动自由生成剧情。' : ''}
 ${FORBIDDEN_ROLE_WORDS_PROMPT}
+${FORBIDDEN_ACTION_CLICHES_PROMPT}
 ${trigger === 'start' ? '请生成出行开场，描述到达场景，让同伴打招呼并展示性格。' : '请根据用户最新的输入，生成自然的互动回应。'}
 你的输出必须是合法JSON（不要有任何其他文字）：{"events":[{"type":"action","speaker":"","content":"旁白描述"},{"type":"character","speaker":"同伴名字","content":"对话内容"}]}
 type只能是"action"或"character"，action的speaker必须是空字符串，每次输出1~3条事件。`;
@@ -14600,6 +14600,23 @@ type只能是"action"或"character"，action的speaker必须是空字符串，�
 6. 如果想表达照顾、提醒、陪伴，可以自然说“我陪你”“我帮你看看”“我在呢”，不要用管家/助手称呼。
 `.trim();
 
+        const FORBIDDEN_ACTION_CLICHES_PROMPT = `
+【动作描写禁用模板】
+以下动作模板和相似表达禁止反复使用，除非当前上下文真的强烈需要：
+1. 禁止反复写“嘴角柔和了一丝 / 嘴角松了一点 / 紧绷的嘴角缓和 / 唇角微不可察地动了动”。
+2. 禁止反复写“挤了挤眼睛 / 挤了挤眼 / 眨了眨眼 / 使了个眼色”。
+3. 禁止反复写“做了一个……口型 / 用口型说…… / 无声地比口型”。
+4. 禁止反复写“端起茶杯 / 摩挲杯沿 / 指尖摩挲杯壁 / 放下茶杯”。
+5. 禁止反复写“收回目光 / 移开视线 / 看向某人 / 眼底闪过……”。
+6. 禁止反复写“轻轻点头 / 满意地点头 / 点了点头 / 微微颔首”。
+7. 禁止反复写“靠在椅背上 / 敲了敲桌面 / 指尖敲桌 / 抬手按了按眉心”。
+8. 禁止反复写抽象神态变化，例如“气氛缓和了一点”“神色柔和了一些”“眼神复杂了一瞬”，除非后面有具体行为承接。
+9. 动作不能像固定表情包，不能每轮都写同一类嘴角、眼神、点头、口型、茶杯。
+10. 每条 action 必须和当前事件强相关：角色正在做什么、手边有什么、场景里有什么、刚刚谁说了什么，就从这些具体内容里生成动作。
+11. 动作优先写具体行为，不要写泛泛神态。比如“把红包往林澈那边推了推”比“嘴角柔和了一丝”更好。
+12. 如果没有很有必要的动作，就不要输出 action，直接用 speech。
+`.trim();
+
         function appendForbiddenRoleWordsRule(promptText) {
             const text = String(promptText || '').trim();
             if (!text) return FORBIDDEN_ROLE_WORDS_PROMPT;
@@ -14645,6 +14662,38 @@ type只能是"action"或"character"，action的speaker必须是空字符串，�
                 .trim();
         }
 
+        function cleanAiSpeechText(text) {
+            let s = String(text || '').trim();
+            if (!s) return '';
+
+            s = s
+                .replace(/```(?:json)?/gi, '')
+                .replace(/<[^>]+>/g, '')
+                .replace(/&nbsp;/g, ' ')
+                .trim();
+
+            s = s.replace(/^[（(【\[][^）)】\]]{1,30}[）)】\]]\s*/g, '').trim();
+            s = s.replace(/^[^,，。！？!?；;：:\n]{1,24}[）)】\]]\s*/g, '').trim();
+            s = s.replace(/^[）)】\]]+\s*/g, '').trim();
+            s = s.replace(/\s*[（(【\[]+$/g, '').trim();
+            s = s.replace(/\s*[）)】\]]+$/g, '').trim();
+
+            if (
+                /^（[\s\S]*）$/.test(s) ||
+                /^\([\s\S]*\)$/.test(s) ||
+                /^【[\s\S]*】$/.test(s) ||
+                /^\[[\s\S]*\]$/.test(s)
+            ) {
+                return '';
+            }
+
+            if (/^(小声|低声|压低声音|忍不住|抬手|起身|站起|坐下|看着|望向|伸手|收回|垂眼|点头|皱眉|笑着|叹了口气)[^，。！？!?]{0,20}[）)】\]]?/.test(s)) {
+                s = s.replace(/^(小声|低声|压低声音|忍不住|抬手|起身|站起|坐下|看着|望向|伸手|收回|垂眼|点头|皱眉|笑着|叹了口气)[^，。！？!?]{0,24}[）)】\]]?\s*/g, '').trim();
+            }
+
+            return s.trim();
+        }
+
         const SANITIZABLE_AI_TEXT_KEYS = new Set([
             'content',
             'text',
@@ -14688,7 +14737,144 @@ type只能是"action"或"character"，action的speaker必须是空字符串，�
 
         function sanitizeAiGeneratedMessageData(messageData) {
             if (!messageData || typeof messageData !== 'object') return messageData;
-            return sanitizeStructuredAiText({ ...messageData });
+
+            const cleaned = sanitizeStructuredAiText({ ...messageData });
+
+            if (typeof cleaned.content === 'string' && (cleaned.type === 'text' || cleaned.type === 'offlineSpeech')) {
+                cleaned.content = cleanAiSpeechText(cleaned.content);
+            }
+
+            if (
+                cleaned.type === 'voice' &&
+                cleaned.content &&
+                typeof cleaned.content === 'object' &&
+                typeof cleaned.content.text === 'string'
+            ) {
+                cleaned.content = {
+                    ...cleaned.content,
+                    text: cleanAiSpeechText(cleaned.content.text)
+                };
+            }
+
+            return cleaned;
+        }
+
+        const FORBIDDEN_ACTION_CLICHES = [
+            /嘴角.*?(柔和|缓和|松|动|扬|勾)/,
+            /紧绷的嘴角/,
+            /唇角.*?(动|扬|勾|软)/,
+            /挤了挤眼/,
+            /眨了眨眼/,
+            /使了个眼色/,
+            /做了一个.*?口型/,
+            /用口型/,
+            /无声地.*?口型/,
+            /端起.*?茶杯/,
+            /摩挲.*?(杯|指尖|杯沿|杯壁)/,
+            /收回目光/,
+            /移开视线/,
+            /看向.*?(方向|那边|某人|大家|江淮|林澈|陆逊|师兄|师父)/,
+            /眼底.*?(闪过|掠过|一瞬|复杂|柔和)/,
+            /神色.*?(柔和|缓和|复杂|一瞬)/,
+            /轻轻点了点头/,
+            /点了点头/,
+            /微微颔首/,
+            /满意地.*?点/,
+            /靠在椅背/,
+            /敲了敲桌/,
+            /指尖.*?敲/,
+            /按了按眉心/,
+            /气氛.*?(缓和|凝固|安静)/
+        ];
+
+        function isClicheOfflineAction(text) {
+            const s = String(text || '').trim();
+            if (!s) return true;
+            return FORBIDDEN_ACTION_CLICHES.some(re => re.test(s));
+        }
+
+        function extractActionContextKeywords(contextText = '') {
+            const raw = String(contextText || '');
+            const keywords = new Set();
+
+            const fixedWords = [
+                '红包', '手机', '门口', '沙发', '桌', '椅', '茶', '杯', '屏幕',
+                '消息', '群', '钱', '转账', '礼物', '书包', '外套', '伞', '钥匙',
+                '师兄', '师姐', '师弟', '师妹', '师父', '徒弟', '老师', '客厅',
+                '戒尺', '手', '手腕', '站起来', '坐下', '递给', '推给'
+            ];
+
+            fixedWords.forEach(w => {
+                if (raw.includes(w)) keywords.add(w);
+            });
+
+            const nameMatches = raw.match(/[\u4e00-\u9fa5]{2,4}/g) || [];
+            nameMatches.forEach(name => {
+                if (!['这个', '那个', '什么', '一下', '刚刚', '现在', '他们', '我们', '你们', '自己', '关系', '动作', '说话'].includes(name)) {
+                    keywords.add(name);
+                }
+            });
+
+            return Array.from(keywords).slice(0, 40);
+        }
+
+        function isContextBoundAction(text, contextText = '') {
+            const s = String(text || '').trim();
+            if (!s) return false;
+            if (s.length < 12) return false;
+
+            const keywords = extractActionContextKeywords(contextText);
+            if (!keywords.length) return true;
+            return keywords.some(w => s.includes(w));
+        }
+
+        function shouldSkipOfflineActionByQuality(actionText, contextText = '') {
+            const s = String(actionText || '').trim();
+            if (!s) return true;
+
+            if (isClicheOfflineAction(s)) {
+                console.warn('[跳过模板化动作]', { actionText: s });
+                return true;
+            }
+
+            if (!isContextBoundAction(s, contextText)) {
+                console.warn('[跳过未绑定上下文的动作]', {
+                    actionText: s,
+                    contextPreview: String(contextText || '').slice(0, 300)
+                });
+                return true;
+            }
+
+            return false;
+        }
+
+        function getRecentOfflineActionsForChat(chat, limit = 12) {
+            if (!chat || !Array.isArray(chat.history)) return [];
+            return chat.history
+                .filter(m => m && m.type === 'offlineAction' && typeof m.content === 'string')
+                .slice(-limit)
+                .map(m => stripOuterActionBrackets(m.content).trim())
+                .filter(Boolean);
+        }
+
+        function normalizeActionForSimilarity(text) {
+            return String(text || '')
+                .replace(/[，。！？、,.!?；;：“”"（）()]/g, '')
+                .replace(/\s+/g, '')
+                .replace(/他|她|它|对方|这个人|那个人/g, '')
+                .slice(0, 28);
+        }
+
+        function isRepeatedRecentAction(chat, actionText) {
+            const normalized = normalizeActionForSimilarity(actionText);
+            if (!normalized) return false;
+
+            const recentActions = getRecentOfflineActionsForChat(chat, 12);
+            return recentActions.some(old => {
+                const oldNorm = normalizeActionForSimilarity(old);
+                if (!oldNorm) return false;
+                return oldNorm.includes(normalized) || normalized.includes(oldNorm);
+            });
         }
 
        
@@ -17318,9 +17504,11 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
         });
     } else {
         const pieces = rawLen <= 42
-            ? [cleanOfflineEventContent(rawContent)].filter(Boolean)
+            ? [cleanAiSpeechText(cleanOfflineEventContent(rawContent))].filter(Boolean)
             : splitOfflineSpeechForRender(rawContent);
         pieces.forEach(piece => {
+            piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
+            if (!piece) return;
             expanded.push({
                 type: 'offlineSpeech',
                 sender: ev.sender || ev.characterId || senderProfile?.id,
@@ -17366,19 +17554,11 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     }
 
     function pushSpeech(text) {
-        const cleaned = cleanOfflineEventContent(text);
+        const cleaned = cleanAiSpeechText(cleanOfflineEventContent(text));
         if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned)) return;
 
-        if ((cleaned.startsWith('（') && cleaned.endsWith('）')) ||
-            (cleaned.startsWith('(') && cleaned.endsWith(')')) ||
-            (cleaned.startsWith('【') && cleaned.endsWith('】')) ||
-            (cleaned.startsWith('*') && cleaned.endsWith('*'))) {
-            pushAction(cleaned);
-            return;
-        }
-
         splitLongSpeech(cleaned).forEach(piece => {
-            piece = cleanOfflineEventContent(piece);
+            piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
             if (!piece || isOrphanBracket(piece) || isJsonGarbageFragment(piece)) return;
             result.push({
                 type: 'offlineSpeech',
@@ -17462,7 +17642,7 @@ async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatC
         const messageType = normalizeOfflineEventType(ev.type, ev.content);
         const content = messageType === 'offlineAction'
             ? stripOuterActionBrackets(ev.content)
-            : cleanOfflineEventContent(ev.content);
+            : cleanAiSpeechText(cleanOfflineEventContent(ev.content));
 
         if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
 
@@ -17935,6 +18115,24 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
 
     if (sender !== 'user' && sender !== 'myProfile' && sender !== 'system_instruction') {
         messageData = sanitizeAiGeneratedMessageData(messageData);
+    }
+
+    if (
+        (messageData.type === 'text' || messageData.type === 'offlineSpeech') &&
+        typeof messageData.content === 'string' &&
+        !messageData.content.trim()
+    ) {
+        return null;
+    }
+
+    if (
+        messageData.type === 'voice' &&
+        messageData.content &&
+        typeof messageData.content === 'object' &&
+        typeof messageData.content.text === 'string' &&
+        !messageData.content.text.trim()
+    ) {
+        return null;
     }
 
     // 3. (仅聊天模式) 处理宠物经验和首次聊天日期
@@ -18889,6 +19087,7 @@ async function triggerGroupFreeChat(group) {
         
         const safeGroupHistoryText = buildSafeGroupHistoryText(group, null, 8);
         const groupRecentContextDigest = buildGroupRecentContextDigest(group, null, 40);
+        const groupRelationshipMatrixPrompt = await buildGroupRelationshipMatrixPrompt(group);
 
         // 1g. 构建角色档案（摘要型互通）
         let characterDossiersPrompt = allMemberProfiles.map(profile => {
@@ -18944,12 +19143,33 @@ ${groupRecentContextDigest}
 5. 允许群成员对前面其他角色说过的话做回应，但不要重复同一句意思。
 
 ${FORBIDDEN_ROLE_WORDS_PROMPT}
+${FORBIDDEN_ACTION_CLICHES_PROMPT}
 
 [背景资料：角色档案]
 ${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要、跨场景关键记忆和近期私聊近况摘要。' : '下方是本次群聊所有AI角色的基础档案。'}
 --- 角色档案区 ---
 ${characterDossiersPrompt}
 --- 档案区结束 ---
+
+[群内关系矩阵｜最高优先级]
+${groupRelationshipMatrixPrompt}
+
+[称呼规则｜必须遵守]
+1. 角色称呼别人时，必须先看群内关系矩阵，不要凭空乱叫。
+2. 如果 A 是 B 的师父、长辈、上级，B 不能随便直呼其名，除非人设明确允许。
+3. 如果 A 是 B 的师兄、师姐、同门前辈，要按关系称呼，不要叫错成师父或徒弟。
+4. 如果关系不明确，宁可使用名字，不要乱编亲密称呼。
+5. 不要把用户和角色的关系、角色和角色之间的关系混在一起。
+6. 如果角色关系里已经写了具体称呼，必须优先使用具体称呼。
+7. 如果关系网和人设中没有明确写 A 应该叫 B “师父 / 师兄 / 师弟 / 徒弟 / 长辈”，禁止凭空使用这些辈分称呼。
+8. 如果不确定称呼，优先叫对方名字，不要乱套师门关系。
+9. 每次发言前先确认“说话者是谁、被称呼者是谁、两人的关系是什么”。
+
+[关系不能乱编]
+1. 如果关系网里有明确关系，必须按关系网来。
+2. 如果关系网没有写，不能凭空把别人叫成师父、师兄、徒弟、长辈。
+3. 角色发言前先判断自己和对方的关系，再决定称呼。
+4. 如果不知道怎么称呼，用对方名字，别乱叫亲昵称呼或辈分称呼。
 
 [背景资料：最近群聊背景]
 以下内容只用于判断群内关系、语气和情绪余温。
@@ -19009,6 +19229,33 @@ MESSAGE_END
 4. action 只能辅助氛围，不能连续超过 1 条。
 5. 群成员自由聊天的重点是互相说话，不是旁白描述。
 6. 如果有 action，下一条必须尽量是 speech。
+
+【动作生成规则】
+1. action 必须根据当前上下文临场生成，不允许套固定神态模板。
+2. 每条 action 必须至少包含一个具体上下文元素，例如：当前提到的人、物品、红包、座位、门口、手机、聊天内容、刚刚的发言、当前场景里的具体物件。
+3. action 只写可被看见的行为，少写抽象心理和泛泛神态。
+4. 不要用“似乎 / 仿佛 / 眼底 / 嘴角 / 视线 / 神色 / 气场 / 氛围”来凑动作。
+5. 不要总写点头、看向、嘴角、眼神、口型、茶杯。
+6. 如果当前上下文没有合适动作，请不要硬写 action，直接输出 speech。
+7. 每轮最多 1 条 action；除非用户明确要求线下剧情推进，否则不要连续输出动作。
+8. action 不能脱离本轮话题，不能只是通用氛围描写。
+9. 如果动作和当前用户最新输入无关，就不要生成。
+
+示例：
+错误：
+TYPE: action
+他紧绷的嘴角似乎柔和了一丝，轻轻点了点头。
+
+正确：
+TYPE: action
+他把刚拆开的红包往林澈那边推了推，手指在屏幕上停了一下，示意对方收下。
+
+错误：
+TYPE: action
+他挤了挤眼睛，做了一个“以后我罩你”的口型。
+
+正确：
+TYPE: speech
 `;
 
         // --- 3. 【核心】构建AI调用参数 ---
@@ -19099,6 +19346,10 @@ MESSAGE_END
         let lastRenderedType = '';
         let renderedSpeechCount = 0;
         let renderedActionCount = 0;
+        const actionContextText = [
+            groupRecentContextDigest || '',
+            characterDossiersPrompt || ''
+        ].join('\n');
 
         for (const match of messageMatches) {
             const speakerName = match[1].trim();
@@ -19143,7 +19394,11 @@ MESSAGE_END
                 const actionText = stripOuterActionBrackets(content)
                     .replace(/^["“”]+|["“”]+$/g, '')
                     .trim();
-                if (actionText) {
+                if (actionText && isRepeatedRecentAction(group, actionText)) {
+                    console.warn('[跳过重复动作]', { actionText });
+                    continue;
+                }
+                if (actionText && !shouldSkipOfflineActionByQuality(actionText, actionContextText)) {
                     await sleep(800 + Math.random() * 700);
                     await createAndAddMessage(
                         {
@@ -19166,15 +19421,17 @@ MESSAGE_END
             content = cleanGroupSpeechContent(content);
             if (speakerProfile && content) {
                 await sleep(800 + Math.random() * 700);
-                await createAndAddMessage(
+                const savedSpeechMessage = await createAndAddMessage(
                     { type: 'text', content },
                     speakerProfile.id,
                     group,
                     true,
                     'chat'
                 );
-                renderedSpeechCount++;
-                lastRenderedType = 'speech';
+                if (savedSpeechMessage) {
+                    renderedSpeechCount++;
+                    lastRenderedType = 'speech';
+                }
             }
         }
 
@@ -19268,6 +19525,7 @@ async function triggerGroupChatAiReply(group) {
 
         const safeGroupHistoryText = buildSafeGroupHistoryText(group, _grpLatestUserMsgId, 40);
         const groupRecentContextDigest = buildGroupRecentContextDigest(group, _grpLatestUserMsgId, 40);
+        const groupRelationshipMatrixPrompt = await buildGroupRelationshipMatrixPrompt(group);
         const needPrivateMemory = doesInputNeedPrivateMemory(latestGroupInputText);
 
         let characterDossiersPrompt = '';
@@ -19335,6 +19593,27 @@ ${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，
 ${characterDossiersPrompt}
 --- 档案区结束 ---
 
+[群内关系矩阵｜最高优先级]
+${groupRelationshipMatrixPrompt}
+
+[称呼规则｜必须遵守]
+1. 角色称呼别人时，必须先看群内关系矩阵，不要凭空乱叫。
+2. 如果 A 是 B 的师父、长辈、上级，B 不能随便直呼其名，除非人设明确允许。
+3. 如果 A 是 B 的师兄、师姐、同门前辈，要按关系称呼，不要叫错成师父或徒弟。
+4. 如果关系不明确，宁可使用名字，不要乱编亲密称呼。
+5. 不要把用户和角色的关系、角色和角色之间的关系混在一起。
+6. 不要把群聊里的师门关系套到所有人身上。
+7. 如果角色关系里已经写了具体称呼，必须优先使用具体称呼。
+8. 如果关系网和人设中没有明确写 A 应该叫 B “师父 / 师兄 / 师弟 / 徒弟 / 长辈”，禁止凭空使用这些辈分称呼。
+9. 如果不确定称呼，优先叫对方名字，不要乱套师门关系。
+10. 每次发言前先确认“说话者是谁、被称呼者是谁、两人的关系是什么”。
+
+[关系不能乱编]
+1. 如果关系网里有明确关系，必须按关系网来。
+2. 如果关系网没有写，不能凭空把别人叫成师父、师兄、徒弟、长辈。
+3. 角色发言前先判断自己和对方的关系，再决定称呼。
+4. 如果不知道怎么称呼，用对方名字，别乱叫亲昵称呼或辈分称呼。
+
 [群聊当前轮次规则]
 1. 本轮不是续写整段群聊历史。
 2. 本轮只生成群成员对【当前用户最新输入】的反应。
@@ -19365,6 +19644,7 @@ ${characterDossiersPrompt}
 [禁用词列表] 绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦、小管家、小管家婆、小管家公、管家公、管婆、小助手、AI助手、智能助手、虚拟助手、机器人。
 绝对禁止用“小管家 / 小管家婆 / 小管家公 / 小助手 / AI助手 / 机器人”等称呼来称呼自己、称呼用户或称呼角色。角色应该像真实联系人一样说话，不要用服务型、工具型、客服型自称。
 ${FORBIDDEN_ROLE_WORDS_PROMPT}
+${FORBIDDEN_ACTION_CLICHES_PROMPT}
 [回复规则]
 1. 输出只能是 MESSAGE 脚本，不要附加解释。
 2. TYPE 必须是 speech 或 action。
@@ -19419,6 +19699,34 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
 6. 群聊是聊天，不是小说旁白。角色必须开口说话。
 7. 禁止一整轮只写“他看着、他点头、他拿出、他递给”这类动作。
 8. 如果角色送红包、转账、拿东西、靠近等动作后，必须紧跟一句 speech 解释或回应。
+
+【动作生成规则】
+1. action 必须根据当前上下文临场生成，不允许套固定神态模板。
+2. 每条 action 必须至少包含一个具体上下文元素，例如：当前提到的人、物品、红包、座位、门口、手机、聊天内容、刚刚的发言、当前场景里的具体物件。
+3. action 只写可被看见的行为，少写抽象心理和泛泛神态。
+4. 不要用“似乎 / 仿佛 / 眼底 / 嘴角 / 视线 / 神色 / 气场 / 氛围”来凑动作。
+5. 不要总写点头、看向、嘴角、眼神、口型、茶杯。
+6. 如果当前上下文没有合适动作，请不要硬写 action，直接输出 speech。
+7. 每轮最多 1 条 action；除非用户明确要求线下剧情推进，否则不要连续输出动作。
+8. action 不能脱离本轮话题，不能只是通用氛围描写。
+9. 如果动作和当前用户最新输入无关，就不要生成。
+
+示例：
+错误：
+TYPE: action
+他紧绷的嘴角似乎柔和了一丝，轻轻点了点头。
+
+正确：
+TYPE: action
+他把刚拆开的红包往林澈那边推了推，手指在屏幕上停了一下，示意对方收下。
+
+错误：
+TYPE: action
+他挤了挤眼睛，做了一个“以后我罩你”的口型。
+
+正确：
+TYPE: speech
+以后这种事别一个人扛，先在群里喊我。
 
 【额外提醒】
 每个角色可以输出多条 MESSAGE，但必须以 speech 为主，action 只是辅助。禁止连续输出多个 action。
@@ -19515,6 +19823,11 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
         let lastRenderedType = '';
         let renderedSpeechCount = 0;
         let renderedActionCount = 0;
+        const actionContextText = [
+            latestGroupInputText || '',
+            groupRecentContextDigest || '',
+            safeGroupHistoryText || ''
+        ].join('\n');
 
         for (const match of messageMatches) {
             const speakerName = match[1].trim();
@@ -19562,7 +19875,12 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
                     .replace(/^["“”]+|["“”]+$/g, '')
                     .trim();
 
-                if (actionText) {
+                if (actionText && isRepeatedRecentAction(group, actionText)) {
+                    console.warn('[跳过重复动作]', { actionText });
+                    continue;
+                }
+
+                if (actionText && !shouldSkipOfflineActionByQuality(actionText, actionContextText)) {
                     await sleep(800 + Math.random() * 700);
                     await createAndAddMessage(
                         {
@@ -19585,15 +19903,17 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
             content = cleanGroupSpeechContent(content);
             if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
                 await sleep(800 + Math.random() * 700);
-                await createAndAddMessage(
+                const savedSpeechMessage = await createAndAddMessage(
                     { type: 'text', content },
                     speakerProfile.id,
                     group,
                     true,
                     'chat'
                 );
-                renderedSpeechCount++;
-                lastRenderedType = 'speech';
+                if (savedSpeechMessage) {
+                    renderedSpeechCount++;
+                    lastRenderedType = 'speech';
+                }
             }
         }
 
@@ -20034,6 +20354,119 @@ function buildGroupMemberRelationshipSummary(contactProfile) {
     return memories.length ? memories.map(x => `- ${x}`).join('\n') : '暂无重要长期记忆';
 }
 
+async function collectRelationshipNetworksForGroup(group, allowedIds) {
+    const networks = [];
+    const candidateIds = new Set();
+
+    if (group?.id) candidateIds.add(group.id);
+
+    if (Array.isArray(group?.members)) {
+        group.members.forEach(id => {
+            if (id) candidateIds.add(id);
+        });
+    }
+
+    if (Array.isArray(group?.npcMembers)) {
+        group.npcMembers.forEach(npc => {
+            if (npc?.id) candidateIds.add(npc.id);
+        });
+    }
+
+    for (const id of candidateIds) {
+        try {
+            const data = await kokoMemory.get('relationshipNetworks', id);
+            if (data && Array.isArray(data.edges)) {
+                networks.push(data);
+            }
+        } catch (e) {
+            console.warn('[读取关系网失败]', id, e);
+        }
+    }
+
+    return networks;
+}
+
+async function buildGroupRelationshipMatrixPrompt(group) {
+    if (!group || !Array.isArray(group.members)) return '(暂无群内关系矩阵)';
+
+    const getProfile = (id) => {
+        if (id === 'myProfile' || id === 'user') return state.myProfile;
+        let profile = state.contacts.find(c => c.id === id);
+        if (profile) return profile;
+        if (Array.isArray(group.npcMembers)) {
+            profile = group.npcMembers.find(n => n.id === id);
+            if (profile) return profile;
+        }
+        return null;
+    };
+
+    const profiles = [];
+    group.members.forEach(id => {
+        const profile = getProfile(id);
+        if (profile && id !== 'myProfile' && id !== 'user' && !profiles.some(p => p.id === profile.id)) {
+            profiles.push(profile);
+        }
+    });
+
+    if (Array.isArray(group.npcMembers)) {
+        group.npcMembers.forEach(npc => {
+            if (npc && npc.id && !profiles.some(p => p.id === npc.id)) {
+                profiles.push(npc);
+            }
+        });
+    }
+
+    const lines = [];
+    const seenRelationLines = new Set();
+    const pushRelationLine = (line) => {
+        if (!line || seenRelationLines.has(line)) return;
+        seenRelationLines.add(line);
+        lines.push(line);
+    };
+    const allowedIds = new Set(['myProfile', 'user', ...profiles.map(p => p.id)]);
+
+    try {
+        const networks = await collectRelationshipNetworksForGroup(group, allowedIds);
+        networks.forEach(network => {
+            if (!network || !Array.isArray(network.edges)) return;
+
+            network.edges.forEach(edge => {
+                if (!edge || !allowedIds.has(edge.source) || !allowedIds.has(edge.target)) return;
+
+                const sourceProfile = getProfile(edge.source);
+                const targetProfile = getProfile(edge.target);
+                const sourceName = edge.source === 'myProfile' || edge.source === 'user'
+                    ? (state.myProfile?.name || '用户')
+                    : (sourceProfile?.name || edge.source);
+                const targetName = edge.target === 'myProfile' || edge.target === 'user'
+                    ? (state.myProfile?.name || '用户')
+                    : (targetProfile?.name || edge.target);
+                const relationship = String(edge.relationship || '').trim();
+                const detail = String(edge.detail || '').trim();
+                if (!relationship && !detail) return;
+
+                pushRelationLine(`- ${sourceName} -> ${targetName}: ${relationship || '关系已记录'}${detail ? ` | ${detail.slice(0, 120)}` : ''}`);
+            });
+        });
+    } catch (error) {
+        console.warn('[群内关系矩阵读取失败]', error);
+    }
+
+    profiles.forEach(profile => {
+        const contactProfile = state.contacts.find(c => c.id === profile.id) || profile;
+        const relationSummary = buildGroupMemberRelationshipSummary(contactProfile);
+        if (relationSummary && relationSummary !== '暂无重要长期记忆') {
+            lines.push(`【${profile.name} 的关系资料】\n${relationSummary}`);
+        }
+
+        if (contactProfile.persona) {
+            lines.push(`【${profile.name} 的人设重点】\n${String(contactProfile.persona || '').slice(0, 300)}`);
+        }
+    });
+
+    return lines.length ? lines.join('\n\n') : '(暂无群内关系矩阵)';
+}
+
 function buildCrossSceneMemorySummary(contact, group) {
     const lines = [];
 
@@ -20316,12 +20749,12 @@ function doesInputNeedPrivateMemory(text) {
 }
 
 function cleanGroupSpeechContent(text) {
-    return String(text || '')
+    return cleanAiSpeechText(
+        String(text || '')
         .trim()
         .replace(/^["“”]+|["“”]+$/g, '')
-        .replace(/^\s*[（(]\s*/, '')
-        .replace(/\s*[）)]\s*$/, '')
-        .trim();
+        .trim()
+    );
 }
 
 function inferGroupMessageType(content) {
@@ -20484,6 +20917,7 @@ ${musicListString}
 5. 第一条回复必须直接回应当前用户最新输入。
 
 ${FORBIDDEN_ROLE_WORDS_PROMPT}
+${FORBIDDEN_ACTION_CLICHES_PROMPT}
 ${isNarrativeMode ? `
 【线下叙事输出格式：绝对强制】
 你必须只返回一个严格 JSON 对象，禁止 markdown，禁止 \`\`\`json，禁止解释说明。
@@ -20654,6 +21088,7 @@ const NORMAL_BASE_PROMPT = `
 - 机器人
 绝对禁止用“小管家 / 小管家婆 / 小管家公 / 小助手 / AI助手 / 机器人”等称呼来称呼自己、称呼用户或称呼角色。角色应该像真实联系人一样说话，不要用服务型、工具型、客服型自称。
 ${FORBIDDEN_ROLE_WORDS_PROMPT}
+${FORBIDDEN_ACTION_CLICHES_PROMPT}
 
 [回复规则]
 1. 你的回复可以包含多条消息，每条消息占一行，一行消息禁止长篇大论。
@@ -20779,6 +21214,7 @@ const NARRATIVE_BASE_PROMPT = `
 - 机器人
 绝对禁止用“小管家 / 小管家婆 / 小管家公 / 小助手 / AI助手 / 机器人”等称呼来称呼自己、称呼用户或称呼角色。角色应该像真实联系人一样说话，不要用服务型、工具型、客服型自称。
 ${FORBIDDEN_ROLE_WORDS_PROMPT}
+${FORBIDDEN_ACTION_CLICHES_PROMPT}
 
 [！！！输出格式：绝对强制 JSON，违反即视为错误！！！]
 你的每一条回复，必须且只能是一个严格的 JSON 对象，最外层包含 events、heart_voice 两个字段。diary 字段可以兼容解析，但不要主动输出。
@@ -28614,7 +29050,11 @@ async function showRelationshipScreen(contactId) {
     screen.dataset.currentContactId = contactId;
 
     await renderRelationshipNetwork(contactId);
-    await renderRelationshipGraph(contactId); 
+    setTimeout(() => {
+        renderRelationshipGraph(contactId).catch(err => {
+            console.error('[关系网延迟渲染失败]', err);
+        });
+    }, 80);
 }
 /**
  * (新) 辅助函数：将点击的关系填充到编辑器中
@@ -28969,101 +29409,146 @@ async function deleteCharacter(charId) {
 async function renderRelationshipGraph(contactId) {
     const graphContainer = document.getElementById('relationship-graph-container');
     if (!graphContainer) return;
-    const myChart = echarts.init(graphContainer);
+    try {
+        let networkData = await kokoMemory.get('relationshipNetworks', contactId);
+        const contact = state.contacts.find(c => c.id === contactId);
 
-    // 这就是关键：我们拿到了当前这个聊天的联系人对象
-    const contact = state.contacts.find(c => c.id === contactId); 
-    const networkData = await kokoMemory.get('relationshipNetworks', contactId);
-    
-    if(!networkData || !networkData.nodes || !networkData.nodes.length === 0) {
-        myChart.clear(); 
-        return;
-    }
+        if (!contact) {
+            graphContainer.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">未找到当前角色</div>';
+            return;
+        }
 
-    // 1. 【核心修正】我们不再从头构建节点...
-    const nodeInfos = networkData.nodes.map(node => {
-        const isCenter = node.id === contactId;
-        
-        let finalName = node.name;
-        let finalAvatar = node.avatar;
+        if (!networkData) networkData = { contactId, nodes: [], edges: [] };
+        if (!Array.isArray(networkData.nodes)) networkData.nodes = [];
+        if (!Array.isArray(networkData.edges)) networkData.edges = [];
 
-        if (node.id === contactId) {
-            // 刷新关系网的主人公 (这部分不变)
-            finalName = contact.name;
-            finalAvatar = contact.avatar;
-        
-        } else if (node.id === 'myProfile') {
-            // ▼▼▼ ✨ 这就是你想要的修复！✨ ▼▼▼
-            // 刷新“你”（用户）
-            // 优先使用当前 contact(TA) 里设置的马甲，如果没设置，再用全局 profile
-            finalName = contact.customUserName || state.myProfile.name;
-            finalName += ' (你)'; // 确保 "(你)" 标签还在
-            finalAvatar = contact.customUserAvatar || state.myProfile.avatar;
-            // ▲▲▲ ✨ 修复结束 ✨ ▲▲▲
-            
-        } else if (node.isContact) {
-            // (刷新其他联系人的代码，这部分不变)
-            const contactProfile = state.contacts.find(c => c.id === node.id);
-            if(contactProfile) {
-                finalName = contactProfile.name;
-                finalAvatar = contactProfile.avatar;
+        if (!networkData.nodes.some(n => n.id === contactId)) {
+            networkData.nodes.push({
+                id: contact.id,
+                name: contact.name,
+                avatar: contact.avatar,
+                isContact: true
+            });
+        }
+
+        if (!networkData.nodes.some(n => n.id === 'myProfile')) {
+            networkData.nodes.push({
+                id: 'myProfile',
+                name: (state.myProfile?.name || '我') + ' (你)',
+                avatar: state.myProfile?.avatar || '',
+                isContact: true
+            });
+        }
+
+        await kokoMemory.put('relationshipNetworks', networkData);
+
+        if (networkData.nodes.length === 0) {
+            graphContainer.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">暂无关系节点</div>';
+            return;
+        }
+
+        const oldChart = echarts.getInstanceByDom(graphContainer);
+        if (oldChart) oldChart.dispose();
+
+        const myChart = echarts.init(graphContainer);
+
+        const nodeInfos = networkData.nodes.map(node => {
+            const isCenter = node.id === contactId;
+            let finalName = node.name || '未命名';
+            let finalAvatar = node.avatar || '';
+
+            if (node.id === contactId) {
+                finalName = contact.name || finalName;
+                finalAvatar = contact.avatar || finalAvatar;
+            } else if (node.id === 'myProfile') {
+                finalName = `${contact.customUserName || state.myProfile?.name || '我'} (你)`;
+                finalAvatar = contact.customUserAvatar || state.myProfile?.avatar || finalAvatar;
+            } else {
+                const contactProfile = state.contacts.find(c => c.id === node.id);
+                if (contactProfile) {
+                    finalName = contactProfile.name || finalName;
+                    finalAvatar = contactProfile.avatar || finalAvatar;
+                }
             }
+
+            return {
+                id: node.id,
+                name: finalName,
+                avatar: finalAvatar || `https://via.placeholder.com/${isCenter ? 60 : 45}/DDD/666?text=${encodeURIComponent(finalName.substring(0, 1))}`,
+                size: isCenter ? 60 : 45
+            };
+        });
+
+        let circularImageUrls = [];
+        try {
+            circularImageUrls = await Promise.all(
+                nodeInfos.map(node => createCircularImage(node.avatar, node.size).catch(() => node.avatar))
+            );
+        } catch (imgErr) {
+            console.warn('[关系网头像裁剪失败，使用原头像]', imgErr);
+            circularImageUrls = nodeInfos.map(node => node.avatar);
         }
-        
-        return {
+
+        const nodesForGraph = nodeInfos.map((node, index) => ({
             id: node.id,
-            name: finalName, // <-- 现在用的是修复后的名字
-            avatar: finalAvatar || `https://via.placeholder.com/${isCenter ? 60 : 45}/DDD/666?text=${finalName.substring(0,1)}`, // <-- 现在用的是修复后的头像
-            size: isCenter ? 60 : 45
-        }
-    });
+            name: node.name,
+            symbolSize: node.size,
+            symbol: circularImageUrls[index] ? 'image://' + circularImageUrls[index] : 'circle',
+            label: {
+                show: true,
+                position: 'bottom',
+                color: '#333',
+                fontWeight: 'bold'
+            },
+            itemStyle: {
+                borderWidth: 2,
+                borderColor: '#fff',
+                shadowBlur: 6,
+                shadowColor: 'rgba(0, 0, 0, 0.4)'
+            }
+        }));
 
-    // 2. 并行处理所有节点的图片 (这部分不变)
-    const imagePromises = nodeInfos.map(node => createCircularImage(node.avatar, node.size));
-    const circularImageUrls = await Promise.all(imagePromises);
-
-    // 3. 用裁剪好的图片数据，构建ECharts节点 (这部分不变)
-    const nodesForGraph = nodeInfos.map((node, index) => ({
-        id: node.id,
-        name: node.name, // 这里会自动用上我们刚刚修复好的 finalName
-        symbolSize: node.size,
-        symbol: 'image://' + circularImageUrls[index], // 这里会自动用上修复好的头像
-        label: {
-            show: true,
-            position: 'bottom',
-            color: '#333',
-            fontWeight: 'bold'
-        },
-        itemStyle: {
-            borderWidth: 2,
-            borderColor: '#fff',
-            shadowBlur: 6,
-            shadowColor: 'rgba(0, 0, 0, 0.4)'
-        }
-    }));
-
-    // 4. 配置图表 (不变)
-    const option = {
-        tooltip: {},
-        series: [{
-            type: 'graph',
-            layout: 'force',
-            roam: true,
-            force: { repulsion: 250, edgeLength: 150, gravity: 0.05 },
-            data: nodesForGraph, //把更新后的节点数据喂给图表
-            links: networkData.edges ? networkData.edges.map(edge => ({
+        const validNodeIds = new Set(nodesForGraph.map(n => n.id));
+        const links = (networkData.edges || [])
+            .filter(edge => edge && validNodeIds.has(edge.source) && validNodeIds.has(edge.target))
+            .map(edge => ({
                 source: edge.source,
                 target: edge.target,
-                label: { show: true, formatter: edge.relationship },
-                tooltip: { formatter: edge.detail }
-            })) : [],
-            lineStyle: { opacity: 0.9, width: 2, curveness: 0.1 }
-        }]
-    };
+                label: { show: true, formatter: edge.relationship || '' },
+                tooltip: { formatter: edge.detail || '' }
+            }));
 
-    // 5. 应用配置 (不变)
-    myChart.setOption(option);
-    window.addEventListener('resize', () => { myChart.resize(); });
+        const option = {
+            tooltip: {},
+            series: [{
+                type: 'graph',
+                layout: 'force',
+                roam: true,
+                force: { repulsion: 250, edgeLength: 150, gravity: 0.05 },
+                data: nodesForGraph,
+                links,
+                lineStyle: { opacity: 0.9, width: 2, curveness: 0.1 }
+            }]
+        };
+
+        myChart.setOption(option);
+
+        setTimeout(() => {
+            try { myChart.resize(); } catch (e) {}
+        }, 100);
+
+        window.addEventListener('resize', () => {
+            try { myChart.resize(); } catch (e) {}
+        });
+    } catch (err) {
+        console.error('[关系网渲染失败]', err);
+        graphContainer.innerHTML = `
+            <div style="padding:20px;color:#888;text-align:center;">
+                关系网加载失败，请检查控制台错误。<br>
+                ${err?.message || ''}
+            </div>
+        `;
+    }
 }
 // (优化版) 打开“添加角色到名册”模态框
 async function openAddToRosterModal() {
