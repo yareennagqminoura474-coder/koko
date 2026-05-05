@@ -19001,6 +19001,14 @@ SPEAKER: [角色名]
 TYPE: speech 或 action
 CONTENT: [单条内容]
 MESSAGE_END
+
+[动作/台词比例硬性规则]
+1. 群聊自由聊天不能全是 action，必须至少包含 2 条 speech。
+2. speech 数量必须大于或等于 action 数量。
+3. 第一条 MESSAGE 必须是 speech。
+4. action 只能辅助氛围，不能连续超过 1 条。
+5. 群成员自由聊天的重点是互相说话，不是旁白描述。
+6. 如果有 action，下一条必须尽量是 speech。
 `;
 
         // --- 3. 【核心】构建AI调用参数 ---
@@ -19033,7 +19041,7 @@ MESSAGE_END
         });
 
         // --- 4. 【核心】调用 generateAiResponse 的“后门” ---
-        const rawResponse = await generateAiResponse(
+        let rawResponse = await generateAiResponse(
             null,                   
             [],                     
             null,                   
@@ -19044,11 +19052,53 @@ MESSAGE_END
         
         // --- 5. 解析并显示AI的回复 ---
         const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*(?:TYPE:\s*(speech|action)\s*)?CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
-        const messageMatches = Array.from(rawResponse.matchAll(messageRegex));
+        let messageMatches = Array.from(rawResponse.matchAll(messageRegex));
+        let { speechCount, actionCount } = getGroupMessageTypeStats(messageMatches);
+
+        if (messageMatches.length > 0 && speechCount === 0) {
+            console.warn('[群聊自由聊天脚本比例异常：全是动作，准备重试]', {
+                groupName: group.name,
+                actionCount,
+                rawPreview: rawResponse.slice(0, 1000)
+            });
+
+            const retryMessages = [
+                ...requestMessages,
+                {
+                    role: 'user',
+                    content: '你上一次输出全是 action，没有任何角色说话，这是错误的。请重新输出 MESSAGE 脚本：必须至少包含 2 条 TYPE: speech，第一条必须是 speech，speech 数量必须大于或等于 action 数量，禁止全是动作。'
+                }
+            ];
+
+            rawResponse = await generateAiResponse(
+                null,
+                [],
+                null,
+                false,
+                'chat',
+                retryMessages
+            );
+
+            messageMatches = Array.from(rawResponse.matchAll(messageRegex));
+            ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
+        }
 
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的自由聊天内容。");
         }
+
+        const shouldForceSpeechFallback = messageMatches.length > 0 && speechCount === 0;
+        if (shouldForceSpeechFallback) {
+            console.warn('[群聊自由聊天重试后仍无台词，启用兜底]', {
+                groupName: group.name,
+                actionCount,
+                rawPreview: rawResponse.slice(0, 1000)
+            });
+        }
+
+        let lastRenderedType = '';
+        let renderedSpeechCount = 0;
+        let renderedActionCount = 0;
 
         for (const match of messageMatches) {
             const speakerName = match[1].trim();
@@ -19074,6 +19124,22 @@ MESSAGE_END
             }
 
             if (messageType === 'action') {
+                if (!shouldForceSpeechFallback && renderedSpeechCount === 0 && speechCount > 0) {
+                    console.warn('[跳过开场动作卡片，优先显示台词]', { speakerName, content });
+                    continue;
+                }
+                if (lastRenderedType === 'action') {
+                    console.warn('[跳过连续动作卡片]', { speakerName, content });
+                    continue;
+                }
+                if (shouldForceSpeechFallback && renderedActionCount >= 1) {
+                    console.warn('[重试后仍无台词，仅保留第一条动作卡片]', { speakerName, content });
+                    continue;
+                }
+                if (renderedActionCount >= renderedSpeechCount && renderedSpeechCount > 0) {
+                    console.warn('[跳过过量动作卡片]', { speakerName, content });
+                    continue;
+                }
                 const actionText = stripOuterActionBrackets(content)
                     .replace(/^["“”]+|["“”]+$/g, '')
                     .trim();
@@ -19091,6 +19157,8 @@ MESSAGE_END
                         true,
                         'chat'
                     );
+                    renderedActionCount++;
+                    lastRenderedType = 'action';
                 }
                 continue;
             }
@@ -19105,7 +19173,23 @@ MESSAGE_END
                     true,
                     'chat'
                 );
+                renderedSpeechCount++;
+                lastRenderedType = 'speech';
             }
+        }
+
+        if (shouldForceSpeechFallback && renderedSpeechCount === 0) {
+            const fallbackSpeaker = allMemberProfiles.find(p => p && !(group.mutedMembers || []).includes(p.id)) || allMemberProfiles[0];
+            await createAndAddMessage(
+                {
+                    type: 'text',
+                    content: '我先说一句，别光看动作了，这事我们得当面讲清楚。'
+                },
+                fallbackSpeaker?.id || 'system',
+                group,
+                true,
+                'chat'
+            );
         }
 
         await autoSaveGroupRecentMemoryForMembers(group, 12);
@@ -19325,6 +19409,19 @@ ${safeGroupHistoryText}
 第一条回复必须直接回应当前用户最新输入。
 ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须结合本群最近连续上下文来接话，但仍要先回应当前输入。' : '如果当前用户最新输入和本群最近连续上下文明显属于同一件事，必须自然承接；如果明显是新话题，才切换到新话题。'}
 可以保留上一轮的情绪余温，也可以在同一话题下继续推进，但不要无关地翻旧账。
+
+【动作/台词比例硬性规则】
+1. 一轮回复绝对不能全是 action，必须至少包含 2 条 speech。
+2. speech 数量必须大于或等于 action 数量。
+3. 第一条 MESSAGE 必须是 speech，并且必须直接回应当前用户最新输入。
+4. action 只能作为辅助氛围，不能连续超过 1 条。
+5. 如果输出了 action，下一条必须尽量接 speech。
+6. 群聊是聊天，不是小说旁白。角色必须开口说话。
+7. 禁止一整轮只写“他看着、他点头、他拿出、他递给”这类动作。
+8. 如果角色送红包、转账、拿东西、靠近等动作后，必须紧跟一句 speech 解释或回应。
+
+【额外提醒】
+每个角色可以输出多条 MESSAGE，但必须以 speech 为主，action 只是辅助。禁止连续输出多个 action。
 `;
 
         const finalRequestMessages = [
@@ -19360,7 +19457,7 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
             historyCount: Array.isArray(group.history) ? group.history.length : 0
         });
 
-        const rawResponse = await generateAiResponse(
+        let rawResponse = await generateAiResponse(
             null,
             [],
             null,
@@ -19370,11 +19467,54 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
         );
 
         const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*(?:TYPE:\s*(speech|action)\s*)?CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
-        const messageMatches = Array.from(rawResponse.matchAll(messageRegex));
+        let messageMatches = Array.from(rawResponse.matchAll(messageRegex));
+
+        let { speechCount, actionCount } = getGroupMessageTypeStats(messageMatches);
+
+        if (messageMatches.length > 0 && speechCount === 0) {
+            console.warn('[群聊脚本比例异常：全是动作，准备重试]', {
+                groupName: group.name,
+                actionCount,
+                rawPreview: rawResponse.slice(0, 1000)
+            });
+
+            const retryMessages = [
+                ...finalRequestMessages,
+                {
+                    role: 'user',
+                    content: '你上一次输出全是 action，没有任何角色说话，这是错误的。请重新输出 MESSAGE 脚本：必须至少包含 2 条 TYPE: speech，第一条必须是 speech，speech 数量必须大于或等于 action 数量，禁止全是动作。'
+                }
+            ];
+
+            rawResponse = await generateAiResponse(
+                null,
+                [],
+                null,
+                false,
+                'chat',
+                retryMessages
+            );
+
+            messageMatches = Array.from(rawResponse.matchAll(messageRegex));
+            ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
+        }
 
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的群聊脚本。");
         }
+
+        const shouldForceSpeechFallback = messageMatches.length > 0 && speechCount === 0;
+        if (shouldForceSpeechFallback) {
+            console.warn('[群聊脚本重试后仍无台词，启用兜底]', {
+                groupName: group.name,
+                actionCount,
+                rawPreview: rawResponse.slice(0, 1000)
+            });
+        }
+
+        let lastRenderedType = '';
+        let renderedSpeechCount = 0;
+        let renderedActionCount = 0;
 
         for (const match of messageMatches) {
             const speakerName = match[1].trim();
@@ -19402,6 +19542,22 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
             }
 
             if (messageType === 'action') {
+                if (!shouldForceSpeechFallback && renderedSpeechCount === 0 && speechCount > 0) {
+                    console.warn('[跳过开场动作卡片，优先显示台词]', { speakerName, content });
+                    continue;
+                }
+                if (lastRenderedType === 'action') {
+                    console.warn('[跳过连续动作卡片]', { speakerName, content });
+                    continue;
+                }
+                if (shouldForceSpeechFallback && renderedActionCount >= 1) {
+                    console.warn('[重试后仍无台词，仅保留第一条动作卡片]', { speakerName, content });
+                    continue;
+                }
+                if (renderedActionCount >= renderedSpeechCount && renderedSpeechCount > 0) {
+                    console.warn('[跳过过量动作卡片]', { speakerName, content });
+                    continue;
+                }
                 const actionText = stripOuterActionBrackets(content)
                     .replace(/^["“”]+|["“”]+$/g, '')
                     .trim();
@@ -19420,6 +19576,8 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
                         true,
                         'chat'
                     );
+                    renderedActionCount++;
+                    lastRenderedType = 'action';
                 }
                 continue;
             }
@@ -19434,7 +19592,23 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
                     true,
                     'chat'
                 );
+                renderedSpeechCount++;
+                lastRenderedType = 'speech';
             }
+        }
+
+        if (shouldForceSpeechFallback && renderedSpeechCount === 0) {
+            const fallbackSpeaker = allMemberProfiles.find(p => p && !(group.mutedMembers || []).includes(p.id)) || allMemberProfiles[0];
+            await createAndAddMessage(
+                {
+                    type: 'text',
+                    content: '我先说一句，别光看动作了，这事我们得当面讲清楚。'
+                },
+                fallbackSpeaker?.id || 'system',
+                group,
+                true,
+                'chat'
+            );
         }
 
         await autoSaveGroupRecentMemoryForMembers(group, 12);
@@ -20161,6 +20335,21 @@ function inferGroupMessageType(content) {
     }
 
     return 'speech';
+}
+
+function getGroupMessageTypeStats(messageMatches) {
+    const parsedMessageTypes = (Array.isArray(messageMatches) ? messageMatches : []).map(match => {
+        let t = String(match?.[2] || 'speech').trim().toLowerCase();
+        const content = String(match?.[3] || '').trim();
+        if (!match?.[2]) t = inferGroupMessageType(content);
+        if (t !== 'speech' && t !== 'action') t = 'speech';
+        return t;
+    });
+
+    const speechCount = parsedMessageTypes.filter(t => t === 'speech').length;
+    const actionCount = parsedMessageTypes.filter(t => t === 'action').length;
+
+    return { parsedMessageTypes, speechCount, actionCount };
 }
 
 async function saveGroupCrossSceneMemory(group, content, relatedContactIds = []) {
