@@ -19384,6 +19384,14 @@ function doesCurrentInputReferToPrevious(text) {
     return /(刚刚|刚才|上一句|上一轮|前面|继续|接着|你还没回答|那个问题|刚说的|刚才那个|刚刚那个|前面那个)/.test(s);
 }
 
+function removePreviousTurnCallbackIfNotAllowed(text, latestUserInput) {
+    if (doesCurrentInputReferToPrevious(latestUserInput)) return text;
+    let s = String(text || '');
+    s = s.replace(/^(你刚刚|你刚才|刚才那句|上一句|你前面说|从你刚刚|刚刚那种|刚才那个|刚刚那个|还在想刚才|你刚说)[^。！？!?]*[。！？!?]/, '');
+    s = s.replace(/(你刚刚|你刚才|刚才那句|上一句|你前面说|刚才那个|刚刚那个)[^。！？!?]*[。！？!?]/g, '');
+    return s.trim();
+}
+
 function buildCurrentTurnBoundaryRules(mode, allowPreviousCallback) {
     const lines = [
         '【Z0. 当前轮次边界 — 极高优先级】',
@@ -19406,6 +19414,14 @@ function buildCurrentTurnBoundaryRules(mode, allowPreviousCallback) {
         lines.push('线下模式：action 可以承接场景连续性，但 speech 必须优先回应当前用户最新输入，不要反复追旧账。');
     } else if (mode === 'group') {
         lines.push('群聊模式：所有可控角色都必须优先接住当前用户最新输入，不要所有人都继续上一轮话题。');
+    } else if (mode === 'private') {
+        lines.push('【私聊当前轮次强边界】');
+        lines.push('上一轮角色情绪和动作只用于保持人物状态，不等于继续上一轮话题。');
+        lines.push('本轮必须先判断当前用户最新输入在表达什么，再决定如何回应。');
+        if (!allowPreviousCallback) {
+            lines.push('当前用户没有明确提到上一轮（刚刚/刚才/上一句/继续/接着/你还没回答/前面那个），禁止主动补答上一轮、解释上一轮、继续上一轮问题。');
+            lines.push('可以保留情绪余温（别扭、生气、冷淡、亲近、沉默），但回复内容必须围绕当前用户最新输入，不能继续回答上一轮具体内容。');
+        }
     }
 
     return lines.join('\n');
@@ -19576,7 +19592,8 @@ const NORMAL_BASE_PROMPT = `
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
-以下是你和用户最近按【时间顺序】发生的所有互动记录，包含了[私聊]和[论坛]两个场景。这是你决策和回应的【最高优先级】信息源。在回复前，你必须仔细阅读并理解所有记录。
+以下是你和用户最近按【时间顺序】发生的所有互动记录，包含了[私聊]和[论坛]两个场景。
+【历史背景，仅供理解关系和情绪】以下内容不是本轮要回答的问题。禁止把这里面的上一轮用户发言当成当前输入。禁止主动补答旧问题。除非当前用户明确说"继续刚刚/上一句/前面那个/你还没回答"，否则不能把旧话题作为回复重点。
 ---
 {{memory_stream}}
 ---
@@ -20143,7 +20160,7 @@ ${memoriesList}
 
                 let personaDirectives = "";
                 if (contact?.persona) { personaDirectives += `\n\n# 核心角色指令 (Your Core Role Directive)\n---\n这是你的核心身份，你必须严格、完全地代入以下角色进行对话：\n${contact.persona}\n---`; }
-                personaDirectives += `\n\n# 角色的最新心声 (Your Last Recorded Heart Voice)\n---\n这是你上次回复时的内心状态，请参考此状态以保持情感连贯性：\n${lastHeartVoiceString}\n---`;
+                personaDirectives += `\n\n# 角色的最新心声 (Your Last Recorded Heart Voice)\n---\n【上一轮角色回复心声，仅用于避免重复】\n这不是本轮要继续回答的内容。不要顺着心声继续上一轮话题。只用它避免重复措辞、保持角色情感状态。当前用户没提上一轮时，不要引用里面的具体话题。\n${lastHeartVoiceString}\n---`;
                 if (contact?.userPersona) { personaDirectives += `\n\n# 对话者信息 (Your Counterpart's Information)\n---\n与你对话的用户的角色设定如下，请将TA视为真实存在的角色并进行互动：\n${contact.userPersona}\n---`; }
                 
                 const firstLineEndIndex = finalSystemPrompt.indexOf(']');
@@ -20595,6 +20612,10 @@ ${qzoneContextText}
                         : '';
                     const _allowPrev = doesCurrentInputReferToPrevious(_latestInputText);
                     systemContent += '\n\n' + buildCurrentTurnBoundaryRules(isNarrativeMode ? 'offline' : 'private', _allowPrev);
+                    console.log('[私聊当前输入]', {
+                        latestUserInput: _latestInputText,
+                        allowPreviousCallback: _allowPrev
+                    });
                 } catch (_e) { /* 静默忽略，不影响主流程 */ }
 
                 // (你原来的 history 转换 messages 逻辑，这里是图文支持的关键)
@@ -22529,6 +22550,19 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
     const extractionRegex = /\[发送了一段静态内容，文本是：["']([\s\S]*?)["']\]/g;
     conversation = conversation.replace(extractionRegex, '').trim();
 
+    // 私聊追旧过滤：提取当前用户最新输入（仅私聊使用）
+    let _privateChatLatestInput = '';
+    if (effectiveChatContext && !effectiveChatContext.isGroup) {
+        try {
+            const _lum = (effectiveChatContext.history || []).filter(
+                m => m.sender === 'user' && !['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type)
+            ).slice(-1)[0];
+            _privateChatLatestInput = _lum
+                ? (typeof _lum.content === 'string' ? _lum.content : (_lum.content?.text || ''))
+                : '';
+        } catch (_e) { /* 静默忽略 */ }
+    }
+
  // ========================= 【核心修复：心声解析】 =========================
 let heartVoiceContent = null;
 
@@ -23653,12 +23687,24 @@ case 'takeout': {
 
                     // 如果删掉指令后还有内容，就发送
                     if (finalContent) {
-                        await createAndAddMessage({ 
-                            type: 'text', 
-                            content: finalContent,
+                        let _contentToSend = finalContent;
+                        if (!effectiveChatContext.isGroup) {
+                            _contentToSend = removePreviousTurnCallbackIfNotAllowed(finalContent, _privateChatLatestInput);
+                            console.log('[私聊追旧检测]', {
+                                latestUserInput: _privateChatLatestInput,
+                                content: _contentToSend,
+                                looksLikePreviousCallback: /(你刚刚|你刚才|刚才那句|上一句|你前面说|刚才那个|刚刚那个)/.test(_contentToSend)
+                            });
+                        }
+                        if (!_contentToSend) {
+                            continue;
+                        }
+                        await createAndAddMessage({
+                            type: 'text',
+                            content: _contentToSend,
                             quote: quoteData // <--- ✨ 注入引用数据
                         }, senderProfile.id, effectiveChatContext, false, 'chat');
-                        
+
                         await sleep(400 + Math.random() * 400);
                     }
                 }
