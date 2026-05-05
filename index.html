@@ -427,6 +427,7 @@
         .message { padding: 6px 10px; border-radius: 22px; position: relative; word-wrap: break-word; min-width: 50px; box-shadow: 0 2px 4px var(--shadow-color); font-size: 14px; white-space: pre-wrap;}
         .message-timestamp { font-size: 11px; color: #aaa; margin-top: 4px; padding: 0 5px; }
         .message-wrapper.selected .message, .message-wrapper.selected .message.red-packet, .message-wrapper.selected .message.voice, .message-wrapper.selected .message.picture-description { background-color: #bde0fe !important; }
+.offline-action-card.selected { background-color: #bde0fe !important; border-color: #90caf9 !important; }
 /* ▼▼▼ 用这个新的动画效果，替换掉你原来的 @keyframes fadeIn ▼▼▼ */
 @keyframes bubble-fade-in {
     from {
@@ -15258,7 +15259,7 @@ async function exitEditMode() {
     // 4. ✨【核心修复】✨
     //   我们不再粗暴地刷新整个聊天，而是温柔地
     //   把所有“蓝色高亮”的消息都取消掉，这样就不会乱跳了！
-    document.querySelectorAll('.message-wrapper.selected').forEach(el => {
+    document.querySelectorAll('.message-wrapper.selected, .offline-action-card.selected').forEach(el => {
         el.classList.remove('selected');
     });
     
@@ -15692,6 +15693,15 @@ if (contact.customBubbleCss) {
     // 3. 关键：appendChild 会把它放在 <head> 的末尾，确保它覆盖所有其他主题
     document.head.appendChild(styleTag);
 }
+            // 记录从群聊切换到私聊的状态，用于私聊群聊上下文触发判断
+            const previousContact = state.activeChatId ? state.contacts.find(c => c.id === state.activeChatId) : null;
+            if (previousContact && previousContact.isGroup && contact && !contact.isGroup) {
+                state.lastOpenedChatWasGroup = true;
+                state.lastGroupChatExitAt = Date.now();
+                state.lastGroupChatId = previousContact.id;
+            } else if (contact && contact.isGroup) {
+                state.lastOpenedChatWasGroup = false;
+            }
             state.activeChatId = contactId;
             // 在 openChat 函数中...
 
@@ -19837,6 +19847,51 @@ function buildRecentPrivateChatDigest(contactProfile, limit = 12) {
     return lines.join('\n');
 }
 
+function buildPrivateRecentContextDigest(contact, latestMsgId, limit = 30) {
+    if (!contact || !Array.isArray(contact.history)) return '(暂无私聊上下文)';
+
+    const myProfile = state.myProfile || {};
+    const blockedTypes = ['system_notification', 'loading', 'error', 'heart_voice'];
+
+    const history = contact.history
+        .filter(m => m && !blockedTypes.includes(m.type))
+        .slice(-limit);
+
+    const lines = history.map((m, index) => {
+        const isUser = m.sender === 'user' || m.sender === 'myProfile';
+        const name = isUser ? (myProfile.name || '我') : (contact.name || '角色');
+
+        let content = '';
+        if (typeof m.content === 'string') {
+            content = m.content;
+        } else if (m.content && typeof m.content === 'object') {
+            content = m.content.text || m.content.content || m.content.description || JSON.stringify(m.content);
+        }
+
+        if (m.type === 'voice') {
+            content = `【语音】${content}`;
+        } else if (m.type === 'image' || m.type === 'uploaded_image' || m.type === 'picture_description') {
+            content = `【图片】${content || '发送了一张图片'}`;
+        } else if (m.type === 'transfer') {
+            content = `【转账】${content}`;
+        } else if (m.type === 'red_packet') {
+            content = `【红包】${content}`;
+        } else if (m.type === 'offlineAction') {
+            content = `【动作】${stripOuterActionBrackets(content)}`;
+        } else if (m.type === 'offlineSpeech') {
+            content = `【线下发言】${content}`;
+        }
+
+        content = String(content || '').replace(/<[^>]+>/g, '').trim();
+        if (!content) return '';
+
+        const currentMark = m.id === latestMsgId ? ' ← 当前用户最新输入' : '';
+        return `${index + 1}. ${name}: ${content}${currentMark}`;
+    }).filter(Boolean);
+
+    return lines.join('\n') || '(暂无私聊上下文)';
+}
+
 function buildPrivateGroupMemorySummary(contact) {
     const lines = [];
 
@@ -19935,6 +19990,37 @@ function buildRecentGroupChatDigestForContact(contact, limit = 20) {
         });
 
     return lines.length ? lines.join('\n\n') : '暂无相关群聊近况';
+}
+
+function shouldUseGroupContextInPrivateChat(latestInputText, contact, recentGroupChatDigest) {
+    const text = String(latestInputText || '').trim();
+    if (!contact || contact.isGroup) return false;
+    if (!recentGroupChatDigest || recentGroupChatDigest === '暂无相关群聊近况') return false;
+
+    // 1. 明确提到群聊关键词，直接启用
+    const explicitGroupKeywords = [
+        '群里', '群聊', '刚刚群', '刚才群', '群里面',
+        '她刚才说', '他刚才说', '他们刚才说', '她在群里', '他在群里',
+        '刚才那个群', '群里那个', '群里的', '你们刚才', '刚才你们'
+    ];
+    if (explicitGroupKeywords.some(k => text.includes(k))) return true;
+
+    // 2. 短句/指代句：只在刚从群聊切回私聊（3分钟内）才启用
+    const ambiguousFollowUpPatterns = [
+        '你怎么看', '你觉得呢', '什么意思', '她什么意思', '他什么意思',
+        '然后呢', '继续', '那怎么办', '怎么办', '为什么',
+        '这个呢', '那个呢', '她呢', '他呢', '所以呢'
+    ];
+    const isAmbiguousFollowUp = ambiguousFollowUpPatterns.some(k => text === k || text.includes(k));
+
+    const justFromGroup =
+        state.lastOpenedChatWasGroup === true &&
+        state.lastGroupChatExitAt &&
+        (Date.now() - state.lastGroupChatExitAt < 3 * 60 * 1000);
+
+    if (justFromGroup && isAmbiguousFollowUp) return true;
+
+    return false;
 }
 
 function doesInputNeedPrivateMemory(text) {
@@ -21270,29 +21356,31 @@ ${qzoneContextText}
                         isNarrativeMode
                     });
 
-                    const groupMemorySection = (contact && !contact.isGroup) ? `
-[相关群聊记忆]
+                    // === 构建 userTask ===
+                    const safeRecentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, 30);
+                    const recentHistoryText = formatRecentHistoryForPrompt(safeRecentHistory, myProfile, contact);
+                    const privateRecentContextDigest = buildPrivateRecentContextDigest(contact, _latestUserMsgId, 30);
+                    const latestInputText = _latestInputText || '';
+
+                    // 判断是否需要在本轮触发群聊上下文（不再无条件注入 system）
+                    const shouldUseGroupContext = shouldUseGroupContextInPrivateChat(
+                        latestInputText, contact, recentGroupChatDigest
+                    );
+
+                    // 群聊上下文只作为 userTask 里的可选背景，且仅在触发时追加
+                    const groupMemorySection = shouldUseGroupContext ? `【可选相关群聊背景｜仅本轮触发】
 ${privateGroupMemorySummary || '暂无相关群聊记忆'}
 
-[最近相关群聊上下文｜用于私聊承接]
+【最近相关群聊上下文｜仅在当前输入承接群聊时使用】
 ${recentGroupChatDigest || '暂无相关群聊近况'}
 
 使用规则：
-1. 如果用户刚从群聊切回私聊，且当前私聊内容明显在接群里的话题，你必须结合这里的群聊上下文理解。
-2. 不要说“我不知道你们群里说了什么”。
-3. 不要把群聊内容当成私聊里刚刚发生的事，但可以说“群里刚才那个……”或者自然接住。
-4. 如果用户私聊里说“刚刚群里那个”“她刚才说的”“你怎么看”“然后呢”“怎么办”，优先结合最近相关群聊上下文。
-5. 群聊记忆只能作为背景，不要机械复述整段聊天记录。
+1. 只有当前用户最新输入明确在问群聊内容，或者刚从群聊切回私聊且当前输入是承接句时，才使用这里。
+2. 如果当前用户最新输入是新话题，必须忽略这里，不要把群聊记忆作为本轮话题。
+3. 群聊内容只是背景，不是私聊里刚刚发生的事。
+4. 不要机械复述群聊记录。
+5. 不要不管用户说什么都绕回群聊。
 ` : '';
-
-                    if (groupMemorySection) {
-                        privateSystemContent += `\n\n${groupMemorySection}`;
-                    }
-
-                    // === 构建 userTask ===
-                    const safeRecentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, 6);
-                    const recentHistoryText = formatRecentHistoryForPrompt(safeRecentHistory, myProfile, contact);
-                    const latestInputText = _latestInputText || '';
 
                     let privateUserTask = '';
 
@@ -21302,13 +21390,26 @@ ${recentGroupChatDigest || '暂无相关群聊近况'}
                         privateUserTask += `【长期记忆摘要，仅供关系背景，不是本轮话题】\n${_privateMems}\n\n`;
                     }
 
-                    if (recentHistoryText) {
-                        privateUserTask += `【最近聊天，仅供语气和关系背景，不是本轮要继续回答的问题】\n${recentHistoryText}\n\n`;
+                    if (privateRecentContextDigest) {
+                        privateUserTask += `【私聊最近连续上下文｜最高优先级】\n${privateRecentContextDigest}\n\n`;
+                        privateUserTask += `【私聊连续性要求】\n`;
+                        privateUserTask += `1. 你必须先读最近连续上下文，再理解当前用户最新输入。\n`;
+                        privateUserTask += `2. 如果当前用户最新输入明显是在接着上面的事情说，必须自然承接，不要像第一次听说。\n`;
+                        privateUserTask += `3. 如果用户说”然后呢””继续””那怎么办””为什么””你觉得呢””这个呢””她呢””他呢”，必须结合最近上下文理解。\n`;
+                        privateUserTask += `4. 不要机械开头说”刚刚你提到/你刚才说”，要直接接话。\n`;
+                        privateUserTask += `5. 如果当前输入明显是新话题，才切换到新话题。\n`;
+                        privateUserTask += `6. 不要无关翻旧账，但同一件事必须继续推进。\n\n`;
                     }
+
+                    // 群聊背景：仅触发时追加到 userTask，不放进 system
+                    if (groupMemorySection) {
+                        privateUserTask += `${groupMemorySection}\n\n`;
+                    }
+
                     if (isNarrativeMode) {
-                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"${contact.id || ''}","characterName":"${contact.name || '角色'}","content":"..."}],"heart_voice":{"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"无"},"diary":"..."}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把"嗯、哦、啧"之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{“events”:[{“type”:”action”,”content”:”...”},{“type”:”speech”,”characterId”:”${contact.id || ''}”,”characterName”:”${contact.name || '角色'}”,”content”:”...”}],”heart_voice”:{“emotion”:”...”,”thoughts”:”...”,”heartRate”:”...”,”jealousy”:”无”},”diary”:”...”}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把”嗯、哦、啧”之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
                     } else {
-                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n只回应上面这一句。\n如果用户最新输入明显是新话题，不要主动翻旧账。\n如果用户最新输入是“你怎么看 / 那怎么办 / 她什么意思 / 然后呢 / 继续 / 刚刚群里那个 / 她刚才说的 / 群里那个”等承接句，且上方存在[最近相关群聊上下文]，必须结合群聊上下文理解。\n可以保留上一轮情绪余温，也可以承接刚刚群聊里的同一件事，但不要无关地翻旧账。\n第一条回复必须直接接住当前用户最新输入。`;
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n优先回应当前用户最新输入。\n你必须先判断当前用户最新输入属于哪一种：\nA. 私聊当前话题的延续：结合【私聊最近连续上下文】自然承接。\nB. 明确承接群聊：只有出现”群里/群聊/她刚才说/群里那个”等明确指向，或刚从群聊切回且用户输入是”你怎么看/然后呢/那怎么办”等短承接句时，才结合【可选相关群聊背景】。\nC. 明显新话题：完全忽略群聊背景，只回答当前新话题。\n\n如果当前输入是新话题，禁止把回复绕回群聊。\n如果当前输入没有提群聊，也不是刚从群聊切回的承接句，不要主动提群聊。\n可以保留角色的情绪和关系状态，但不要无关翻旧账。\n第一条回复必须直接接住当前用户最新输入。`;
                     }
                     if (dynamicInstructions) privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
 
@@ -21327,21 +21428,24 @@ ${recentGroupChatDigest || '暂无相关群聊近况'}
                         ];
                     }
 
-                    console.log('[私聊读取群聊记忆检查]', {
+                    console.log('[私聊群聊上下文触发检查]', {
                         contactName: contact.name,
-                        privateGroupMemorySummary,
-                        recentGroupChatDigestPreview: recentGroupChatDigest.slice(0, 1200),
-                        relatedGroups: state.contacts
-                            .filter(c => c && c.isGroup && Array.isArray(c.history) && (
-                                (Array.isArray(c.members) && c.members.includes(contact.id))
-                                || (Array.isArray(c.npcMembers) && c.npcMembers.some(npc => npc.id === contact.id))
-                            ))
-                            .map(g => ({
-                                groupName: g.name,
-                                memoryShared: g.memoryShared,
-                                historyCount: g.history.length,
-                                crossSceneMemoryCount: g.crossSceneMemories?.length || 0
-                            }))
+                        latestInputText,
+                        shouldUseGroupContext,
+                        lastOpenedChatWasGroup: state.lastOpenedChatWasGroup,
+                        lastGroupChatExitAt: state.lastGroupChatExitAt,
+                        lastGroupChatId: state.lastGroupChatId,
+                        recentGroupChatDigestPreview: recentGroupChatDigest ? recentGroupChatDigest.slice(0, 800) : '',
+                        privateGroupMemorySummaryPreview: privateGroupMemorySummary ? privateGroupMemorySummary.slice(0, 800) : ''
+                    });
+
+                    console.log('[私聊上下文连续性检查]', {
+                        contactName: contact.name,
+                        latestInputText,
+                        historyCount: Array.isArray(contact.history) ? contact.history.length : 0,
+                        safeRecentHistoryCount: safeRecentHistory.length,
+                        privateRecentContextPreview: privateRecentContextDigest.slice(0, 1200),
+                        recentGroupChatDigestPreview: typeof recentGroupChatDigest === 'string' ? recentGroupChatDigest.slice(0, 1200) : ''
                     });
 
                     console.log('[私聊最终请求-干净版]', {
@@ -39633,7 +39737,9 @@ document.getElementById('delete-selected-btn').addEventListener('click', async (
             // 2. ✨【核心新增】✨：在更新数据前，先把屏幕上的气泡直接删掉！
             // 这样既能立刻看到效果，又不会触发页面滚动。
             editModeState.selectedMessageIds.forEach(msgId => {
-                const messageEl = document.getElementById('chat-messages').querySelector(`.message-wrapper[data-message-id="${msgId}"]`);
+                const messageEl = document.getElementById('chat-messages').querySelector(
+                    `.message-wrapper[data-message-id="${msgId}"], .offline-action-card[data-message-id="${msgId}"]`
+                );
                 if (messageEl) {
                     messageEl.remove(); // 直接从 DOM 中移除元素
                 }
