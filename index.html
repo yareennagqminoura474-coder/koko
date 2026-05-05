@@ -77,22 +77,34 @@
     box-shadow: 0 4px 14px var(--shadow-color);
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: 10px;
     line-height: 1.65;
     font-size: 14px;
     word-break: break-word;
     overflow-wrap: anywhere;
     cursor: pointer;
 }
-.offline-action-card span {
+.offline-action-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: #e8f5e9;
+    margin-top: 1px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+.offline-action-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.offline-action-content {
     flex: 1;
     white-space: pre-wrap;
     word-break: break-word;
-}
-.offline-action-card i {
-    color: var(--theme-primary);
-    font-style: normal;
-    flex-shrink: 0;
+    overflow-wrap: anywhere;
 }
 
         html, body {
@@ -16487,9 +16499,53 @@ case 'music_share':
                     const actionWrapper = document.createElement('div');
                     actionWrapper.className = 'offline-action-card';
                     actionWrapper.dataset.messageId = message.id;
+
                     const safeDiv = document.createElement('div');
                     safeDiv.textContent = stripOuterActionBrackets(message.content);
-                    actionWrapper.innerHTML = `<span>${safeDiv.innerHTML}</span><i aria-hidden="true">✦</i>`;
+
+                    const activeChat = state.contacts.find(c => c.id === state.activeChatId);
+
+                    const resolveActionActorProfile = () => {
+                        if (message.characterId === 'myProfile' || message.characterId === 'user') {
+                            return state.myProfile;
+                        }
+
+                        let profile = state.contacts.find(c => c.id === message.characterId);
+                        if (profile) return profile;
+
+                        if (activeChat && activeChat.isGroup && activeChat.npcMembers) {
+                            profile = activeChat.npcMembers.find(npc => npc.id === message.characterId);
+                            if (profile) return profile;
+                        }
+
+                        return null;
+                    };
+
+                    const actorProfile = resolveActionActorProfile();
+                    const actorName = actorProfile?.name || message.characterName || '角色';
+                    const fallbackText = encodeURIComponent((actorName || '角').substring(0, 1));
+                    const fallbackAvatar = `https://placehold.co/34x34/e8f5e9/6b8f71?text=${fallbackText}`;
+                    const avatarUrl = actorProfile?.avatar || fallbackAvatar;
+
+                    const isGroupOffline = !!(activeChat && activeChat.isGroup);
+
+                    if (isGroupOffline) {
+                        actionWrapper.innerHTML = `
+                            <div class="offline-action-avatar">
+                                <img
+                                    src="${avatarUrl}"
+                                    alt="${actorName}头像"
+                                    onerror="this.onerror=null;this.src='${fallbackAvatar}';"
+                                >
+                            </div>
+                            <span class="offline-action-content">${safeDiv.innerHTML}</span>
+                        `;
+                    } else {
+                        actionWrapper.innerHTML = `
+                            <span class="offline-action-content">${safeDiv.innerHTML}</span>
+                        `;
+                    }
+
                     actionWrapper.addEventListener('click', () => handleMessageSelection(actionWrapper, message));
                     return actionWrapper;
                 }
@@ -17140,6 +17196,7 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
                 type: 'offlineAction',
                 sender: 'system',
                 characterId: senderProfile.id,
+                characterName: senderProfile.name,
                 content: piece,
                 timestamp: Date.now()
             });
@@ -17249,7 +17306,12 @@ async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatC
 
         if (messageType === 'offlineAction') {
             const fullMessage = await createAndAddMessage(
-                { type: 'offlineAction', content },
+                {
+                    type: 'offlineAction',
+                    content,
+                    characterId: ev.characterId || senderProfile?.id || '',
+                    characterName: ev.characterName || senderProfile?.name || ''
+                },
                 'system',
                 effectiveChatContext,
                 true,
@@ -18651,6 +18713,7 @@ async function triggerGroupFreeChat(group) {
         });
         
         const safeGroupHistoryText = buildSafeGroupHistoryText(group, null, 8);
+        const groupRecentContextDigest = buildGroupRecentContextDigest(group, null, 40);
 
         // 1g. 构建角色档案（摘要型互通）
         let characterDossiersPrompt = allMemberProfiles.map(profile => {
@@ -18694,6 +18757,17 @@ ${recentPrivateDigest}
 ${worldBookContextString}
 ---
 
+[本群最近连续上下文｜最高优先级]
+下面是本群最近正在发生的连续对话。你必须先读这里，再决定群成员现在怎么接话。
+${groupRecentContextDigest}
+
+[自由聊天连续性要求]
+1. 群成员自由聊天必须接着本群刚刚的话题继续，不要像重启了一轮新聊天。
+2. 如果最近大家在聊同一件事，就继续推进这个话题。
+3. 不要每次都重新解释背景。
+4. 不要反复使用“刚刚你提到……”“刚刚说到……”，要更自然地接话。
+5. 允许群成员对前面其他角色说过的话做回应，但不要重复同一句意思。
+
 [背景资料：角色档案]
 ${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要、跨场景关键记忆和近期私聊近况摘要。' : '下方是本次群聊所有AI角色的基础档案。'}
 --- 角色档案区 ---
@@ -18713,6 +18787,13 @@ ${safeGroupHistoryText}
 3. 禁止主动复述私聊原文。
 4. 除非群内有人明确提到私聊，否则不要直接说“我们私聊刚刚说过……”。
 5. 可以自然表现为：角色更熟悉用户近况、称呼变化、态度变化、关系余温仍在。
+
+[口癖限制]
+1. 不要频繁使用“刚刚你提到”“刚刚说到”“你刚才说”。
+2. 连续上下文不是为了让你复读“刚刚”，而是为了让你自然接住话题。
+3. 同一轮群聊回复里最多只能出现一次“刚刚/刚才”。
+4. 大多数时候直接接话，不要用总结式开头。
+5. 不要每个角色都先复述用户问题。
 
 [回复规则]
 1. 输出只能是 MESSAGE 脚本，不要附加解释。
@@ -18768,6 +18849,12 @@ MESSAGE_END
             })
         });
 
+        console.log('[群聊自由聊天上下文检查]', {
+            groupName: group.name,
+            groupRecentContextPreview: groupRecentContextDigest.slice(0, 1200),
+            historyCount: Array.isArray(group.history) ? group.history.length : 0
+        });
+
         // --- 4. 【核心】调用 generateAiResponse 的“后门” ---
         const rawResponse = await generateAiResponse(
             null,                   
@@ -18816,7 +18903,12 @@ MESSAGE_END
                 if (actionText) {
                     await sleep(800 + Math.random() * 700);
                     await createAndAddMessage(
-                        { type: 'offlineAction', content: actionText },
+                        {
+                            type: 'offlineAction',
+                            content: actionText,
+                            characterId: speakerProfile?.id || '',
+                            characterName: speakerProfile?.name || ''
+                        },
                         'system',
                         group,
                         true,
@@ -18911,7 +19003,8 @@ async function triggerGroupChatAiReply(group) {
             allowPreviousCallback = doesCurrentInputReferToPrevious(latestGroupInputText);
         } catch (_e) { /* 静默忽略 */ }
 
-        const safeGroupHistoryText = buildSafeGroupHistoryText(group, _grpLatestUserMsgId, 8);
+        const safeGroupHistoryText = buildSafeGroupHistoryText(group, _grpLatestUserMsgId, 40);
+        const groupRecentContextDigest = buildGroupRecentContextDigest(group, _grpLatestUserMsgId, 40);
         const needPrivateMemory = doesInputNeedPrivateMemory(latestGroupInputText);
 
         let characterDossiersPrompt = '';
@@ -18961,6 +19054,18 @@ ${recentPrivateDigest}
 ${worldBookContextString}
 ---
 
+[第四份信息：本群最近连续上下文｜最高优先级]
+下面是本群最近正在发生的连续对话。你必须先读这里，再回复当前用户最新输入。
+${groupRecentContextDigest}
+
+[连续性要求]
+1. 如果当前用户最新输入明显是在接着上面的事情说，就必须承认这是同一件事，不要像第一次听说一样重新介绍。
+2. 不要总说“你刚提到……”“刚刚你说……”，除非用户真的在强调刚刚。
+3. 更自然的接法是直接接住话题，比如“那我觉得可以……”“这样的话……”“所以现在应该……”。
+4. 如果上一轮已经解释过，不要重复开头，不要重新铺垫，直接往下推进。
+5. 群成员之间也要记得彼此上一轮说过什么，不要互相像失忆一样重复问同一个问题。
+6. 如果当前用户输入很短，比如“然后呢”“继续”“那怎么办”“为什么”，必须结合本群最近上下文理解，不要当成新话题。
+
 [第五份信息：角色档案]
 ${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要、跨场景关键记忆和近期私聊近况摘要。' : '下方是本次群聊所有AI角色的基础档案。'}
 --- 角色档案区 ---
@@ -18971,7 +19076,7 @@ ${characterDossiersPrompt}
 1. 本轮不是续写整段群聊历史。
 2. 本轮只生成群成员对【当前用户最新输入】的反应。
 3. 最近群聊背景只影响语气、情绪和关系，不是本轮要继续回答的问题。
-4. 当前用户没有提“刚刚/继续/上一句/前面那个”时，禁止继续上一轮具体话题。
+4. 如果当前用户最新输入和本群最近连续上下文明显属于同一件事，必须自然承接；如果明显是新话题，才切换到新话题。
 5. 第一条 MESSAGE 必须能对应当前用户最新输入。
 6. 输出前自检：每条 MESSAGE 是否能对应当前用户最新输入？不能对应就删掉。
 
@@ -18982,6 +19087,14 @@ ${characterDossiersPrompt}
 4. 禁止直接说“我们私聊刚刚说过……”除非当前用户明确提到私聊。
 5. 可以自然表现为：角色知道用户最近经历过什么、两人关系变了、称呼更熟、态度更亲近或更别扭。
 6. 群聊第一条仍然必须回应【当前用户最新输入】。
+7. 本群最近连续上下文的优先级高于私聊近况；私聊近况只能辅助关系和情绪，不能覆盖本群最近刚刚发生的事。
+
+[口癖限制]
+1. 不要频繁使用“刚刚你提到”“刚刚说到”“你刚才说”。
+2. 连续上下文不是为了让你复读“刚刚”，而是为了让你自然接住话题。
+3. 同一轮群聊回复里最多只能出现一次“刚刚/刚才”。
+4. 大多数时候直接接话，不要用总结式开头。
+5. 不要每个角色都先复述用户问题。
 
 [通用规则 - 所有角色都必须遵守]
 [文学风格] 你的写作风格需要遵循高端女性向文学（类似晋江文学城的流行风格）。文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时,要体现出较高的文学素养。
@@ -19013,14 +19126,24 @@ MESSAGE_END
 【当前用户最新输入】
 ${latestGroupInputText || '(用户发送了非文字内容)'}
 
+【本群最近连续上下文｜最高优先级】
+${groupRecentContextDigest}
+
+【连续理解规则】
+1. 判断当前输入是否和最近群聊上下文属于同一件事。
+2. 如果属于同一件事，要直接接住，不要像第一次听到一样。
+3. 如果用户说“然后呢”“继续”“那怎么办”“为什么”“这个呢”，必须结合最近上下文理解。
+4. 不要每次都用“刚刚你提到”“刚刚说到”开头。
+5. 不要复述背景，直接往下推进。
+
 【最近群聊背景，仅供语气和关系背景，不是本轮要继续回答的问题】
 ${safeGroupHistoryText}
 
 【本轮任务】
 只生成群成员对【当前用户最新输入】的反应。
 第一条回复必须直接回应当前用户最新输入。
-${allowPreviousCallback ? '当前用户明确提到了上一轮内容，可以有限承接，但仍要先回应当前输入。' : '如果当前用户没有明确说“刚刚/刚才/上一句/继续/接着/你还没回答/前面那个”，禁止继续上一轮具体话题。'}
-可以保留上一轮的情绪余温，但不能继续上一轮具体内容。
+${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须结合本群最近连续上下文来接话，但仍要先回应当前输入。' : '如果当前用户最新输入和本群最近连续上下文明显属于同一件事，必须自然承接；如果明显是新话题，才切换到新话题。'}
+可以保留上一轮的情绪余温，也可以在同一话题下继续推进，但不要无关地翻旧账。
 `;
 
         const finalRequestMessages = [
@@ -19046,6 +19169,14 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，可以�
                     ).slice(0, 200)
                 };
             })
+        });
+
+        console.log('[群聊上下文连续性检查]', {
+            groupName: group.name,
+            latestGroupInputText,
+            safeGroupHistoryLength: safeGroupHistoryText ? safeGroupHistoryText.length : 0,
+            groupRecentContextPreview: groupRecentContextDigest.slice(0, 1200),
+            historyCount: Array.isArray(group.history) ? group.history.length : 0
         });
 
         const rawResponse = await generateAiResponse(
@@ -19097,7 +19228,12 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，可以�
                 if (actionText) {
                     await sleep(800 + Math.random() * 700);
                     await createAndAddMessage(
-                        { type: 'offlineAction', content: actionText },
+                        {
+                            type: 'offlineAction',
+                            content: actionText,
+                            characterId: speakerProfile?.id || '',
+                            characterName: speakerProfile?.name || ''
+                        },
                         'system',
                         group,
                         true,
@@ -19329,6 +19465,14 @@ function formatRecentHistoryForPrompt(recentHistory, myProfile, contact) {
 
 function resolveGroupMessageSenderName(msg, group) {
     if (!msg) return '未知';
+    if (msg.type === 'offlineAction') {
+        if (msg.characterId === 'myProfile' || msg.characterId === 'user') {
+            return state.myProfile?.name || '用户';
+        }
+        const actor = state.contacts.find(c => c.id === msg.characterId)
+            || (group?.npcMembers || []).find(n => n.id === msg.characterId);
+        return actor?.name || msg.characterName || '角色';
+    }
     if (msg.sender === 'user' || msg.sender === 'myProfile') {
         return state.myProfile?.name || '用户';
     }
@@ -19358,8 +19502,27 @@ function getGroupPromptMessageText(msg) {
             return `[红包:${msg.content?.blessing || ''}]`;
         case 'transfer':
             return `[转账:${msg.content?.amount || ''}]`;
+        case 'gift':
+            return `[礼物:${msg.content?.title || ''}]`;
+        case 'takeout': {
+            const shopName = msg.content?.shopName || '外卖';
+            const items = Array.isArray(msg.content?.items)
+                ? msg.content.items.map(item => `${item.name || '商品'}x${item.count || 1}`).join('、')
+                : '';
+            return `[外卖:${shopName}${items ? ` / ${items}` : ''}]`;
+        }
+        case 'location_share':
+            return `[位置:${msg.content?.name || ''}]`;
+        case 'game_wheel':
+            return `[转盘游戏:${msg.content?.name || ''}]`;
+        case 'post_share':
+            return '[分享帖子]';
+        case 'product_share':
+            return `[分享商品:${msg.content?.productDetails?.name || ''}]`;
+        case 'chat_history_share':
+            return `[聊天记录:${msg.content?.sourceChatName || ''}]`;
         case 'offlineAction':
-            return `[动作:${msg.content || ''}]`;
+            return `[动作:${stripOuterActionBrackets(msg.content || '')}]`;
         case 'offlineSpeech':
             return `${msg.content || ''}`;
         default:
@@ -19375,7 +19538,7 @@ function buildSafeGroupHistoryText(group, latestUserMessageId, limit = 8) {
         .filter(msg => {
             if (!msg) return false;
             if (latestUserMessageId && msg.id === latestUserMessageId) return false;
-            if (msg.sender === 'system_instruction' || msg.sender === 'system') return false;
+            if (msg.sender === 'system_instruction') return false;
             if (['system_notification', 'loading', 'error', 'heart_voice'].includes(msg.type)) return false;
             return true;
         })
@@ -19388,6 +19551,109 @@ function buildSafeGroupHistoryText(group, latestUserMessageId, limit = 8) {
         })
         .filter(Boolean)
         .join('\n') || '暂无最近群聊背景';
+}
+
+function buildGroupRecentContextDigest(group, latestMsgId, limit = 40) {
+    if (!group || !Array.isArray(group.history)) return '(暂无群聊上下文)';
+
+    const myProfile = state.myProfile || {};
+    const getProfileInGroup = (id) => {
+        if (id === 'myProfile' || id === 'user') return myProfile;
+        let profile = state.contacts.find(c => c.id === id);
+        if (profile) return profile;
+        if (group.npcMembers) {
+            profile = group.npcMembers.find(npc => npc.id === id);
+            if (profile) return profile;
+        }
+        return null;
+    };
+
+    const blockedTypes = ['system_notification', 'loading', 'error', 'heart_voice'];
+    const history = group.history
+        .filter(m => m && !blockedTypes.includes(m.type))
+        .slice(-limit);
+
+    const lines = history.map((m, index) => {
+        const profile = getProfileInGroup(m.sender);
+        const actionActorProfile = getProfileInGroup(m.characterId);
+        let name =
+            m.sender === 'user' || m.sender === 'myProfile'
+                ? (myProfile.name || '我')
+                : (profile?.name || m.characterName || m.senderName || m.sender || '群成员');
+
+        let content = '';
+        if (typeof m.content === 'string') {
+            content = m.content.replace(/<[^>]+>/g, '');
+        } else if (m.content && typeof m.content === 'object') {
+            content = m.content.text || m.content.content || '';
+        }
+
+        switch (m.type) {
+            case 'offlineAction': {
+                const actorName = m.characterName || actionActorProfile?.name || name;
+                name = actorName || name;
+                content = `【动作/${actorName || '角色'}】${stripOuterActionBrackets(content)}`;
+                break;
+            }
+            case 'offlineSpeech':
+                content = `【线下发言】${content}`;
+                break;
+            case 'image':
+            case 'uploaded_image':
+                content = m.isEmoticon && m.emoticonName
+                    ? `【表情包】${m.emoticonName}`
+                    : `【图片】${content || '发送了一张图片'}`;
+                break;
+            case 'picture_description':
+                content = `【图片描述】${m.content?.description || content}`;
+                break;
+            case 'voice':
+                content = `【语音】${m.content?.text || content}`;
+                break;
+            case 'transfer':
+                content = `【转账】${m.content?.amount || content}`;
+                break;
+            case 'red_packet':
+                content = `【红包】${m.content?.blessing || content}`;
+                break;
+            case 'gift':
+                content = `【礼物】${m.content?.title || content}`;
+                break;
+            case 'takeout': {
+                const shopName = m.content?.shopName || '外卖';
+                const items = Array.isArray(m.content?.items)
+                    ? m.content.items.map(item => `${item.name || '商品'}x${item.count || 1}`).join('、')
+                    : '';
+                content = `【外卖】${shopName}${items ? ` / ${items}` : ''}`;
+                break;
+            }
+            case 'location_share':
+                content = `【位置】${m.content?.name || content}`;
+                break;
+            case 'game_wheel':
+                content = `【转盘游戏】${m.content?.name || content}`;
+                break;
+            case 'product_share':
+                content = `【分享商品】${m.content?.productDetails?.name || content}`;
+                break;
+            case 'post_share':
+                content = '【分享帖子】';
+                break;
+            case 'chat_history_share':
+                content = `【聊天记录】${m.content?.sourceChatName || content}`;
+                break;
+            default:
+                break;
+        }
+
+        content = String(content || '').trim();
+        if (!content) return '';
+
+        const currentMark = m.id === latestMsgId ? ' ← 当前用户最新输入' : '';
+        return `${index + 1}. ${name}: ${content}${currentMark}`;
+    }).filter(Boolean);
+
+    return lines.join('\n') || '(暂无群聊上下文)';
 }
 
 function buildGroupMemberRelationshipSummary(contactProfile) {
@@ -19590,11 +19856,21 @@ function buildCurrentTurnBoundaryRules(mode, allowPreviousCallback) {
         '输出前自检：每条回复是否能对应当前用户最新输入？如果不能，就删掉或改写。',
     ];
 
-    if (!allowPreviousCallback) {
-        lines.push('当前用户没有明确提到上一轮，禁止主动补答上一轮、解释上一轮、追问上一轮、总结上一轮。');
-        lines.push('禁止出现：你刚刚/你刚才/刚才那句/上一句/你前面说/从你刚刚/刚刚那种/刚才那个 等追旧账句式。');
+    if (mode === 'group') {
+        if (!allowPreviousCallback) {
+            lines.push('群聊模式：如果当前用户最新输入和本群最近连续上下文明显属于同一件事，必须自然承接；如果明显是新话题，才切换到新话题。');
+            lines.push('群聊模式：不要机械使用“刚刚你提到/你刚才说/上一句”开头，但可以顺着同一话题继续推进。');
+            lines.push('群聊模式：禁止无关翻旧账、补答已经过去的旧问题，但不要因为用户没说“继续”就假装不知道本群刚刚在聊什么。');
+        } else {
+            lines.push('群聊模式：当前用户明确提到了上一轮内容，必须结合本群最近连续上下文自然接话。');
+        }
     } else {
-        lines.push('当前用户明确提到了上一轮内容，允许承接上一轮。');
+        if (!allowPreviousCallback) {
+            lines.push('当前用户没有明确提到上一轮，禁止主动补答上一轮、解释上一轮、追问上一轮、总结上一轮。');
+            lines.push('禁止出现：你刚刚/你刚才/刚才那句/上一句/你前面说/从你刚刚/刚刚那种/刚才那个 等追旧账句式。');
+        } else {
+            lines.push('当前用户明确提到了上一轮内容，允许承接上一轮。');
+        }
     }
 
     if (mode === 'offline') {
@@ -19956,6 +20232,9 @@ const NARRATIVE_BASE_PROMPT = `
         async function generateAiResponse(contact, history, customSystemPrompt, forceDiary = false, apiType = 'chat', forceMessages = null) { //  1. 新增 forceMessages 参数
             const apiConfig = getApiFor(apiType);
             const { apiKey, model, endpoint, contextLength, longTermMemoryLength } = apiConfig;
+            const effectiveContextLength = contact?.isGroup
+                ? Math.max(contextLength || 20, 40)
+                : (contextLength || 20);
 
             if (!apiKey || !endpoint || !model) {
                 const errorMsg = `错误：${apiType === 'square' ? '论坛' : (apiType === 'snoop' ? '窥探' : '聊天')}API未配置。请前往“发现-API设置”进行配置。`;
@@ -20798,7 +21077,7 @@ ${qzoneContextText}
                 let _lastUserMsg = null;
                 let _latestInputText = '';
                 try {
-                    _lastUserMsg = history.filter(m => m.sender === 'user' && !['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type)).slice(-1)[0];
+                    _lastUserMsg = history.filter(m => (m.sender === 'user' || m.sender === 'myProfile') && !['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type)).slice(-1)[0];
                     _latestUserMsgId = _lastUserMsg ? _lastUserMsg.id : null;
                     _latestInputText = _lastUserMsg
                         ? (typeof _lastUserMsg.content === 'string' ? _lastUserMsg.content : (_lastUserMsg.content?.text || ''))
@@ -20884,11 +21163,11 @@ ${qzoneContextText}
                 } else {
                 // (群聊/其他：保持原有多轮消息结构，不改动)
                 const messages = [];
-                const recentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, contextLength || 20);
+                const recentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, effectiveContextLength);
 
                 let currentUserMessageParts = [];
                 for (const msg of recentHistory) {
-                    const role = (msg.sender === 'user') ? 'user' : 'assistant';
+                    const role = (msg.sender === 'user' || msg.sender === 'myProfile') ? 'user' : 'assistant';
                     if (role === 'user') {
                         let textContent = null;
                         
