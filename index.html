@@ -19690,13 +19690,15 @@ ${isNarrativeMode ? `
 4. 多句台词必须拆成多个 speech event。
 5. 多个动作必须拆成多个 action event。
 6. 禁止把整段回复写成一个超长 content。
+` : `
 【普通私聊输出规则】
 输出多条自然聊天气泡。
 不要写说明文。
 不要总结设定。
 不要重新开场。
 不要突然复盘上一轮。
-`}`;
+`}
+`;
 }
 
 function buildPromptHistoryExcludingLatest(history, latestUserMessageId, limit) {
