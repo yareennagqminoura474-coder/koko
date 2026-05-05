@@ -16924,6 +16924,81 @@ function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
     return senderProfile?.id || 'system';
 }
 
+function splitOfflineSpeechForRender(text) {
+    return String(text || '')
+        .replace(/\r/g, '\n')
+        .split(/(?:\n+|(?<=[。！？!?])\s*)/)
+        .map(s => cleanOfflineEventContent(s))
+        .map(s => s.trim())
+        .filter(Boolean)
+        .filter(s => !isOrphanBracket(s) && !isJsonGarbageFragment(s));
+}
+
+function splitOfflineActionForRender(text) {
+    return String(text || '')
+        .replace(/\r/g, '\n')
+        .split(/(?:\n+|(?<=[。！？!?；;])\s*)/)
+        .map(s => stripOuterActionBrackets(s))
+        .map(s => s.trim())
+        .filter(Boolean)
+        .filter(s => !isOrphanBracket(s) && !isJsonGarbageFragment(s));
+}
+
+function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
+    const expanded = [];
+    if (!ev) return expanded;
+
+    let rawType = ev.type || ev.kind || ev.eventType || '';
+    let rawContent =
+        ev.content ||
+        ev.text ||
+        ev.message ||
+        ev.speech ||
+        ev.dialogue ||
+        ev.line ||
+        ev.words ||
+        ev.action ||
+        ev.narration ||
+        ev.description ||
+        '';
+
+    rawContent = String(rawContent || '').trim();
+    if (!rawContent) return expanded;
+
+    let messageType = normalizeOfflineEventType(rawType, rawContent);
+
+    // 如果 type 是 speech，但内容明显是动作，则改成 action
+    if (messageType !== 'offlineAction' && looksLikeOfflineAction(rawContent)) {
+        messageType = 'offlineAction';
+    }
+
+    if (messageType === 'offlineAction') {
+        const pieces = splitOfflineActionForRender(rawContent);
+        pieces.forEach(piece => {
+            expanded.push({
+                type: 'offlineAction',
+                sender: 'system',
+                characterId: ev.characterId || senderProfile?.id,
+                characterName: ev.characterName || senderProfile?.name,
+                content: piece
+            });
+        });
+    } else {
+        const pieces = splitOfflineSpeechForRender(rawContent);
+        pieces.forEach(piece => {
+            expanded.push({
+                type: 'offlineSpeech',
+                sender: ev.sender || ev.characterId || senderProfile?.id,
+                characterId: ev.characterId || senderProfile?.id,
+                characterName: ev.characterName || senderProfile?.name,
+                content: piece
+            });
+        });
+    }
+
+    return expanded;
+}
+
 function splitActionSentences(text) {
     return String(text || '').split(/(?<=[。！？!?；;])\s*/).map(s => s.trim()).filter(Boolean);
 }
@@ -17029,6 +17104,59 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     return result;
 }
 
+async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatContext) {
+    const list = Array.isArray(events) ? events : [];
+    const expandedEvents = [];
+
+    list.forEach(ev => {
+        const parts = expandOfflineEventForRender(ev, senderProfile, effectiveChatContext);
+        expandedEvents.push(...parts);
+    });
+
+    console.log('[线下分条渲染]', {
+        originalCount: list.length,
+        expandedCount: expandedEvents.length,
+        preview: expandedEvents.slice(0, 5).map(e => ({
+            type: e.type,
+            content: e.content
+        }))
+    });
+
+    for (const ev of expandedEvents) {
+        const messageType = normalizeOfflineEventType(ev.type, ev.content);
+        const content = messageType === 'offlineAction'
+            ? stripOuterActionBrackets(ev.content)
+            : cleanOfflineEventContent(ev.content);
+
+        if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
+
+        if (messageType === 'offlineAction') {
+            const fullMessage = await createAndAddMessage(
+                { type: 'offlineAction', content },
+                'system',
+                effectiveChatContext,
+                true,
+                'chat'
+            );
+            if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+        } else {
+            const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
+            const fullMessage = await createAndAddMessage(
+                { type: 'offlineSpeech', content },
+                sid,
+                effectiveChatContext,
+                true,
+                'chat'
+            );
+            if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
+        }
+
+        await sleep(250 + Math.random() * 200);
+    }
+
+    return expandedEvents.length;
+}
+
 async function processOfflineNarrativeAiReply(conversation, senderProfile, effectiveChatContext) {
     const payload = parseOfflineAiResponsePayload(conversation);
 
@@ -17051,32 +17179,8 @@ async function processOfflineNarrativeAiReply(conversation, senderProfile, effec
 
         // AI 返回了普通文本，用文本兜底渲染，保证消息能出来
         const fallbackEvents = parseNarrativeHtmlOrTextToOfflineEvents(source, senderProfile);
-        if (fallbackEvents && fallbackEvents.length) {
-            console.warn('[线下模式] AI 未返回 JSON，已使用文本兜底渲染');
-            for (const ev of fallbackEvents) {
-                const messageType = normalizeOfflineEventType(ev.type);
-                const content = messageType === 'offlineAction'
-                    ? stripOuterActionBrackets(ev.content)
-                    : cleanOfflineEventContent(ev.content);
-                if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
-                if (messageType === 'offlineAction') {
-                    const fullMessage = await createAndAddMessage(
-                        { type: 'offlineAction', content },
-                        'system', effectiveChatContext, true, 'chat'
-                    );
-                    if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
-                } else {
-                    const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
-                    const fullMessage = await createAndAddMessage(
-                        { type: 'offlineSpeech', content },
-                        sid, effectiveChatContext, true, 'chat'
-                    );
-                    if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
-                }
-                await sleep(250 + Math.random() * 200);
-            }
-            return;
-        }
+        const renderedCount = await renderOfflineEventsOneByOne(fallbackEvents, senderProfile, effectiveChatContext);
+        if (renderedCount) return;
 
         await createAndAddMessage(
             { type: 'system_notification', content: '线下回复格式解析失败，请重试。' },
@@ -17095,33 +17199,8 @@ async function processOfflineNarrativeAiReply(conversation, senderProfile, effec
 
         const source = String(conversation || '').trim();
         const fallbackEvents = parseNarrativeHtmlOrTextToOfflineEvents(source, senderProfile);
-
-        if (fallbackEvents && fallbackEvents.length) {
-            console.warn('[线下模式] events 为空，已尝试文本兜底渲染');
-            for (const ev of fallbackEvents) {
-                const messageType = normalizeOfflineEventType(ev.type);
-                const content = messageType === 'offlineAction'
-                    ? stripOuterActionBrackets(ev.content)
-                    : cleanOfflineEventContent(ev.content);
-                if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
-                if (messageType === 'offlineAction') {
-                    const fullMessage = await createAndAddMessage(
-                        { type: 'offlineAction', content },
-                        'system', effectiveChatContext, true, 'chat'
-                    );
-                    if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
-                } else {
-                    const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
-                    const fullMessage = await createAndAddMessage(
-                        { type: 'offlineSpeech', content },
-                        sid, effectiveChatContext, true, 'chat'
-                    );
-                    if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
-                }
-                await sleep(250 + Math.random() * 200);
-            }
-            return;
-        }
+        const renderedCount = await renderOfflineEventsOneByOne(fallbackEvents, senderProfile, effectiveChatContext);
+        if (renderedCount) return;
 
         await createAndAddMessage(
             { type: 'system_notification', content: '线下回复为空，请重试。' },
@@ -17130,30 +17209,19 @@ async function processOfflineNarrativeAiReply(conversation, senderProfile, effec
         return;
     }
 
-    for (const ev of events) {
-        const messageType = normalizeOfflineEventType(ev.type);
-        const content = messageType === 'offlineAction'
-            ? stripOuterActionBrackets(ev.content)
-            : cleanOfflineEventContent(ev.content);
+    const renderedCount = await renderOfflineEventsOneByOne(events, senderProfile, effectiveChatContext);
 
-        if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
+    if (!renderedCount) {
+        console.warn('[线下模式] events 存在但分条后为空', {
+            rawConversation: String(conversation || '').slice(0, 1000),
+            events
+        });
 
-        if (messageType === 'offlineAction') {
-            const fullMessage = await createAndAddMessage(
-                { type: 'offlineAction', content },
-                'system', effectiveChatContext, true, 'chat'
-            );
-            if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
-        } else {
-            const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
-            const fullMessage = await createAndAddMessage(
-                { type: 'offlineSpeech', content },
-                sid, effectiveChatContext, true, 'chat'
-            );
-            if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
-        }
-
-        await sleep(250 + Math.random() * 200);
+        await createAndAddMessage(
+            { type: 'system_notification', content: '线下回复为空，请重试。' },
+            'system', effectiveChatContext, true, 'chat'
+        );
+        return;
     }
 
     await persistOfflineHeartVoiceAndDiary(senderProfile, payload, effectiveChatContext);
@@ -19614,7 +19682,14 @@ ${isNarrativeMode ? `
 10. 不要输出空 events。
 11. 不要输出空 content。
 12. 不要输出 JSON 外的任何文字。
-` : `
+
+【线下分条要求】
+1. events 不要把多句话塞进一个 content。
+2. 一条 action 只写一个动作或一个场景变化。
+3. 一条 speech 只写一句自然台词。
+4. 多句台词必须拆成多个 speech event。
+5. 多个动作必须拆成多个 action event。
+6. 禁止把整段回复写成一个超长 content。
 【普通私聊输出规则】
 输出多条自然聊天气泡。
 不要写说明文。
@@ -20853,7 +20928,7 @@ ${qzoneContextText}
                         privateUserTask += `【最近聊天，仅供语气和关系背景，不是本轮要继续回答的问题】\n${recentHistoryText}\n\n`;
                     }
                     if (isNarrativeMode) {
-                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"${contact.id || ''}","characterName":"${contact.name || '角色'}","content":"..."}],"heart_voice":{"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"无"},"diary":"..."}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。`;
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"${contact.id || ''}","characterName":"${contact.name || '角色'}","content":"..."}],"heart_voice":{"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"无"},"diary":"..."}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 必须分条】\nevents 不要把多句话塞进一个 content。\n不要把所有动作和台词塞进一个 content。\n每个 content 尽量控制在 5 到 35 个字。\n一条 action 只写一个动作或一个场景变化。\n一条 speech 只写一句自然台词。\n多句台词必须拆成多个 speech event。`;
                     } else {
                         privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n只回应上面这一句。\n如果用户没有明确说"刚刚/继续/上一句/前面那个/你还没回答"，不要主动回到上一轮话题。\n可以保留上一轮情绪余温，但不要继续上一轮具体内容。\n第一条回复必须直接接住当前用户最新输入。`;
                     }
