@@ -16924,24 +16924,90 @@ function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
     return senderProfile?.id || 'system';
 }
 
+function mergeShortOfflinePieces(pieces, options = {}) {
+    const minLen = options.minLen || 24;
+    const maxLen = options.maxLen || 80;
+    const maxSentences = options.maxSentences || 3;
+
+    const result = [];
+    let buffer = '';
+    let sentenceCount = 0;
+
+    const flush = () => {
+        const text = String(buffer || '').trim();
+        if (text) result.push(text);
+        buffer = '';
+        sentenceCount = 0;
+    };
+
+    (pieces || []).forEach(piece => {
+        const p = String(piece || '').trim();
+        if (!p) return;
+
+        // 超短语气词可以单独保留
+        if (/^(嗯|哦|啧|行|好|哈|啊|喂|哼|切|嘁)[。！？!?…]*$/.test(p)) {
+            flush();
+            result.push(p);
+            return;
+        }
+
+        const next = buffer ? buffer + p : p;
+        const nextLen = next.length;
+
+        if (!buffer) {
+            buffer = p;
+            sentenceCount = 1;
+            return;
+        }
+
+        if (nextLen <= maxLen && sentenceCount < maxSentences) {
+            buffer = next;
+            sentenceCount += 1;
+        } else {
+            flush();
+            buffer = p;
+            sentenceCount = 1;
+        }
+
+        if (buffer.length >= minLen && sentenceCount >= maxSentences) {
+            flush();
+        }
+    });
+
+    flush();
+    return result.filter(Boolean);
+}
+
 function splitOfflineSpeechForRender(text) {
-    return String(text || '')
+    const rawPieces = String(text || '')
         .replace(/\r/g, '\n')
         .split(/(?:\n+|(?<=[。！？!?])\s*)/)
         .map(s => cleanOfflineEventContent(s))
         .map(s => s.trim())
         .filter(Boolean)
         .filter(s => !isOrphanBracket(s) && !isJsonGarbageFragment(s));
+
+    return mergeShortOfflinePieces(rawPieces, {
+        minLen: 22,
+        maxLen: 75,
+        maxSentences: 3
+    });
 }
 
 function splitOfflineActionForRender(text) {
-    return String(text || '')
+    const rawPieces = String(text || '')
         .replace(/\r/g, '\n')
         .split(/(?:\n+|(?<=[。！？!?；;])\s*)/)
         .map(s => stripOuterActionBrackets(s))
         .map(s => s.trim())
         .filter(Boolean)
         .filter(s => !isOrphanBracket(s) && !isJsonGarbageFragment(s));
+
+    return mergeShortOfflinePieces(rawPieces, {
+        minLen: 30,
+        maxLen: 95,
+        maxSentences: 3
+    });
 }
 
 function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
@@ -16965,6 +17031,8 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
     rawContent = String(rawContent || '').trim();
     if (!rawContent) return expanded;
 
+    const rawLen = rawContent.length;
+
     let messageType = normalizeOfflineEventType(rawType, rawContent);
 
     // 如果 type 是 speech，但内容明显是动作，则改成 action
@@ -16973,7 +17041,9 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
     }
 
     if (messageType === 'offlineAction') {
-        const pieces = splitOfflineActionForRender(rawContent);
+        const pieces = rawLen <= 90
+            ? [stripOuterActionBrackets(rawContent)].filter(Boolean)
+            : splitOfflineActionForRender(rawContent);
         pieces.forEach(piece => {
             expanded.push({
                 type: 'offlineAction',
@@ -16984,7 +17054,9 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
             });
         });
     } else {
-        const pieces = splitOfflineSpeechForRender(rawContent);
+        const pieces = rawLen <= 70
+            ? [cleanOfflineEventContent(rawContent)].filter(Boolean)
+            : splitOfflineSpeechForRender(rawContent);
         pieces.forEach(piece => {
             expanded.push({
                 type: 'offlineSpeech',
@@ -19683,13 +19755,14 @@ ${isNarrativeMode ? `
 11. 不要输出空 content。
 12. 不要输出 JSON 外的任何文字。
 
-【线下分条要求】
-1. events 不要把多句话塞进一个 content。
-2. 一条 action 只写一个动作或一个场景变化。
-3. 一条 speech 只写一句自然台词。
-4. 多句台词必须拆成多个 speech event。
-5. 多个动作必须拆成多个 action event。
-6. 禁止把整段回复写成一个超长 content。
+【线下分条建议】
+1. events 不要把所有动作和台词塞进一个超长 content。
+2. 也不要把一句话就分成一条。
+3. 每个 content 不要太短。
+4. speech 每条建议 18 到 70 字，可以包含 1 到 3 句自然台词。
+5. action 每条建议 25 到 90 字，可以包含 1 到 3 个连续动作。
+6. 不要把"嗯、哦、啧"之外的正常回复拆成几个字一条。
+7. 自然分组，在这个长度范围内，不是无脑短拆，也不是全塞一个。
 ` : `
 【普通私聊输出规则】
 输出多条自然聊天气泡。
@@ -20930,7 +21003,7 @@ ${qzoneContextText}
                         privateUserTask += `【最近聊天，仅供语气和关系背景，不是本轮要继续回答的问题】\n${recentHistoryText}\n\n`;
                     }
                     if (isNarrativeMode) {
-                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"${contact.id || ''}","characterName":"${contact.name || '角色'}","content":"..."}],"heart_voice":{"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"无"},"diary":"..."}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 必须分条】\nevents 不要把多句话塞进一个 content。\n不要把所有动作和台词塞进一个 content。\n每个 content 尽量控制在 5 到 35 个字。\n一条 action 只写一个动作或一个场景变化。\n一条 speech 只写一句自然台词。\n多句台词必须拆成多个 speech event。`;
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"${contact.id || ''}","characterName":"${contact.name || '角色'}","content":"..."}],"heart_voice":{"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"无"},"diary":"..."}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\nspeech 每条建议 18 到 70 字，可以包含 1 到 3 句自然台词。\naction 每条建议 25 到 90 字，可以包含 1 到 3 个连续动作。\n不要把"嗯、哦、啧"之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
                     } else {
                         privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n只回应上面这一句。\n如果用户没有明确说"刚刚/继续/上一句/前面那个/你还没回答"，不要主动回到上一轮话题。\n可以保留上一轮情绪余温，但不要继续上一轮具体内容。\n第一条回复必须直接接住当前用户最新输入。`;
                     }
