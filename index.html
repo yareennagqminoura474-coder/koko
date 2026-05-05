@@ -18389,6 +18389,9 @@ async function triggerPrivateFreeChat(contact) {
         const privateGroupMemorySummary = (contact && !contact.isGroup)
             ? buildPrivateGroupMemorySummary(contact)
             : '';
+        const recentGroupChatDigest = (contact && !contact.isGroup)
+            ? buildRecentGroupChatDigestForContact(contact, 20)
+            : '';
 
         // 步骤4: 收集【短信】历史 (这是我 V8 忘加的)
         if (contact && contact.smsHistory) {
@@ -18458,14 +18461,20 @@ async function triggerPrivateFreeChat(contact) {
             baseSystemPrompt = baseSystemPrompt.replace('{{music_library_list}}', musicListString ? `- ${musicListString}` : '（曲库为空）');
         }
 
-        const groupMemorySection = privateGroupMemorySummary ? `
+        const groupMemorySection = (contact && !contact.isGroup) ? `
 
-【群聊相关记忆摘要】
----
-这些只是群聊余波和关系背景。
-如果当前用户没提群聊、刚刚、继续、前面那件事，不要主动把它作为本轮话题。
-${privateGroupMemorySummary}
----
+[相关群聊记忆]
+${privateGroupMemorySummary || '暂无相关群聊记忆'}
+
+[最近相关群聊上下文｜用于私聊承接]
+${recentGroupChatDigest || '暂无相关群聊近况'}
+
+使用规则：
+1. 如果用户刚从群聊切回私聊，且当前私聊内容明显在接群里的话题，你必须结合这里的群聊上下文理解。
+2. 不要说“我不知道你们群里说了什么”。
+3. 不要把群聊内容当成私聊里刚刚发生的事，但可以说“群里刚才那个……”或者自然接住。
+4. 如果用户私聊里说“刚刚群里那个”“她刚才说的”“你怎么看”“然后呢”“怎么办”，优先结合最近相关群聊上下文。
+5. 群聊记忆只能作为背景，不要机械复述整段聊天记录。
 ` : '';
 
         const finalSystemPrompt = baseSystemPrompt + `
@@ -18931,6 +18940,8 @@ MESSAGE_END
             }
         }
 
+        await autoSaveGroupRecentMemoryForMembers(group, 12);
+
     } catch (e) {
         console.error("群聊自由聊天执行失败:", e);
         await createAndAddMessage({
@@ -19255,6 +19266,8 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
                 );
             }
         }
+
+        await autoSaveGroupRecentMemoryForMembers(group, 12);
     } catch (e) {
         console.error("群聊AI回复生成失败:", e);
     } finally {
@@ -19801,6 +19814,83 @@ function buildPrivateGroupMemorySummary(contact) {
     return lines.length ? lines.join('\n') : '暂无相关群聊记忆';
 }
 
+function buildRecentGroupChatDigestForContact(contact, limit = 20) {
+    if (!contact || !contact.id) return '暂无相关群聊近况';
+
+    const myProfile = state.myProfile || {};
+    const lines = [];
+
+    state.contacts
+        .filter(c => c && c.isGroup && c.memoryShared !== false && Array.isArray(c.history))
+        .forEach(group => {
+            const isMember = Array.isArray(group.members) && group.members.includes(contact.id);
+            const hasNpcMember = Array.isArray(group.npcMembers) && group.npcMembers.some(npc => npc.id === contact.id);
+            if (!isMember && !hasNpcMember) return;
+
+            const recentMsgs = group.history
+                .filter(m => {
+                    if (!m) return false;
+                    if (m.sender === 'system_instruction') return false;
+                    if (m.sender === 'system' && m.type !== 'offlineAction') return false;
+                    if (['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type)) return false;
+                    return true;
+                })
+                .slice(-limit);
+
+            if (!recentMsgs.length) return;
+
+            const getProfileInGroupLocal = (id) => {
+                if (id === 'user' || id === 'myProfile') return myProfile;
+                let profile = state.contacts.find(c => c.id === id);
+                if (profile) return profile;
+                if (Array.isArray(group.npcMembers)) {
+                    profile = group.npcMembers.find(npc => npc.id === id);
+                    if (profile) return profile;
+                }
+                return null;
+            };
+
+            const digestLines = recentMsgs.map(m => {
+                const profile = getProfileInGroupLocal(m.sender || m.characterId);
+                const actorProfile = getProfileInGroupLocal(m.characterId);
+                const senderName =
+                    m.sender === 'user' || m.sender === 'myProfile'
+                        ? (myProfile.name || '我')
+                        : (m.characterName || actorProfile?.name || profile?.name || m.senderName || m.sender || '群成员');
+
+                let content = '';
+                if (typeof m.content === 'string') {
+                    content = m.content;
+                } else if (m.content && typeof m.content === 'object') {
+                    content = m.content.text || m.content.content || m.content.description || JSON.stringify(m.content);
+                }
+
+                if (m.type === 'offlineAction') {
+                    content = `【动作】${stripOuterActionBrackets(content)}`;
+                } else if (m.type === 'offlineSpeech') {
+                    content = `【线下发言】${content}`;
+                } else if (m.type === 'image' || m.type === 'uploaded_image') {
+                    content = `【图片】${content || '发送了一张图片'}`;
+                } else if (m.type === 'transfer') {
+                    content = `【转账】${content}`;
+                } else if (m.type === 'red_packet') {
+                    content = `【红包】${content}`;
+                }
+
+                content = String(content || '').replace(/<[^>]+>/g, '').trim();
+                if (!content) return '';
+
+                return `${senderName}: ${content.slice(0, 120)}`;
+            }).filter(Boolean);
+
+            if (digestLines.length) {
+                lines.push(`来自群聊《${group.name || '群聊'}》的最近内容：\n${digestLines.join('\n')}`);
+            }
+        });
+
+    return lines.length ? lines.join('\n\n') : '暂无相关群聊近况';
+}
+
 function doesInputNeedPrivateMemory(text) {
     return /(私聊|单聊|刚刚我们|刚才我们|你不是知道|你知道我|之前我跟你说|我们之前|上次我跟你|还记得|记不记得|你忘了|我们俩|只有你知道)/.test(String(text || ''));
 }
@@ -19843,6 +19933,26 @@ async function saveGroupCrossSceneMemory(group, content, relatedContactIds = [])
     group.crossSceneMemories = group.crossSceneMemories.slice(-50);
 
     await kokoMemory.put('contacts', group);
+}
+
+async function autoSaveGroupRecentMemoryForMembers(group, limit = 12) {
+    if (!group || group.memoryShared === false || !Array.isArray(group.history)) return;
+
+    const recentText = buildGroupRecentContextDigest(group, null, limit);
+    if (!recentText || recentText === '(暂无群聊上下文)') return;
+
+    const relatedContactIds = (group.members || []).filter(id => id && id !== 'user' && id !== 'myProfile');
+    if (!relatedContactIds.length) return;
+
+    const content = `最近群聊《${group.name || '群聊'}》里发生了这些：${recentText.slice(0, 300)}`;
+
+    await saveGroupCrossSceneMemory(group, content, relatedContactIds);
+
+    console.log('[群聊自动同步到私聊记忆]', {
+        groupName: group.name,
+        relatedContactIds,
+        contentPreview: content.slice(0, 300)
+    });
 }
 
 function buildCurrentTurnBoundaryRules(mode, allowPreviousCallback) {
@@ -20547,6 +20657,9 @@ case 'takeout':
                 const privateGroupMemorySummary = (contact && !contact.isGroup)
                     ? buildPrivateGroupMemorySummary(contact)
                     : '';
+                const recentGroupChatDigest = (contact && !contact.isGroup)
+                    ? buildRecentGroupChatDigestForContact(contact, 20)
+                    : '';
                 
                 // (你原来的短信记忆逻辑)
                 if (contact && contact.smsHistory) {
@@ -21099,7 +21212,7 @@ ${qzoneContextText}
                     // privateSystemContent 从 basePrompt 重新构建，不复用 finalSystemPrompt/memoryCoreContext/记忆流
 
                     // 用干净函数构建 privateSystemContent，完全不接触 basePrompt/finalSystemPrompt/memoryCoreContext
-                    const privateSystemContent = buildCleanPrivateSystemContent({
+                    let privateSystemContent = buildCleanPrivateSystemContent({
                         contact,
                         myProfile: myProfile,
                         thoughtPresetContent,
@@ -21110,6 +21223,25 @@ ${qzoneContextText}
                         musicListString,
                         isNarrativeMode
                     });
+
+                    const groupMemorySection = (contact && !contact.isGroup) ? `
+[相关群聊记忆]
+${privateGroupMemorySummary || '暂无相关群聊记忆'}
+
+[最近相关群聊上下文｜用于私聊承接]
+${recentGroupChatDigest || '暂无相关群聊近况'}
+
+使用规则：
+1. 如果用户刚从群聊切回私聊，且当前私聊内容明显在接群里的话题，你必须结合这里的群聊上下文理解。
+2. 不要说“我不知道你们群里说了什么”。
+3. 不要把群聊内容当成私聊里刚刚发生的事，但可以说“群里刚才那个……”或者自然接住。
+4. 如果用户私聊里说“刚刚群里那个”“她刚才说的”“你怎么看”“然后呢”“怎么办”，优先结合最近相关群聊上下文。
+5. 群聊记忆只能作为背景，不要机械复述整段聊天记录。
+` : '';
+
+                    if (groupMemorySection) {
+                        privateSystemContent += `\n\n${groupMemorySection}`;
+                    }
 
                     // === 构建 userTask ===
                     const safeRecentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, 6);
@@ -21124,17 +21256,13 @@ ${qzoneContextText}
                         privateUserTask += `【长期记忆摘要，仅供关系背景，不是本轮话题】\n${_privateMems}\n\n`;
                     }
 
-                    if (privateGroupMemorySummary) {
-                        privateUserTask += `【群聊相关记忆摘要】\n${privateGroupMemorySummary}\n\n这些只是群聊余波和关系背景。\n如果当前用户没提群聊/刚刚/继续/前面那件事，不要主动把它作为本轮话题。\n\n`;
-                    }
-
                     if (recentHistoryText) {
                         privateUserTask += `【最近聊天，仅供语气和关系背景，不是本轮要继续回答的问题】\n${recentHistoryText}\n\n`;
                     }
                     if (isNarrativeMode) {
                         privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{"events":[{"type":"action","content":"..."},{"type":"speech","characterId":"${contact.id || ''}","characterName":"${contact.name || '角色'}","content":"..."}],"heart_voice":{"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"无"},"diary":"..."}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把"嗯、哦、啧"之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
                     } else {
-                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n只回应上面这一句。\n如果用户没有明确说"刚刚/继续/上一句/前面那个/你还没回答"，不要主动回到上一轮话题。\n可以保留上一轮情绪余温，但不要继续上一轮具体内容。\n第一条回复必须直接接住当前用户最新输入。`;
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n只回应上面这一句。\n如果用户最新输入明显是新话题，不要主动翻旧账。\n如果用户最新输入是“你怎么看 / 那怎么办 / 她什么意思 / 然后呢 / 继续 / 刚刚群里那个 / 她刚才说的 / 群里那个”等承接句，且上方存在[最近相关群聊上下文]，必须结合群聊上下文理解。\n可以保留上一轮情绪余温，也可以承接刚刚群聊里的同一件事，但不要无关地翻旧账。\n第一条回复必须直接接住当前用户最新输入。`;
                     }
                     if (dynamicInstructions) privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
 
@@ -21152,6 +21280,24 @@ ${qzoneContextText}
                             { role: 'user', content: privateUserTask }
                         ];
                     }
+
+                    console.log('[私聊读取群聊记忆检查]', {
+                        contactName: contact.name,
+                        privateGroupMemorySummary,
+                        recentGroupChatDigestPreview: recentGroupChatDigest.slice(0, 1200),
+                        relatedGroups: state.contacts
+                            .filter(c => c && c.isGroup && Array.isArray(c.history) && (
+                                (Array.isArray(c.members) && c.members.includes(contact.id))
+                                || (Array.isArray(c.npcMembers) && c.npcMembers.some(npc => npc.id === contact.id))
+                            ))
+                            .map(g => ({
+                                groupName: g.name,
+                                memoryShared: g.memoryShared,
+                                historyCount: g.history.length,
+                                crossSceneMemoryCount: g.crossSceneMemories?.length || 0
+                            }))
+                    });
+
                     console.log('[私聊最终请求-干净版]', {
                         usingFinalSystemPrompt: false,
                         usingBasePrompt: privateSystemContent.includes('{{memory_stream}}') || privateSystemContent.includes('统一时序记忆流') || privateSystemContent.includes('上一轮角色回复'),
