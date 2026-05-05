@@ -18657,6 +18657,7 @@ async function triggerGroupFreeChat(group) {
                 const contactProfile = state.contacts.find(c => c.id === profile.id);
                 const relationshipSummary = buildGroupMemberRelationshipSummary(contactProfile);
                 const crossSceneSummary = buildCrossSceneMemorySummary(contactProfile, group);
+                const recentPrivateDigest = buildRecentPrivateChatDigest(contactProfile, 30);
 
                 return `
 - 角色名: ${profile.name}
@@ -18664,8 +18665,10 @@ async function triggerGroupFreeChat(group) {
   ${group.memoryShared ? `
   - [与用户的关系摘要，仅供语气，不是本轮话题]
 ${relationshipSummary}
-  - [跨场景记忆摘要]
+  - [跨场景关键记忆摘要]
 ${crossSceneSummary}
+  - [近期私聊近况摘要，仅供理解这个角色和用户最近的关系状态，不是本轮要继续回答的问题]
+${recentPrivateDigest}
   ` : ''}
 `;
             }).join('');
@@ -18692,7 +18695,7 @@ ${worldBookContextString}
 ---
 
 [背景资料：角色档案]
-${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要与跨场景关键记忆。' : '下方是本次群聊所有AI角色的基础档案。'}
+${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要、跨场景关键记忆和近期私聊近况摘要。' : '下方是本次群聊所有AI角色的基础档案。'}
 --- 角色档案区 ---
 ${characterDossiersPrompt}
 --- 档案区结束 ---
@@ -18703,6 +18706,13 @@ ${characterDossiersPrompt}
 ---
 ${safeGroupHistoryText}
 ---
+
+[私聊近况使用规则]
+1. 近期私聊近况只用于判断角色和用户之间最近的关系状态、亲疏、误会、约定、称呼、情绪余温。
+2. 禁止把近期私聊近况当成此刻群里刚刚有人说的话。
+3. 禁止主动复述私聊原文。
+4. 除非群内有人明确提到私聊，否则不要直接说“我们私聊刚刚说过……”。
+5. 可以自然表现为：角色更熟悉用户近况、称呼变化、态度变化、关系余温仍在。
 
 [回复规则]
 1. 输出只能是 MESSAGE 脚本，不要附加解释。
@@ -18722,7 +18732,7 @@ ${safeGroupHistoryText}
 用户（${myProfile.name}）正在“观察”群聊，TA没有发言。
 你的任务是：
 1. 选择 2 到 3 名角色。
-2. 根据最近群聊背景、关系摘要和跨场景记忆，生成一小段自然互动。
+2. 根据最近群聊背景、关系摘要、跨场景关键记忆和近期私聊近况摘要，生成一小段自然互动。
 3. 可以延续最近群内正在发酵的气氛，但不要突然切回久远私聊旧话题。
 4. 绝对不要和用户“${myProfile.name}”直接说话，这是AI成员之间的对话。
 
@@ -18740,6 +18750,23 @@ MESSAGE_END
             { role: 'system', content: finalSystemPrompt },
             { role: 'user', content: freeChatUserTaskPrompt } 
         ];
+
+        console.log('[群聊自由聊天记忆互通检查]', {
+            groupName: group.name,
+            memoryShared: !!group.memoryShared,
+            memberDigests: allMemberProfiles.map(profile => {
+                const contactProfile = state.contacts.find(c => c.id === profile.id);
+                return {
+                    name: profile.name,
+                    hasHistory: !!(contactProfile?.history?.length),
+                    permanentCount: contactProfile?.permanent_memories?.length || 0,
+                    memoryCount: contactProfile?.memories?.length || 0,
+                    digestPreview: group.memoryShared
+                        ? buildRecentPrivateChatDigest(contactProfile, 30).slice(0, 200)
+                        : '(memoryShared disabled)'
+                };
+            })
+        });
 
         // --- 4. 【核心】调用 generateAiResponse 的“后门” ---
         const rawResponse = await generateAiResponse(
@@ -18885,6 +18912,7 @@ async function triggerGroupChatAiReply(group) {
         } catch (_e) { /* 静默忽略 */ }
 
         const safeGroupHistoryText = buildSafeGroupHistoryText(group, _grpLatestUserMsgId, 8);
+        const needPrivateMemory = doesInputNeedPrivateMemory(latestGroupInputText);
 
         let characterDossiersPrompt = '';
         if (group.memoryShared) {
@@ -18892,13 +18920,19 @@ async function triggerGroupChatAiReply(group) {
                 const contactProfile = state.contacts.find(c => c.id === profile.id);
                 const relationshipSummary = buildGroupMemberRelationshipSummary(contactProfile);
                 const crossSceneSummary = buildCrossSceneMemorySummary(contactProfile, group);
+                const recentPrivateDigest = buildRecentPrivateChatDigest(
+                    contactProfile,
+                    needPrivateMemory ? 50 : 30
+                );
                 return `
 - 角色名: ${profile.name}
   - 核心人设: ${(profile.persona || '').replace(/\n/g, ' ')}
   - [与用户的关系摘要，仅供语气，不是本轮话题]
 ${relationshipSummary}
-  - [跨场景记忆摘要]
+  - [跨场景关键记忆摘要]
 ${crossSceneSummary}
+  - [近期私聊近况摘要，仅供理解这个角色和用户最近的关系状态，不是本轮要继续回答的问题]
+${recentPrivateDigest}
 `;
             }).join('');
         } else {
@@ -18928,7 +18962,7 @@ ${worldBookContextString}
 ---
 
 [第五份信息：角色档案]
-${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要与跨场景关键记忆。' : '下方是本次群聊所有AI角色的基础档案。'}
+${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要、跨场景关键记忆和近期私聊近况摘要。' : '下方是本次群聊所有AI角色的基础档案。'}
 --- 角色档案区 ---
 ${characterDossiersPrompt}
 --- 档案区结束 ---
@@ -18940,6 +18974,14 @@ ${characterDossiersPrompt}
 4. 当前用户没有提“刚刚/继续/上一句/前面那个”时，禁止继续上一轮具体话题。
 5. 第一条 MESSAGE 必须能对应当前用户最新输入。
 6. 输出前自检：每条 MESSAGE 是否能对应当前用户最新输入？不能对应就删掉。
+
+[私聊近况使用规则]
+1. 近期私聊近况只用于判断角色和用户之间最近的关系状态、亲疏、误会、约定、称呼、情绪余温。
+2. 禁止把近期私聊近况当成当前群聊里用户刚说的话。
+3. 禁止主动复述私聊原文。
+4. 禁止直接说“我们私聊刚刚说过……”除非当前用户明确提到私聊。
+5. 可以自然表现为：角色知道用户最近经历过什么、两人关系变了、称呼更熟、态度更亲近或更别扭。
+6. 群聊第一条仍然必须回应【当前用户最新输入】。
 
 [通用规则 - 所有角色都必须遵守]
 [文学风格] 你的写作风格需要遵循高端女性向文学（类似晋江文学城的流行风格）。文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时,要体现出较高的文学素养。
@@ -18985,6 +19027,26 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，可以�
             { role: 'system', content: cleanGroupSystemPrompt },
             { role: 'user', content: groupUserTaskPrompt }
         ];
+
+        console.log('[群聊记忆互通检查]', {
+            groupName: group.name,
+            memoryShared: !!group.memoryShared,
+            latestGroupInputText,
+            needPrivateMemory,
+            memberDigests: allMemberProfiles.map(profile => {
+                const contactProfile = state.contacts.find(c => c.id === profile.id);
+                return {
+                    name: profile.name,
+                    hasHistory: !!(contactProfile?.history?.length),
+                    permanentCount: contactProfile?.permanent_memories?.length || 0,
+                    memoryCount: contactProfile?.memories?.length || 0,
+                    digestPreview: buildRecentPrivateChatDigest(
+                        contactProfile,
+                        needPrivateMemory ? 50 : 30
+                    ).slice(0, 200)
+                };
+            })
+        });
 
         const rawResponse = await generateAiResponse(
             null,
@@ -19384,6 +19446,72 @@ function buildCrossSceneMemorySummary(contact, group) {
     return lines.length ? lines.join('\n') : '暂无跨场景关键记忆';
 }
 
+function buildRecentPrivateChatDigest(contactProfile, limit = 12) {
+    if (!contactProfile || !Array.isArray(contactProfile.history)) {
+        return '暂无近期私聊近况';
+    }
+
+    const msgs = contactProfile.history
+        .filter(msg => {
+            if (!msg) return false;
+            if (msg.sender === 'system_instruction' || msg.sender === 'system') return false;
+            if (['system_notification', 'loading', 'error', 'heart_voice'].includes(msg.type)) return false;
+            return true;
+        })
+        .slice(-limit);
+
+    if (!msgs.length) return '暂无近期私聊近况';
+
+    const lines = msgs.map(msg => {
+        const who = (msg.sender === 'user' || msg.sender === 'myProfile')
+            ? (state.myProfile?.name || '用户')
+            : (contactProfile.name || '角色');
+
+        let content = '';
+
+        switch (msg.type) {
+            case 'text':
+            case 'html':
+                content = typeof msg.content === 'string'
+                    ? msg.content.replace(/<[^>]+>/g, '').trim()
+                    : '';
+                break;
+            case 'image':
+            case 'uploaded_image':
+                content = msg.isEmoticon && msg.emoticonName
+                    ? `[表情包:${msg.emoticonName}]`
+                    : '[图片]';
+                break;
+            case 'picture_description':
+                content = `[图片描述:${msg.content?.description || ''}]`;
+                break;
+            case 'voice':
+                content = `[语音:${msg.content?.text || ''}]`;
+                break;
+            case 'red_packet':
+                content = `[红包:${msg.content?.blessing || ''}]`;
+                break;
+            case 'transfer':
+                content = `[转账:${msg.content?.amount || ''}]`;
+                break;
+            case 'music_share':
+                content = `[音乐:${msg.content?.title || ''}]`;
+                break;
+            default:
+                content = typeof msg.content === 'string'
+                    ? msg.content.replace(/<[^>]+>/g, '').trim()
+                    : '';
+        }
+
+        if (!content) return '';
+        return `${who}: ${content.slice(0, 80)}`;
+    }).filter(Boolean);
+
+    if (!lines.length) return '暂无近期私聊近况';
+
+    return lines.join('\n');
+}
+
 function buildPrivateGroupMemorySummary(contact) {
     const lines = [];
 
@@ -19405,6 +19533,10 @@ function buildPrivateGroupMemorySummary(contact) {
         });
 
     return lines.length ? lines.join('\n') : '暂无相关群聊记忆';
+}
+
+function doesInputNeedPrivateMemory(text) {
+    return /(私聊|单聊|刚刚我们|刚才我们|你不是知道|你知道我|之前我跟你说|我们之前|上次我跟你|还记得|记不记得|你忘了|我们俩|只有你知道)/.test(String(text || ''));
 }
 
 function cleanGroupSpeechContent(text) {
