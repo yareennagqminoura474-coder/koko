@@ -14375,6 +14375,7 @@ ${companionDescs}
 场景描述：${outing.placeDesc || ''}
 可进行的活动：${(outing.placeActivities || []).join('、')}
 ${outing.isCustomPlace ? '这是用户自定义场景，不要按固定模板写，要根据用户输入的地点、氛围和活动自由生成剧情。' : ''}
+${FORBIDDEN_ROLE_WORDS_PROMPT}
 ${trigger === 'start' ? '请生成出行开场，描述到达场景，让同伴打招呼并展示性格。' : '请根据用户最新的输入，生成自然的互动回应。'}
 你的输出必须是合法JSON（不要有任何其他文字）：{"events":[{"type":"action","speaker":"","content":"旁白描述"},{"type":"character","speaker":"同伴名字","content":"对话内容"}]}
 type只能是"action"或"character"，action的speaker必须是空字符串，每次输出1~3条事件。`;
@@ -14387,7 +14388,11 @@ type只能是"action"或"character"，action的speaker必须是空字符串，�
                 try { const m = result.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); } catch(e) {}
                 const eventsToAdd = parsed?.events?.length ? parsed.events : [{ type: 'character', speaker: outing.companions[0]?.name || '同伴', content: result.slice(0,300) }];
                 for (const evt of eventsToAdd) {
-                    const e = { ...evt, time: Date.now() };
+                    const e = {
+                        ...evt,
+                        content: sanitizeForbiddenRoleWords(evt?.content || ''),
+                        time: Date.now()
+                    };
                     outing.events.push(e);
                     if (stream) appendOutingEventToDOM(stream, e, outing);
                 }
@@ -14583,6 +14588,107 @@ type只能是"action"或"character"，action的speaker必须是空字符串，�
             return text.replace(mentionRegex, (match) => {
                 return `<span class="mention">${match}</span>`;
             });
+        }
+
+        const FORBIDDEN_ROLE_WORDS_PROMPT = `
+【称呼与口吻禁令】
+1. 回复中绝对禁止出现“小管家”“小管家婆”“小管家公”“管家公”“管婆”“小助手”“AI助手”“智能助手”“虚拟助手”“机器人”等词。
+2. 绝对禁止用“小管家 / 小管家婆 / 小管家公 / 小助手 / AI助手 / 机器人”等称呼来称呼自己、称呼用户或称呼角色。
+3. 不要把自己说成服务用户的助手、管家、客服、系统。
+4. 要像真实的人、真实朋友、真实恋人或真实群成员一样说话。
+5. 不要说“我来帮你安排”“作为你的管家”“本小管家觉得”这类话。
+6. 如果想表达照顾、提醒、陪伴，可以自然说“我陪你”“我帮你看看”“我在呢”，不要用管家/助手称呼。
+`.trim();
+
+        function appendForbiddenRoleWordsRule(promptText) {
+            const text = String(promptText || '').trim();
+            if (!text) return FORBIDDEN_ROLE_WORDS_PROMPT;
+            if (text.includes('【称呼与口吻禁令】')) return text;
+            return `${text}\n\n${FORBIDDEN_ROLE_WORDS_PROMPT}`;
+        }
+
+        function normalizeSystemMessagesWithForbiddenRoleWords(messages) {
+            const list = Array.isArray(messages) ? messages.map(msg => msg ? { ...msg } : msg) : [];
+            let hasSystemMessage = false;
+
+            const normalized = list.map(msg => {
+                if (!msg || msg.role !== 'system' || typeof msg.content !== 'string') return msg;
+                hasSystemMessage = true;
+                return {
+                    ...msg,
+                    content: appendForbiddenRoleWordsRule(msg.content)
+                };
+            });
+
+            if (!hasSystemMessage) {
+                normalized.unshift({ role: 'system', content: FORBIDDEN_ROLE_WORDS_PROMPT });
+            }
+
+            return normalized;
+        }
+
+        function sanitizeForbiddenRoleWords(text) {
+            if (typeof text !== 'string') return text;
+
+            return text
+                .replace(/小管家婆/g, '')
+                .replace(/小管家公/g, '')
+                .replace(/小管家/g, '')
+                .replace(/管家公/g, '')
+                .replace(/管婆/g, '')
+                .replace(/小助手/g, '')
+                .replace(/AI助手/g, '')
+                .replace(/智能助手/g, '')
+                .replace(/虚拟助手/g, '')
+                .replace(/机器人/g, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
+        }
+
+        const SANITIZABLE_AI_TEXT_KEYS = new Set([
+            'content',
+            'text',
+            'description',
+            'blessing',
+            'accompanyingMessage',
+            'message',
+            'emotion',
+            'thoughts',
+            'preview',
+            'full'
+        ]);
+
+        function sanitizeStructuredAiText(value, currentKey = '') {
+            if (typeof value === 'string') {
+                return currentKey && !SANITIZABLE_AI_TEXT_KEYS.has(currentKey)
+                    ? value
+                    : sanitizeForbiddenRoleWords(value);
+            }
+
+            if (Array.isArray(value)) {
+                return value.map(item => sanitizeStructuredAiText(item));
+            }
+
+            if (!value || typeof value !== 'object') {
+                return value;
+            }
+
+            const clone = Array.isArray(value) ? [] : {};
+            Object.entries(value).forEach(([key, itemValue]) => {
+                if (typeof itemValue === 'string') {
+                    clone[key] = SANITIZABLE_AI_TEXT_KEYS.has(key)
+                        ? sanitizeForbiddenRoleWords(itemValue)
+                        : itemValue;
+                } else {
+                    clone[key] = sanitizeStructuredAiText(itemValue, key);
+                }
+            });
+            return clone;
+        }
+
+        function sanitizeAiGeneratedMessageData(messageData) {
+            if (!messageData || typeof messageData !== 'object') return messageData;
+            return sanitizeStructuredAiText({ ...messageData });
         }
 
        
@@ -17827,6 +17933,10 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
         contact[historyArray] = []; // 如果数组不存在，先创建
     }
 
+    if (sender !== 'user' && sender !== 'myProfile' && sender !== 'system_instruction') {
+        messageData = sanitizeAiGeneratedMessageData(messageData);
+    }
+
     // 3. (仅聊天模式) 处理宠物经验和首次聊天日期
     if (historyArray === 'history') { // 仅适用于 App 内聊天
         if (contact.pet && sender !== 'system_instruction' && messageData.type !== 'system_notification') {
@@ -18833,6 +18943,8 @@ ${groupRecentContextDigest}
 4. 不要反复使用“刚刚你提到……”“刚刚说到……”，要更自然地接话。
 5. 允许群成员对前面其他角色说过的话做回应，但不要重复同一句意思。
 
+${FORBIDDEN_ROLE_WORDS_PROMPT}
+
 [背景资料：角色档案]
 ${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要、跨场景关键记忆和近期私聊近况摘要。' : '下方是本次群聊所有AI角色的基础档案。'}
 --- 角色档案区 ---
@@ -19166,7 +19278,9 @@ ${characterDossiersPrompt}
 [通用规则 - 所有角色都必须遵守]
 [文学风格] 你的写作风格需要遵循高端女性向文学（类似晋江文学城的流行风格）。文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时,要体现出较高的文学素养。
 [内容限制] 你的发言必须积极向上,充满希望。严禁探讨任何形式的阴谋论,严禁表达或引导至绝望、悲观或虚无主义的情绪。
-[禁用词列表] 绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
+[禁用词列表] 绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦、小管家、小管家婆、小管家公、管家公、管婆、小助手、AI助手、智能助手、虚拟助手、机器人。
+绝对禁止用“小管家 / 小管家婆 / 小管家公 / 小助手 / AI助手 / 机器人”等称呼来称呼自己、称呼用户或称呼角色。角色应该像真实联系人一样说话，不要用服务型、工具型、客服型自称。
+${FORBIDDEN_ROLE_WORDS_PROMPT}
 [回复规则]
 1. 输出只能是 MESSAGE 脚本，不要附加解释。
 2. TYPE 必须是 speech 或 action。
@@ -20179,6 +20293,8 @@ ${musicListString}
 3. 但不能继续上一轮具体话题。
 4. 如果当前用户没有明确说"刚刚/继续/上一句/前面那个/你还没回答"，禁止主动补答上一轮。
 5. 第一条回复必须直接回应当前用户最新输入。
+
+${FORBIDDEN_ROLE_WORDS_PROMPT}
 ${isNarrativeMode ? `
 【线下叙事输出格式：绝对强制】
 你必须只返回一个严格 JSON 对象，禁止 markdown，禁止 \`\`\`json，禁止解释说明。
@@ -20337,6 +20453,18 @@ const NORMAL_BASE_PROMPT = `
 - 磨人
 - 玩火
 - 黑甜的梦
+- 小管家
+- 小管家婆
+- 小管家公
+- 管家公
+- 管婆
+- 小助手
+- AI助手
+- 智能助手
+- 虚拟助手
+- 机器人
+绝对禁止用“小管家 / 小管家婆 / 小管家公 / 小助手 / AI助手 / 机器人”等称呼来称呼自己、称呼用户或称呼角色。角色应该像真实联系人一样说话，不要用服务型、工具型、客服型自称。
+${FORBIDDEN_ROLE_WORDS_PROMPT}
 
 [回复规则]
 1. 你的回复可以包含多条消息，每条消息占一行，一行消息禁止长篇大论。
@@ -20450,6 +20578,18 @@ const NARRATIVE_BASE_PROMPT = `
 - 磨人
 - 玩火
 - 黑甜的梦
+- 小管家
+- 小管家婆
+- 小管家公
+- 管家公
+- 管婆
+- 小助手
+- AI助手
+- 智能助手
+- 虚拟助手
+- 机器人
+绝对禁止用“小管家 / 小管家婆 / 小管家公 / 小助手 / AI助手 / 机器人”等称呼来称呼自己、称呼用户或称呼角色。角色应该像真实联系人一样说话，不要用服务型、工具型、客服型自称。
+${FORBIDDEN_ROLE_WORDS_PROMPT}
 
 [！！！输出格式：绝对强制 JSON，违反即视为错误！！！]
 你的每一条回复，必须且只能是一个严格的 JSON 对象，最外层包含 events、heart_voice 两个字段。diary 字段可以兼容解析，但不要主动输出。
@@ -20493,11 +20633,14 @@ const NARRATIVE_BASE_PROMPT = `
             // ▼▼▼ 3. 这里是新增的核心 "后门" 逻辑 ▼▼▼
             if (forceMessages) {
                 // 如果调用者提供了这个参数，我们就无条件使用它，跳过所有历史记录处理
-                requestMessages = forceMessages;
+                requestMessages = normalizeSystemMessagesWithForbiddenRoleWords(forceMessages);
             
             // ▼▼▼ 4. 下面是你原来的 'if (customSystemPrompt)' 逻辑 (注意 'let' 被移除了) ▼▼▼
             } else if (customSystemPrompt) {
-                requestMessages = [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: customSystemPrompt }];
+                requestMessages = normalizeSystemMessagesWithForbiddenRoleWords([
+                    { role: 'system', content: "You are a helpful assistant." },
+                    { role: 'user', content: customSystemPrompt }
+                ]);
             
             // ▼▼▼ 5. 下面是你原来的 'else' 逻辑 (注意 'let' 被移除了) ▼▼▼
             } else {
@@ -21632,11 +21775,13 @@ ${recentGroupChatDigest || '暂无相关群聊近况'}
                 }
 
                 // (你原来的 requestMessages 赋值)
-                requestMessages = [{ role: 'system', content: systemContent }, ...messages];
+                    requestMessages = [{ role: 'system', content: systemContent }, ...messages];
                 } // end else (群聊/其他：多轮结构)
 
             // ▼▼▼ 6. 'else' 逻辑的结尾 ▼▼▼
             }
+
+            requestMessages = normalizeSystemMessagesWithForbiddenRoleWords(requestMessages);
             // ▲▲▲ 'else' 逻辑结束 ▲▲▲
 
             // ▼▼▼ 修改：构建请求体时加入 temperature 和 max_tokens ▼▼▼
@@ -21680,10 +21825,10 @@ ${recentGroupChatDigest || '暂无相关群聊近况'}
                     }
                     data = await response.json();
                 }
-                return data.choices[0].message.content.trim();
+                return sanitizeForbiddenRoleWords(data.choices[0].message.content.trim());
             } catch (error) {
                 console.error('API调用失败:', error);
-                return `抱歉，调用API时遇到问题: ${error.message}`;
+                return sanitizeForbiddenRoleWords(`抱歉，调用API时遇到问题: ${error.message}`);
             }
         }
         
@@ -36199,10 +36344,14 @@ ${heartVoiceText}
         throw new Error('定时日记缺少 full 正文');
     }
 
-    const normalizedFull = /^\d{4}年\d{1,2}月\d{1,2}日/.test(full)
-        ? full
-        : `${dateTitle}\n\n${full}`;
-    const preview = String(parsed.preview || getDiaryPreviewText({ full: normalizedFull })).trim();
+    const normalizedFull = sanitizeForbiddenRoleWords(
+        /^\d{4}年\d{1,2}月\d{1,2}日/.test(full)
+            ? full
+            : `${dateTitle}\n\n${full}`
+    );
+    const preview = sanitizeForbiddenRoleWords(
+        String(parsed.preview || getDiaryPreviewText({ full: normalizedFull })).trim()
+    );
 
     contact.diary = contact.diary || [];
     contact.diary.push({
