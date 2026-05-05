@@ -14126,6 +14126,7 @@ function renderEmoticonPicker() {
             npcName: '',
             npcPersonality: '',
             selectedPlaceId: null,
+            customPlace: null,
             presetContactId: null,
         };
 
@@ -14136,6 +14137,7 @@ function renderEmoticonPicker() {
             outingFlowState.npcName = '';
             outingFlowState.npcPersonality = '';
             outingFlowState.selectedPlaceId = null;
+            outingFlowState.customPlace = null;
             outingFlowState.presetContactId = presetContactId || null;
             renderOutingHomeView();
         }
@@ -14239,16 +14241,57 @@ function renderEmoticonPicker() {
                 card.addEventListener('click', () => {
                     grid.querySelectorAll('.outing-place-card').forEach(el => el.classList.remove('selected'));
                     card.classList.add('selected');
+                    outingFlowState.customPlace = null;
                     outingFlowState.selectedPlaceId = place.id;
                     document.getElementById('place-start-btn').disabled = false;
                 });
                 grid.appendChild(card);
             });
+            const customCard = document.createElement('div');
+            customCard.className = 'outing-place-card';
+            customCard.dataset.id = 'custom';
+            customCard.innerHTML = `
+                <div class="opc-emoji">✨</div>
+                <div class="opc-name">自定义场景</div>
+                <div class="opc-desc">自己输入想去的地方和玩法</div>
+                <div class="opc-price">自定义</div>
+            `;
+            customCard.addEventListener('click', async () => {
+                const name = await showCustomPrompt('自定义场景', '请输入想去的地方，比如：夜市、海边、校园操场、电影院、雨天便利店');
+                if (!name || !name.trim()) return;
+
+                const desc = await showCustomPrompt('场景描述', '简单描述一下这个地方的氛围，比如：人很多、适合散步、下雨天、很安静');
+                const activitiesText = await showCustomPrompt('可做的事情', '输入几个活动，用逗号分隔，比如：聊天,拍照,吃东西,散步');
+
+                const activities = (activitiesText || '')
+                    .split(/[,，、\s]+/)
+                    .map(s => s.trim())
+                    .filter(Boolean);
+
+                outingFlowState.customPlace = {
+                    id: 'custom_' + Date.now(),
+                    name: name.trim(),
+                    emoji: '✨',
+                    desc: (desc || '').trim() || '用户自定义的出行场景',
+                    priceLevel: 1,
+                    activities: activities.length ? activities : ['聊天', '散步', '互动']
+                };
+
+                grid.querySelectorAll('.outing-place-card').forEach(el => el.classList.remove('selected'));
+                customCard.classList.add('selected');
+                customCard.querySelector('.opc-name').textContent = outingFlowState.customPlace.name;
+                customCard.querySelector('.opc-desc').textContent = outingFlowState.customPlace.desc;
+                outingFlowState.selectedPlaceId = outingFlowState.customPlace.id;
+                document.getElementById('place-start-btn').disabled = false;
+            });
+            grid.appendChild(customCard);
             document.getElementById('place-start-btn').addEventListener('click', doStartOuting);
         }
 
         async function doStartOuting() {
-            const place = OUTING_PLACES.find(p => p.id === outingFlowState.selectedPlaceId);
+            const place = outingFlowState.customPlace && outingFlowState.selectedPlaceId === outingFlowState.customPlace.id
+                ? outingFlowState.customPlace
+                : OUTING_PLACES.find(p => p.id === outingFlowState.selectedPlaceId);
             if (!place) return;
             let companions;
             if (outingFlowState.mode === 'npc') {
@@ -14256,7 +14299,7 @@ function renderEmoticonPicker() {
             } else {
                 companions = outingFlowState.selectedIds.map(id => state.contacts.find(c => c.id === id)).filter(Boolean).map(c => ({ id: c.id, name: c.name, avatar: c.avatar || '' }));
             }
-            const outing = { id: 'outing_' + Date.now(), mode: outingFlowState.mode, companions, placeId: place.id, placeName: place.name, placeEmoji: place.emoji, placeActivities: place.activities, events: [], purchases: [], spentTotal: 0, status: 'active', memorySynced: false, startTime: Date.now() };
+            const outing = { id: 'outing_' + Date.now(), mode: outingFlowState.mode, companions, placeId: place.id, placeName: place.name, placeEmoji: place.emoji, placeActivities: place.activities, placeDesc: place.desc || '', isCustomPlace: !!outingFlowState.customPlace && outingFlowState.selectedPlaceId === outingFlowState.customPlace.id, events: [], purchases: [], spentTotal: 0, status: 'active', memorySynced: false, startTime: Date.now() };
             await saveOutingData(outing);
             await setCurrentOuting(outing.id);
             renderOutingActiveView(outing);
@@ -14327,7 +14370,10 @@ function renderEmoticonPicker() {
             const systemPrompt = `你是一个互动出行叙事引擎。用户「${userName}」正在「${outing.placeName}」和同伴出去玩。
 同伴信息：
 ${companionDescs}
-可进行的活动：${outing.placeActivities.join('、')}
+场景名称：${outing.placeName}
+场景描述：${outing.placeDesc || ''}
+可进行的活动：${(outing.placeActivities || []).join('、')}
+${outing.isCustomPlace ? '这是用户自定义场景，不要按固定模板写，要根据用户输入的地点、氛围和活动自由生成剧情。' : ''}
 ${trigger === 'start' ? '请生成出行开场，描述到达场景，让同伴打招呼并展示性格。' : '请根据用户最新的输入，生成自然的互动回应。'}
 你的输出必须是合法JSON（不要有任何其他文字）：{"events":[{"type":"action","speaker":"","content":"旁白描述"},{"type":"character","speaker":"同伴名字","content":"对话内容"}]}
 type只能是"action"或"character"，action的speaker必须是空字符串，每次输出1~3条事件。`;
