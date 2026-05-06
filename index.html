@@ -19226,6 +19226,15 @@ ${safeGroupHistoryText}
 3. 可以延续最近群内正在发酵的气氛，但不要突然切回久远私聊旧话题。
 4. 绝对不要和用户“${myProfile.name}”直接说话，这是AI成员之间的对话。
 
+【自由聊天推进规则】
+1. 每轮选择 2 到 3 个角色参与。
+2. 主说话者可以连续 2 到 3 条 speech。
+3. 总 MESSAGE 数建议 5 到 9 条。
+4. action 最多 1 到 2 条。
+5. 不要所有人轮流附和。
+6. 每轮至少推进一个话题、关系或事件。
+7. 不要强行每个人都说话，也不要限制每个人只能说一句。
+
 [输出格式]
 你的输出必须是严格遵守以下格式的聊天记录脚本。
 MESSAGE_START
@@ -19235,19 +19244,33 @@ CONTENT: [单条内容]
 MESSAGE_END
 
 [动作/台词比例硬性规则]
-1. 群聊自由聊天不能全是 action，必须至少包含 2 条 speech。
-2. speech 数量必须大于或等于 action 数量。
-3. 第一条 MESSAGE 必须是 speech。
-4. action 只能辅助氛围，不能连续超过 1 条。
-5. 群成员自由聊天的重点是互相说话，不是旁白描述。
-6. 如果有 action，下一条必须尽量是 speech。
+1. 一轮回复不能全是 action。
+2. 一轮至少 4 条 speech，最多 7 条 speech。
+3. 一轮 action 最多 2 条。
+4. 一轮总 MESSAGE 数建议 5 到 9 条，最多不能超过 10 条。
+5. 第一条 MESSAGE 必须是 speech。
+6. 主说话者可以连续发 2 到 3 条，但必须递进，不要重复同一句意思。
+7. 如果已经形成推进，不要继续让其他角色补空话。
+8. 群成员自由聊天的重点是互相说话和推进，不是轮流表态或旁白描述。
 
 【speech 长度和分句规则】
-1. 每条 speech 建议控制在 10 到 28 个字，通常 1 句，最多 2 句。
-2. 不要把一句完整的话拆成几个字一条。
-3. 除了"嗯""好""行""别闹"这类特殊极短回应外，普通 speech 至少 8 个字。
-4. speech 不要过长，单条尽量不超过 36 个字。
-5. 群成员说话要自然、完整，不要碎片化。
+1. 每条 speech 建议 8 到 30 个字，像真实聊天气泡。
+2. 可以短，但不能碎。禁止“手。”“伸平了。”这种拆碎句。
+3. 一个角色可以连续发 2 到 3 条，但必须每条都有递进。
+4. 不要把一句话拆成几个无意义碎片。
+5. 也不要写成长段说教。
+6. 每条 speech 至少要承担一个功能：回应、追问、命令、解释、反驳、安抚、推动下一步。
+7. 如果只是重复别人说过的话，就不要输出。
+8. 群聊要有来回感，不是广播稿。
+
+【禁止废话和重复】
+1. 禁止一轮里多个角色重复“这是为你好”“别紧张”“放心”“别怕”“我知道了”。
+2. 禁止每个人都对同一件事表示满意、点头、认可。
+3. 禁止无意义的情绪铺垫，例如“气氛缓和了一些”“大家都沉默了”“他看着他”。
+4. 禁止没有新信息的补充发言。
+5. 禁止把一句简单意思拆给多个角色说。
+6. 如果某句话删掉也不影响剧情推进，就不要生成。
+7. 角色必须围绕当前事件做出有用反应，不要水字数。
 
 【动作生成规则】
 1. action 必须根据当前上下文临场生成，不允许套固定神态模板。
@@ -19256,7 +19279,7 @@ MESSAGE_END
 4. 不要用“似乎 / 仿佛 / 眼底 / 嘴角 / 视线 / 神色 / 气场 / 氛围”来凑动作。
 5. 不要总写点头、看向、嘴角、眼神、口型、茶杯。
 6. 如果当前上下文没有合适动作，请不要硬写 action，直接输出 speech。
-7. 每轮最多 1 条 action；除非用户明确要求线下剧情推进，否则不要连续输出动作。
+7. 每轮最多 1 到 2 条 action；除非用户明确要求线下剧情推进，否则不要连续输出动作。
 8. action 不能脱离本轮话题，不能只是通用氛围描写。
 9. 如果动作和当前用户最新输入无关，就不要生成。
 
@@ -19332,7 +19355,7 @@ TYPE: speech
                 ...requestMessages,
                 {
                     role: 'user',
-                    content: '你上一次输出全是 action，没有任何角色说话，这是错误的。请重新输出 MESSAGE 脚本：必须至少包含 2 条 TYPE: speech，第一条必须是 speech，speech 数量必须大于或等于 action 数量，禁止全是动作。'
+                    content: '你上一次输出全是 action，没有任何角色说话，这是错误的。请重新输出 MESSAGE 脚本：必须包含 4 到 7 条 TYPE: speech，第一条必须是 speech，总 MESSAGE 数控制在 5 到 9 条，speech 数量必须大于 action 数量，action 最多 2 条，允许主说话者连续发两三条，但每条都要递进，禁止轮流附和。'
                 }
             ];
 
@@ -19348,6 +19371,9 @@ TYPE: speech
             messageMatches = Array.from(rawResponse.matchAll(messageRegex));
             ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
         }
+
+        messageMatches = limitGroupMessagesForProgress(messageMatches, 9);
+        ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
 
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的自由聊天内容。");
@@ -19437,14 +19463,16 @@ TYPE: speech
                 continue;
             }
 
-            content = cleanGroupSpeechContent(content);
-            if (speakerProfile && content) {
-                if (isTooShortGroupSpeech(content)) {
-                    console.warn('[跳过过短 speech]', { speakerName, content });
+            let speechText = cleanAiSpeechText(sanitizeForbiddenRoleWords(cleanGroupSpeechContent(content))).trim();
+            if (speakerProfile && speechText) {
+                if (isTooShortGroupSpeech(speechText)) {
+                    console.warn('[跳过过短 speech]', { speakerName, speechText });
+                } else if (isLowValueGroupSpeech(speechText)) {
+                    console.warn('[跳过低价值 speech]', { speakerName, speechText });
                 } else {
                     await sleep(800 + Math.random() * 700);
                     const savedSpeechMessage = await createAndAddMessage(
-                        { type: 'text', content },
+                        { type: 'text', content: speechText },
                         speakerProfile.id,
                         group,
                         true,
@@ -19704,6 +19732,40 @@ ${groupRecentContextDigest}
 4. 不要每次都用“刚刚你提到”“刚刚说到”开头。
 5. 不要复述背景，直接往下推进。
 
+【群聊推进规则｜最高优先级】
+1. 群聊不是每个人轮流打卡，也不是一个人只能说一句。
+2. 一轮回复选择 2 到 4 个最相关角色参与即可，但主推进角色可以连续说 2 到 4 条。
+3. 其他角色可以插话、反驳、提醒、补充，每人 1 到 2 条。
+4. 一轮总 MESSAGE 数建议 7 到 12 条，最多 14 条。
+5. speech 为主，action 为辅；speech 建议 6 到 9 条，action 建议 1 到 2 条。
+6. 每一轮必须形成一个小推进，而不是停在原地。
+7. 推进可以是：做出决定、提出下一步、关系变化、冲突升级、冲突缓和、某人被说服、某人反抗、某人行动、问题被明确。
+8. 允许同一角色连续发两三条短气泡，因为真实群聊里一个人也会连发。
+9. 但禁止无意义连发，连续发言必须是递进关系，不能重复同一句意思。
+10. 不要把所有角色都拉出来说话；谁和当前事件最相关，谁多说。
+
+【剧情推进节拍】
+一轮群聊最好包含下面 3 到 5 个节拍：
+1. 直接回应用户当前输入。
+2. 一个角色提出态度或命令。
+3. 另一个角色反驳、补充或拦住。
+4. 主推进角色继续解释、要求或推动下一步。
+5. 被影响的角色做出反应。
+6. 最后留下一个明确变化：比如事情推进了、某人妥协了、某人更紧张了、某人准备行动了。
+
+不要只写：
+A：我同意。
+B：我也觉得。
+C：别怕。
+D：这是为你好。
+
+要写成有递进：
+A：先别急着躲，手伸出来。
+B：你别把人吓跑了，话说清楚再动手。
+A：我没吓他，我要的是他记住规矩。
+C：那就先问清楚，别直接罚。
+A：行，林澈，你自己说，刚才为什么躲？
+
 【最近群聊背景，仅供语气和关系背景，不是本轮要继续回答的问题】
 ${safeGroupHistoryText}
 
@@ -19714,24 +19776,33 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
 可以保留上一轮的情绪余温，也可以在同一话题下继续推进，但不要无关地翻旧账。
 
 【动作/台词比例硬性规则】
-1. 一轮回复绝对不能全是 action，必须至少包含 2 条 speech。
-2. speech 数量必须大于或等于 action 数量。
-3. 第一条 MESSAGE 必须是 speech，并且必须直接回应当前用户最新输入，长度建议 12 到 24 个字，表达完整意思。
-4. action 只能作为辅助氛围，不能连续超过 1 条。
-5. 如果输出了 action，下一条必须尽量接 speech。
-6. 群聊是聊天，不是小说旁白。角色必须开口说话。
-7. 禁止一整轮只写”他看着、他点头、他拿出、他递给”这类动作。
-8. 如果角色送红包、转账、拿东西、靠近等动作后，必须紧跟一句 speech 解释或回应。
+1. 一轮回复不能全是 action。
+2. 一轮至少 5 条 speech，最多 9 条 speech。
+3. 一轮 action 最多 2 条，除非用户明确要求线下剧情推进。
+4. 一轮总 MESSAGE 数建议 7 到 12 条，最多 14 条。
+5. 第一条 MESSAGE 必须是 speech，并且直接回应当前用户最新输入。
+6. 最后一条 MESSAGE 最好留下明确推进点，比如“下一步做什么 / 谁接话 / 谁行动 / 事情状态变化”。
+7. action 只能辅助，不要连续超过 1 条。
+8. 如果一条 action 后面没有 speech 承接，这条 action 就不要输出。
 
 【speech 长度和分句规则】
-1. speech 不要太短，也不要太长。
-2. 每条 speech 建议控制在 10 到 28 个字，通常 1 句，最多 2 句。
-3. 正常说话不要拆成几个字一条，禁止把一句完整的话拆成”手。””伸平了。”这种碎片。
-4. 除了”嗯””好””行””别怕”这种极短回应外，普通 speech 至少要有 8 个字。
-5. 不要连续输出多个极短 speech。
-6. speech 要像正常人说话，简洁自然，但要表达完整意思。
-7. 如果一句话表达不完，可以说成一条稍完整的话，不要硬拆。
-8. 单条 speech 不要超过 36 个字，避免太啰嗦。
+1. 每条 speech 建议 8 到 30 个字，像真实聊天气泡。
+2. 可以短，但不能碎。禁止“手。”“伸平了。”这种拆碎句。
+3. 一个角色可以连续发 2 到 3 条，但必须每条都有递进。
+4. 不要把一句话拆成几个无意义碎片。
+5. 也不要写成长段说教。
+6. 每条 speech 至少要承担一个功能：回应、追问、命令、解释、反驳、安抚、推动下一步。
+7. 如果只是重复别人说过的话，就不要输出。
+8. 群聊要有来回感，不是广播稿。
+
+【禁止废话和重复】
+1. 禁止一轮里多个角色重复“这是为你好”“别紧张”“放心”“别怕”“我知道了”。
+2. 禁止每个人都对同一件事表示满意、点头、认可。
+3. 禁止无意义的情绪铺垫，例如“气氛缓和了一些”“大家都沉默了”“他看着他”。
+4. 禁止没有新信息的补充发言。
+5. 禁止把一句简单意思拆给多个角色说。
+6. 如果某句话删掉也不影响剧情推进，就不要生成。
+7. 角色必须围绕当前事件做出有用反应，不要水字数。
 
 【动作生成规则】
 1. action 必须根据当前上下文临场生成，不允许套固定神态模板。
@@ -19740,7 +19811,7 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
 4. 不要用“似乎 / 仿佛 / 眼底 / 嘴角 / 视线 / 神色 / 气场 / 氛围”来凑动作。
 5. 不要总写点头、看向、嘴角、眼神、口型、茶杯。
 6. 如果当前上下文没有合适动作，请不要硬写 action，直接输出 speech。
-7. 每轮最多 1 条 action；除非用户明确要求线下剧情推进，否则不要连续输出动作。
+7. 每轮最多 1 到 2 条 action；除非用户明确要求线下剧情推进，否则不要连续输出动作。
 8. action 不能脱离本轮话题，不能只是通用氛围描写。
 9. 如果动作和当前用户最新输入无关，就不要生成。
 
@@ -19823,7 +19894,7 @@ TYPE: speech
                 ...finalRequestMessages,
                 {
                     role: 'user',
-                    content: '你上一次输出全是 action，没有任何角色说话，这是错误的。请重新输出 MESSAGE 脚本：必须至少包含 2 条 TYPE: speech，第一条必须是 speech，speech 数量必须大于或等于 action 数量，禁止全是动作。'
+                    content: '你上一次输出全是 action，没有任何角色说话，这是错误的。请重新输出 MESSAGE 脚本：必须包含 5 到 9 条 TYPE: speech，第一条必须是 speech，总 MESSAGE 数控制在 7 到 12 条，speech 数量必须大于 action 数量，action 最多 2 条，允许主推进角色连续发两三条，但每条都要递进，禁止轮流附和。'
                 }
             ];
 
@@ -19839,6 +19910,9 @@ TYPE: speech
             messageMatches = Array.from(rawResponse.matchAll(messageRegex));
             ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
         }
+
+        messageMatches = limitGroupMessagesForProgress(messageMatches, 12);
+        ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
 
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的群聊脚本。");
@@ -19933,14 +20007,16 @@ TYPE: speech
                 continue;
             }
 
-            content = cleanGroupSpeechContent(content);
-            if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
-                if (isTooShortGroupSpeech(content)) {
-                    console.warn('[跳过过短 speech]', { speakerName, content });
+            let speechText = cleanAiSpeechText(sanitizeForbiddenRoleWords(cleanGroupSpeechContent(content))).trim();
+            if (speakerProfile && speechText && !(group.mutedMembers || []).includes(speakerProfile.id)) {
+                if (isTooShortGroupSpeech(speechText)) {
+                    console.warn('[跳过过短 speech]', { speakerName, speechText });
+                } else if (isLowValueGroupSpeech(speechText)) {
+                    console.warn('[跳过低价值 speech]', { speakerName, speechText });
                 } else {
                     await sleep(800 + Math.random() * 700);
                     const savedSpeechMessage = await createAndAddMessage(
-                        { type: 'text', content },
+                        { type: 'text', content: speechText },
                         speakerProfile.id,
                         group,
                         true,
@@ -20794,13 +20870,67 @@ function cleanGroupSpeechContent(text) {
     );
 }
 
+function isProgressiveShortSpeech(text) {
+    const s = cleanAiSpeechText(String(text || '')).trim();
+    if (!s) return false;
+
+    const progressivePatterns = [
+        /别躲/,
+        /别动/,
+        /停手/,
+        /住手/,
+        /说清楚/,
+        /看着我/,
+        /伸出来/,
+        /站好/,
+        /坐下/,
+        /先听/,
+        /先别/,
+        /继续说/,
+        /你说/,
+        /回答/,
+        /解释/,
+        /过来/,
+        /收下/,
+        /拿着/
+    ];
+
+    return progressivePatterns.some(re => re.test(s));
+}
+
 function isTooShortGroupSpeech(text) {
     const s = cleanAiSpeechText(String(text || '')).trim();
     if (!s) return true;
-    const plain = s.replace(/[，。！？!?、；;：:”””'（）()【】\[\]\s]/g, '');
-    const allowedShort = ['嗯', '好', '行', '别怕', '可以', '知道了', '没事', '等等', '住手', '别闹'];
+
+    if (isProgressiveShortSpeech(s)) return false;
+
+    const plain = s.replace(/[，。！？!?、；;：:“”"'（）()【】\[\]\s]/g, '');
+    const allowedShort = ['嗯', '好', '行', '别怕', '可以', '知道了', '没事', '等等', '住手'];
     if (allowedShort.includes(s)) return false;
     return plain.length > 0 && plain.length < 4;
+}
+
+function isLowValueGroupSpeech(text) {
+    const s = cleanAiSpeechText(String(text || '')).trim();
+    if (!s) return true;
+
+    if (isProgressiveShortSpeech(s)) return false;
+
+    const lowValuePatterns = [
+        /^(嗯|好|行|知道了|可以|没事)[。.!！]*$/,
+        /^(放心|别怕|别紧张|放松)[。.!！]*$/,
+        /这是为你好/,
+        /我也是这么想/,
+        /我也觉得/,
+        /说得对/,
+        /确实如此/,
+        /^大家都/,
+        /气氛.*?(缓和|安静|凝固)/,
+        /点了点头/,
+        /看着.*?没有说话/
+    ];
+
+    return lowValuePatterns.some(re => re.test(s));
 }
 
 function inferGroupMessageType(content) {
@@ -20829,6 +20959,51 @@ function getGroupMessageTypeStats(messageMatches) {
     const actionCount = parsedMessageTypes.filter(t => t === 'action').length;
 
     return { parsedMessageTypes, speechCount, actionCount };
+}
+
+function limitGroupMessagesForProgress(messageMatches, maxMessages = 12) {
+    if (!Array.isArray(messageMatches)) return [];
+
+    const result = [];
+    let speechCount = 0;
+    let actionCount = 0;
+    const speakerSpeechCounts = new Map();
+
+    for (const match of messageMatches) {
+        const speakerName = String(match?.[1] || '').trim();
+        let type = String(match?.[2] || 'speech').trim().toLowerCase();
+        const content = String(match?.[3] || '').trim();
+
+        if (!content) continue;
+        if (type !== 'speech' && type !== 'action') type = inferGroupMessageType(content);
+
+        if (type === 'action') {
+            if (actionCount >= 2) continue;
+            if (speechCount === 0) continue;
+            actionCount++;
+            result.push(match);
+            if (result.length >= maxMessages) break;
+            continue;
+        }
+
+        if (type === 'speech') {
+            if (speechCount >= 9) continue;
+
+            const count = speakerSpeechCounts.get(speakerName) || 0;
+            if (count >= 3) continue;
+
+            speakerSpeechCounts.set(speakerName, count + 1);
+            speechCount++;
+            result.push(match);
+            if (result.length >= maxMessages) break;
+        }
+    }
+
+    if (result.length === 0 && messageMatches.length > 0) {
+        return messageMatches.slice(0, Math.min(maxMessages, messageMatches.length));
+    }
+
+    return result;
 }
 
 async function saveGroupCrossSceneMemory(group, content, relatedContactIds = []) {
