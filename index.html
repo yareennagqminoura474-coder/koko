@@ -19001,6 +19001,10 @@ async function triggerGroupFreeChat(group) {
         // 1d. 构建所有AI成员的档案
         const allMemberProfiles = unmutedAiMembers.map(id => getProfileInGroup(id)).filter(Boolean);
         const aiMemberNames = allMemberProfiles.map(profile => profile.name);
+        const allMemberNames = group.members.map(id => {
+            const profile = getProfileInGroup(id);
+            return profile ? profile.name : '';
+        }).filter(Boolean);
         const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
         
         // 1e. 【核心V7：构建完整的统一时序记忆流】
@@ -19097,6 +19101,10 @@ async function triggerGroupFreeChat(group) {
             }
         });
         
+        unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
+        const formatMemEntry = (mem) => `[${mem.type}] ${mem.author}: ${mem.content}`;
+        const finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(formatMemEntry).join('\n') || '(还没有任何记忆)';
+
         const safeGroupHistoryText = buildSafeGroupHistoryText(group, null, 8);
         const groupRecentContextDigest = buildGroupRecentContextDigest(group, null, 40);
         const groupRelationshipMatrixPrompt = await buildGroupRelationshipMatrixPrompt(group);
@@ -19130,88 +19138,51 @@ ${recentPrivateDigest}
 
 [群聊背景与成员列表]
 - 群聊名称: ${group.name}
-- 用户(观察者): ${myProfile.name} (人设: ${userPersonaInGroup})
+- 所有群成员: ${allMemberNames.join('、 ')}
+- 用户(观察者): ${myProfile.name}
+  - 用户人设/签名: ${userPersonaInGroup}
 
-[你可控制的角色]
-你【只能】扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
+[导演规则]
+1. 你只能扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
+2. 你绝对禁止扮演用户 “${myProfile.name}”。
+3. 你要让群聊像真实的人在聊天，而不是像 AI 汇总观点。
+4. 角色必须根据自己的人设、关系、记忆和当前场景说话。
+5. 不要为了平均出场让所有角色都说话，谁该说谁说。
+6. 可以多条气泡连续推进，不要用固定条数限制自己。
 
-[你禁止控制的角色]
-你【绝对禁止】扮演用户 “${myProfile.name}”。
-
-[背景资料：世界书]
+[第三份信息：世界书背景知识]
 ---
 ${worldBookContextString}
 ---
 
-[本群最近连续上下文｜最高优先级]
-下面是本群最近正在发生的连续对话。你必须先读这里，再决定群成员现在怎么接话。
-${groupRecentContextDigest}
+[第四份信息：统一时序记忆流]
+这是与本次群聊相关的所有事件的完整时间线，是你判断当前对话进展的最高优先级信息源。
+记忆流中被圆括号包裹的事件，例如“(发送了一张图片)”或“(发了一个红包)”，代表已经发生的事件。你可以基于这些事件回应，但不要在发言中机械复述这些括号内容。
+---
+${finalMemoryString}
+---
 
-[自由聊天连续性要求]
-1. 群成员自由聊天必须接着本群刚刚的话题继续，不要像重启了一轮新聊天。
-2. 如果最近大家在聊同一件事，就继续推进这个话题。
-3. 不要每次都重新解释背景。
-4. 不要反复使用“刚刚你提到……”“刚刚说到……”，要更自然地接话。
-5. 允许群成员对前面其他角色说过的话做回应，但不要重复同一句意思。
-
-${FORBIDDEN_ROLE_WORDS_PROMPT}
-${FORBIDDEN_ACTION_CLICHES_PROMPT}
-
-[背景资料：角色档案]
-${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要、跨场景关键记忆和近期私聊近况摘要。' : '下方是本次群聊所有AI角色的基础档案。'}
+[第五份信息：角色档案]
+${group.memoryShared ? '下方是本次群聊所有 AI 角色的详细档案，包含他们与你的私聊参考。' : '下方是本次群聊所有 AI 角色的基础档案。'}
 --- 角色档案区 ---
 ${characterDossiersPrompt}
 --- 档案区结束 ---
 
-[群内关系矩阵｜最高优先级]
-${groupRelationshipMatrixPrompt}
+[群内关系矩阵｜必须遵守]
+${groupRelationshipMatrixPrompt || '(暂无明确群内关系矩阵)'}
 
-[称呼规则｜必须遵守]
-1. 角色称呼别人时，必须先看群内关系矩阵，不要凭空乱叫。
-2. 如果 A 是 B 的师父、长辈、上级，B 不能随便直呼其名，除非人设明确允许。
-3. 如果 A 是 B 的师兄、师姐、同门前辈，要按关系称呼，不要叫错成师父或徒弟。
-4. 如果关系不明确，宁可使用名字，不要乱编亲密称呼。
-5. 不要把用户和角色的关系、角色和角色之间的关系混在一起。
-6. 如果角色关系里已经写了具体称呼，必须优先使用具体称呼。
-7. 如果关系网和人设中没有明确写 A 应该叫 B “师父 / 师兄 / 师弟 / 徒弟 / 长辈”，禁止凭空使用这些辈分称呼。
-8. 如果不确定称呼，优先叫对方名字，不要乱套师门关系。
-9. 每次发言前先确认“说话者是谁、被称呼者是谁、两人的关系是什么”。
+[称呼规则]
+1. 如果关系矩阵和人设里明确写了关系，必须按关系称呼。
+2. 如果没有明确关系，不要乱叫师父、师兄、徒弟、长辈。
+3. 不确定称呼时，优先叫名字。
+4. 不要把用户和角色之间的关系，混成角色和角色之间的关系。
 
-[关系不能乱编]
-1. 如果关系网里有明确关系，必须按关系网来。
-2. 如果关系网没有写，不能凭空把别人叫成师父、师兄、徒弟、长辈。
-3. 角色发言前先判断自己和对方的关系，再决定称呼。
-4. 如果不知道怎么称呼，用对方名字，别乱叫亲昵称呼或辈分称呼。
+${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 
-[背景资料：最近群聊背景]
-以下内容只用于判断群内关系、语气和情绪余温。
-它不是某个必须逐句续写的旧脚本。
----
-${safeGroupHistoryText}
----
-
-[私聊近况使用规则]
-1. 近期私聊近况只用于判断角色和用户之间最近的关系状态、亲疏、误会、约定、称呼、情绪余温。
-2. 禁止把近期私聊近况当成此刻群里刚刚有人说的话。
-3. 禁止主动复述私聊原文。
-4. 除非群内有人明确提到私聊，否则不要直接说“我们私聊刚刚说过……”。
-5. 可以自然表现为：角色更熟悉用户近况、称呼变化、态度变化、关系余温仍在。
-
-[口癖限制]
-1. 不要频繁使用“刚刚你提到”“刚刚说到”“你刚才说”。
-2. 连续上下文不是为了让你复读“刚刚”，而是为了让你自然接住话题。
-3. 同一轮群聊回复里最多只能出现一次“刚刚/刚才”。
-4. 大多数时候直接接话，不要用总结式开头。
-5. 不要每个角色都先复述用户问题。
-
-[回复规则]
-1. 输出只能是 MESSAGE 脚本，不要附加解释。
-2. TYPE 必须是 speech 或 action。
-3. speech 只写角色真正说出口的话，不要写动作、神态、心理。
-4. action 只写动作、神态、环境、场景推进，不要写角色说出口的话。
-5. 一条 MESSAGE 只能表达一种类型，不要动作和台词混写。
-6. 每个角色可以输出多条 MESSAGE，动作和台词可以交替。
-7. 不要把所有内容塞在一个 CONTENT 里。
+[特殊指令]
+你可以使用 [sticker:表情名]、[voice:内容]、[picture:描述] 等指令。
+[可用表情包列表]
+${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
 `;
         
         const finalSystemPrompt = freeChatSystemPrompt;
@@ -19221,83 +19192,18 @@ ${safeGroupHistoryText}
 [！！！核心任务！！！]
 用户（${myProfile.name}）正在“观察”群聊，TA没有发言。
 你的任务是：
-1. 选择 2 到 3 名角色。
-2. 根据最近群聊背景、关系摘要、跨场景关键记忆和近期私聊近况摘要，生成一小段自然互动。
-3. 可以延续最近群内正在发酵的气氛，但不要突然切回久远私聊旧话题。
-4. 绝对不要和用户“${myProfile.name}”直接说话，这是AI成员之间的对话。
-
-【自由聊天推进规则】
-1. 每轮选择 2 到 3 个角色参与。
-2. 主说话者可以连续 2 到 3 条 speech。
-3. 总 MESSAGE 数建议 5 到 9 条。
-4. action 最多 1 到 2 条。
-5. 不要所有人轮流附和。
-6. 每轮至少推进一个话题、关系或事件。
-7. 不要强行每个人都说话，也不要限制每个人只能说一句。
+1. 分析上下文：阅读你(System)的背景资料中提供的【统一时序记忆流】（它包含了群聊和私聊），看看大家最后聊了什么。
+2. 选择发言人：从你“可控制的角色”列表中，选择当前最适合继续说话的角色。
+3. 生成对话：让他们围绕“记忆流”中的最后一个话题继续深入，或者开启一个符合人设、世界观、关系和私聊记忆的新话题。
+4. 禁止回复用户：绝对不要和用户“${myProfile.name}”说话，这是 AI 成员之间的对话。
+5. 不要按固定条数生成，按当前氛围自然推进。可以多条，也可以少条，关键是自然和有推进。
 
 [输出格式]
-你的输出必须是严格遵守以下格式的聊天记录脚本。
+你的输出必须严格遵守以下格式：
 MESSAGE_START
-SPEAKER: [角色名]
-TYPE: speech 或 action
-CONTENT: [单条内容]
+SPEAKER: [角色名] (必须从你“可控制的角色”列表中选择)
+CONTENT: [该角色说的单条消息内容，可以包含特殊指令]
 MESSAGE_END
-
-[动作/台词比例硬性规则]
-1. 一轮回复不能全是 action。
-2. 一轮至少 4 条 speech，最多 7 条 speech。
-3. 一轮 action 最多 2 条。
-4. 一轮总 MESSAGE 数建议 5 到 9 条，最多不能超过 10 条。
-5. 第一条 MESSAGE 必须是 speech。
-6. 主说话者可以连续发 2 到 3 条，但必须递进，不要重复同一句意思。
-7. 如果已经形成推进，不要继续让其他角色补空话。
-8. 群成员自由聊天的重点是互相说话和推进，不是轮流表态或旁白描述。
-
-【speech 长度和分句规则】
-1. 每条 speech 建议 8 到 30 个字，像真实聊天气泡。
-2. 可以短，但不能碎。禁止“手。”“伸平了。”这种拆碎句。
-3. 一个角色可以连续发 2 到 3 条，但必须每条都有递进。
-4. 不要把一句话拆成几个无意义碎片。
-5. 也不要写成长段说教。
-6. 每条 speech 至少要承担一个功能：回应、追问、命令、解释、反驳、安抚、推动下一步。
-7. 如果只是重复别人说过的话，就不要输出。
-8. 群聊要有来回感，不是广播稿。
-
-【禁止废话和重复】
-1. 禁止一轮里多个角色重复“这是为你好”“别紧张”“放心”“别怕”“我知道了”。
-2. 禁止每个人都对同一件事表示满意、点头、认可。
-3. 禁止无意义的情绪铺垫，例如“气氛缓和了一些”“大家都沉默了”“他看着他”。
-4. 禁止没有新信息的补充发言。
-5. 禁止把一句简单意思拆给多个角色说。
-6. 如果某句话删掉也不影响剧情推进，就不要生成。
-7. 角色必须围绕当前事件做出有用反应，不要水字数。
-
-【动作生成规则】
-1. action 必须根据当前上下文临场生成，不允许套固定神态模板。
-2. 每条 action 必须至少包含一个具体上下文元素，例如：当前提到的人、物品、红包、座位、门口、手机、聊天内容、刚刚的发言、当前场景里的具体物件。
-3. action 只写可被看见的行为，少写抽象心理和泛泛神态。
-4. 不要用“似乎 / 仿佛 / 眼底 / 嘴角 / 视线 / 神色 / 气场 / 氛围”来凑动作。
-5. 不要总写点头、看向、嘴角、眼神、口型、茶杯。
-6. 如果当前上下文没有合适动作，请不要硬写 action，直接输出 speech。
-7. 每轮最多 1 到 2 条 action；除非用户明确要求线下剧情推进，否则不要连续输出动作。
-8. action 不能脱离本轮话题，不能只是通用氛围描写。
-9. 如果动作和当前用户最新输入无关，就不要生成。
-
-示例：
-错误：
-TYPE: action
-他紧绷的嘴角似乎柔和了一丝，轻轻点了点头。
-
-正确：
-TYPE: action
-他把刚拆开的红包往林澈那边推了推，手指在屏幕上停了一下，示意对方收下。
-
-错误：
-TYPE: action
-他挤了挤眼睛，做了一个“以后我罩你”的口型。
-
-正确：
-TYPE: speech
 `;
 
         // --- 3. 【核心】构建AI调用参数 ---
@@ -19355,7 +19261,7 @@ TYPE: speech
                 ...requestMessages,
                 {
                     role: 'user',
-                    content: '你上一次输出全是 action，没有任何角色说话，这是错误的。请重新输出 MESSAGE 脚本：必须包含 4 到 7 条 TYPE: speech，第一条必须是 speech，总 MESSAGE 数控制在 5 到 9 条，speech 数量必须大于 action 数量，action 最多 2 条，允许主说话者连续发两三条，但每条都要递进，禁止轮流附和。'
+                    content: '你上一次输出没有有效角色台词，格式或内容不适合群聊。请重新输出 MESSAGE 脚本：必须让角色自然说话，不能全是动作，不能控制用户，不要写解释，不要限制条数，按当前剧情自然推进。'
                 }
             ];
 
@@ -19372,9 +19278,6 @@ TYPE: speech
             ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
         }
 
-        messageMatches = limitGroupMessagesForProgress(messageMatches, 9);
-        ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
-
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的自由聊天内容。");
         }
@@ -19390,7 +19293,6 @@ TYPE: speech
 
         let lastRenderedType = '';
         let renderedSpeechCount = 0;
-        let renderedActionCount = 0;
         const actionContextText = [
             groupRecentContextDigest || '',
             characterDossiersPrompt || ''
@@ -19398,14 +19300,8 @@ TYPE: speech
 
         for (const match of messageMatches) {
             const speakerName = match[1].trim();
-            let messageType = String(match[2] || 'speech').trim().toLowerCase();
             let content = match[3].trim();
-            if (!match[2]) {
-                messageType = inferGroupMessageType(content);
-            }
-            if (messageType !== 'speech' && messageType !== 'action') {
-                messageType = 'speech';
-            }
+            const explicitType = String(match[2] || '').trim().toLowerCase();
             
             const speakerProfile = allMemberProfiles.find(p => p.name === speakerName);
 
@@ -19419,31 +19315,21 @@ TYPE: speech
                 content = content.replace(memoryMatch[0], '').trim();
             }
 
-            if (messageType === 'action') {
-                if (!shouldForceSpeechFallback && renderedSpeechCount === 0 && speechCount > 0) {
-                    console.warn('[跳过开场动作卡片，优先显示台词]', { speakerName, content });
-                    continue;
-                }
-                if (lastRenderedType === 'action') {
-                    console.warn('[跳过连续动作卡片]', { speakerName, content });
-                    continue;
-                }
-                if (shouldForceSpeechFallback && renderedActionCount >= 1) {
-                    console.warn('[重试后仍无台词，仅保留第一条动作卡片]', { speakerName, content });
-                    continue;
-                }
-                if (renderedActionCount >= renderedSpeechCount && renderedSpeechCount > 0) {
-                    console.warn('[跳过过量动作卡片]', { speakerName, content });
-                    continue;
-                }
+            content = sanitizeForbiddenRoleWords(content).trim();
+            if (!content) continue;
+
+            const shouldRenderAction = explicitType === 'action' || (!explicitType && looksLikeOfflineAction(content));
+
+            if (shouldRenderAction) {
                 const actionText = cleanOfflineActionText(content)
                     .replace(/^[“””]+|[“””]+$/g, '')
                     .trim();
-                if (actionText && isRepeatedRecentAction(group, actionText)) {
-                    console.warn('[跳过重复动作]', { actionText });
-                    continue;
-                }
-                if (actionText && !shouldSkipOfflineActionByQuality(actionText, actionContextText)) {
+                if (
+                    actionText &&
+                    !isRepeatedRecentAction(group, actionText) &&
+                    !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
+                    lastRenderedType !== 'action'
+                ) {
                     await sleep(800 + Math.random() * 700);
                     await createAndAddMessage(
                         {
@@ -19457,32 +19343,20 @@ TYPE: speech
                         true,
                         'chat'
                     );
-                    renderedActionCount++;
                     lastRenderedType = 'action';
                 }
                 continue;
             }
 
-            let speechText = cleanAiSpeechText(sanitizeForbiddenRoleWords(cleanGroupSpeechContent(content))).trim();
-            if (speakerProfile && speechText) {
-                if (isTooShortGroupSpeech(speechText)) {
-                    console.warn('[跳过过短 speech]', { speakerName, speechText });
-                } else if (isLowValueGroupSpeech(speechText)) {
-                    console.warn('[跳过低价值 speech]', { speakerName, speechText });
-                } else {
-                    await sleep(800 + Math.random() * 700);
-                    const savedSpeechMessage = await createAndAddMessage(
-                        { type: 'text', content: speechText },
-                        speakerProfile.id,
-                        group,
-                        true,
-                        'chat'
-                    );
-                    if (savedSpeechMessage) {
-                        renderedSpeechCount++;
-                        lastRenderedType = 'speech';
-                    }
-                }
+            const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(content);
+            const speechText = hasStructuredDirective ? content : cleanAiSpeechText(content).trim();
+            if (!speechText) continue;
+
+            if (speakerProfile) {
+                await sleep(800 + Math.random() * 700);
+                await processAndDisplayAiResponse(speechText, speakerProfile, group, 'chat');
+                renderedSpeechCount++;
+                lastRenderedType = 'speech';
             }
         }
 
@@ -19578,6 +19452,31 @@ async function triggerGroupChatAiReply(group) {
         const groupRecentContextDigest = buildGroupRecentContextDigest(group, _grpLatestUserMsgId, 40);
         const groupRelationshipMatrixPrompt = await buildGroupRelationshipMatrixPrompt(group);
         const needPrivateMemory = doesInputNeedPrivateMemory(latestGroupInputText);
+        const memoryLimit = state.apiSettings.longTermMemoryLength || 40;
+        const finalMemoryString = (Array.isArray(group.history) ? group.history : [])
+            .filter(msg => msg && msg.sender !== 'system_instruction' && !['loading', 'error', 'heart_voice'].includes(msg.type))
+            .map(msg => {
+                const content = getGroupPromptMessageText(msg);
+                if (!content) return null;
+                const author = resolveGroupMessageSenderName(msg, group);
+                let memoryType = '群聊';
+                if (msg.type === 'offlineAction') memoryType = '群聊动作';
+                else if (msg.type === 'offlineSpeech') memoryType = '群聊线下发言';
+                else if (msg.type === 'voice') memoryType = '群聊语音';
+                else if (msg.type === 'picture_description') memoryType = '图片';
+                else if (msg.type === 'red_packet') memoryType = '红包';
+                else if (msg.type === 'transfer') memoryType = '转账';
+                else if (msg.type === 'system_notification') memoryType = '系统';
+                return {
+                    timestamp: msg.timestamp || 0,
+                    line: `[${memoryType}] ${author}: ${content}`
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-memoryLimit)
+            .map(item => item.line)
+            .join('\n') || '(还没有任何记忆)';
 
         let characterDossiersPrompt = '';
         if (group.memoryShared) {
@@ -19616,224 +19515,87 @@ ${recentPrivateDigest}
 - 用户(话题发起者): ${myProfile.name}
   - 用户人设/签名: ${userPersonaInGroup}
 
-// ▼▼▼ ✨✨✨ 【KOKO 核心修复】✨✨✨ ▼▼▼
 [导演规则]
-1.  **你可控制的角色**: 你【只能】扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
-2.  **你禁止控制的角色**: 你【绝对禁止】扮演用户 “${myProfile.name}”。
+1. 你只能扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
+2. 你绝对禁止扮演用户 “${myProfile.name}”。
+3. 你要让群聊像真实的人在聊天，而不是像 AI 汇总观点。
+4. 角色必须根据自己的人设、关系、记忆和当前场景说话。
+5. 不要为了平均出场让所有角色都说话，谁该说谁说。
+6. 可以多条气泡连续推进，不要用固定条数限制自己。
 
-[第三份信息：世界书背景知识 (全局设定)]
+[第三份信息：世界书背景知识]
 ---
 ${worldBookContextString}
 ---
 
-[第四份信息：本群最近连续上下文｜最高优先级]
-下面是本群最近正在发生的连续对话。你必须先读这里，再回复当前用户最新输入。
-${groupRecentContextDigest}
-
-[连续性要求]
-1. 如果当前用户最新输入明显是在接着上面的事情说，就必须承认这是同一件事，不要像第一次听说一样重新介绍。
-2. 不要总说“你刚提到……”“刚刚你说……”，除非用户真的在强调刚刚。
-3. 更自然的接法是直接接住话题，比如“那我觉得可以……”“这样的话……”“所以现在应该……”。
-4. 如果上一轮已经解释过，不要重复开头，不要重新铺垫，直接往下推进。
-5. 群成员之间也要记得彼此上一轮说过什么，不要互相像失忆一样重复问同一个问题。
-6. 如果当前用户输入很短，比如“然后呢”“继续”“那怎么办”“为什么”，必须结合本群最近上下文理解，不要当成新话题。
+[第四份信息：统一时序记忆流]
+这是与本次群聊相关的所有事件的完整时间线，是你判断当前对话进展的最高优先级信息源。
+记忆流中被圆括号包裹的事件，例如“(发送了一张图片)”或“(发了一个红包)”，代表已经发生的事件。你可以基于这些事件回应，但不要在发言中机械复述这些括号内容。
+---
+${finalMemoryString}
+---
 
 [第五份信息：角色档案]
-${group.memoryShared ? '下方是本次群聊所有AI角色的摘要型档案，包含关系摘要、跨场景关键记忆和近期私聊近况摘要。' : '下方是本次群聊所有AI角色的基础档案。'}
+${group.memoryShared ? '下方是本次群聊所有 AI 角色的详细档案，包含他们与你的私聊参考。' : '下方是本次群聊所有 AI 角色的基础档案。'}
 --- 角色档案区 ---
 ${characterDossiersPrompt}
 --- 档案区结束 ---
 
-[群内关系矩阵｜最高优先级]
-${groupRelationshipMatrixPrompt}
+[群内关系矩阵｜必须遵守]
+${groupRelationshipMatrixPrompt || '(暂无明确群内关系矩阵)'}
 
-[称呼规则｜必须遵守]
-1. 角色称呼别人时，必须先看群内关系矩阵，不要凭空乱叫。
-2. 如果 A 是 B 的师父、长辈、上级，B 不能随便直呼其名，除非人设明确允许。
-3. 如果 A 是 B 的师兄、师姐、同门前辈，要按关系称呼，不要叫错成师父或徒弟。
-4. 如果关系不明确，宁可使用名字，不要乱编亲密称呼。
-5. 不要把用户和角色的关系、角色和角色之间的关系混在一起。
-6. 不要把群聊里的师门关系套到所有人身上。
-7. 如果角色关系里已经写了具体称呼，必须优先使用具体称呼。
-8. 如果关系网和人设中没有明确写 A 应该叫 B “师父 / 师兄 / 师弟 / 徒弟 / 长辈”，禁止凭空使用这些辈分称呼。
-9. 如果不确定称呼，优先叫对方名字，不要乱套师门关系。
-10. 每次发言前先确认“说话者是谁、被称呼者是谁、两人的关系是什么”。
+[称呼规则]
+1. 如果关系矩阵和人设里明确写了关系，必须按关系称呼。
+2. 如果没有明确关系，不要乱叫师父、师兄、徒弟、长辈。
+3. 不确定称呼时，优先叫名字。
+4. 不要把用户和角色之间的关系，混成角色和角色之间的关系。
+5. 如果关系网和人设中没有明确写 A 应该叫 B “师父 / 师兄 / 师弟 / 徒弟 / 长辈”，禁止凭空使用这些辈分称呼。
+6. 如果不确定称呼，优先叫对方名字，不要乱套师门关系。
+7. 每次发言前先确认“说话者是谁、被称呼者是谁、两人的关系是什么”。
 
-[关系不能乱编]
-1. 如果关系网里有明确关系，必须按关系网来。
-2. 如果关系网没有写，不能凭空把别人叫成师父、师兄、徒弟、长辈。
-3. 角色发言前先判断自己和对方的关系，再决定称呼。
-4. 如果不知道怎么称呼，用对方名字，别乱叫亲昵称呼或辈分称呼。
+${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 
-[群聊当前轮次规则]
-1. 本轮不是续写整段群聊历史。
-2. 本轮只生成群成员对【当前用户最新输入】的反应。
-3. 最近群聊背景只影响语气、情绪和关系，不是本轮要继续回答的问题。
-4. 如果当前用户最新输入和本群最近连续上下文明显属于同一件事，必须自然承接；如果明显是新话题，才切换到新话题。
-5. 第一条 MESSAGE 必须能对应当前用户最新输入。
-6. 输出前自检：每条 MESSAGE 是否能对应当前用户最新输入？不能对应就删掉。
-
-[私聊近况使用规则]
-1. 近期私聊近况只用于判断角色和用户之间最近的关系状态、亲疏、误会、约定、称呼、情绪余温。
-2. 禁止把近期私聊近况当成当前群聊里用户刚说的话。
-3. 禁止主动复述私聊原文。
-4. 禁止直接说“我们私聊刚刚说过……”除非当前用户明确提到私聊。
-5. 可以自然表现为：角色知道用户最近经历过什么、两人关系变了、称呼更熟、态度更亲近或更别扭。
-6. 群聊第一条仍然必须回应【当前用户最新输入】。
-7. 本群最近连续上下文的优先级高于私聊近况；私聊近况只能辅助关系和情绪，不能覆盖本群最近刚刚发生的事。
-
-[口癖限制]
-1. 不要频繁使用“刚刚你提到”“刚刚说到”“你刚才说”。
-2. 连续上下文不是为了让你复读“刚刚”，而是为了让你自然接住话题。
-3. 同一轮群聊回复里最多只能出现一次“刚刚/刚才”。
-4. 大多数时候直接接话，不要用总结式开头。
-5. 不要每个角色都先复述用户问题。
-
-[通用规则 - 所有角色都必须遵守]
-[文学风格] 你的写作风格需要遵循高端女性向文学（类似晋江文学城的流行风格）。文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时,要体现出较高的文学素养。
-[内容限制] 你的发言必须积极向上,充满希望。严禁探讨任何形式的阴谋论,严禁表达或引导至绝望、悲观或虚无主义的情绪。
-[禁用词列表] 绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦、小管家、小管家婆、小管家公、管家公、管婆、小助手、AI助手、智能助手、虚拟助手、机器人。
-绝对禁止用“小管家 / 小管家婆 / 小管家公 / 小助手 / AI助手 / 机器人”等称呼来称呼自己、称呼用户或称呼角色。角色应该像真实联系人一样说话，不要用服务型、工具型、客服型自称。
-${FORBIDDEN_ROLE_WORDS_PROMPT}
-${FORBIDDEN_ACTION_CLICHES_PROMPT}
-[回复规则]
-1. 输出只能是 MESSAGE 脚本，不要附加解释。
-2. TYPE 必须是 speech 或 action。
-3. speech 只写角色真正说出口的话，不要写动作、神态、心理。
-4. action 只写动作、神态、环境、场景推进，不要写角色说出口的话。
-5. 如果内容里出现“说、问、喊、嘀咕、冷笑一声说”等叙述，必须拆成 action + speech 两条 MESSAGE。
-6. 一条 MESSAGE 只能表达一种类型，不要动作和台词混写。
-7. 每个角色可以输出多条 MESSAGE，动作和台词可以交替。
-8. 不要把所有内容塞在一个 CONTENT 里。
-9. 不要使用 \`[sticker:]\`、\`[voice:]\`、\`[picture:]\`、\`[red_packet:]\`、\`[transfer_to:]\` 这类特殊指令，本轮只输出 speech/action。
-
-[！！！终极防火墙规则！！！]
-最近群聊背景、关系摘要、跨场景记忆都只是导演给你的后台提示，用于帮助你理解上下文。这些信息【绝对不能】被你当成当前用户的新输入来继续回答。
-
-[输出格式] 你的输出必须是一段严格遵守以下格式的聊天记录脚本。
-MESSAGE_START
-SPEAKER: [角色名]
-TYPE: speech 或 action
-CONTENT: [单条内容]
-MESSAGE_END
+[特殊指令]
+你可以使用 [sticker:表情名]、[voice:内容]、[picture:描述] 等指令。
+[可用表情包列表]
+${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
 `;
 
         const groupUserTaskPrompt = `
-【当前用户最新输入】
+[！！！核心任务！！！]
+用户（${myProfile.name}）刚刚在群聊里发言。
+
+[当前用户最新输入]
 ${latestGroupInputText || '(用户发送了非文字内容)'}
 
-【本群最近连续上下文｜最高优先级】
-${groupRecentContextDigest}
+[任务]
+你的任务是作为群聊模拟器和剧本导演，阅读 System 中提供的【统一时序记忆流】、【角色档案】、【关系矩阵】和【世界书】，让群成员自然回应并继续推进当前对话。
 
-【连续理解规则】
-1. 判断当前输入是否和最近群聊上下文属于同一件事。
-2. 如果属于同一件事，要直接接住，不要像第一次听到一样。
-3. 如果用户说“然后呢”“继续”“那怎么办”“为什么”“这个呢”，必须结合最近上下文理解。
-4. 不要每次都用“刚刚你提到”“刚刚说到”开头。
-5. 不要复述背景，直接往下推进。
+你需要做到：
+1. 先理解当前用户最新输入在群聊上下文里的意义。
+2. 选择最适合接话的角色，不需要所有人都说话。
+3. 允许一个角色连续发多条消息，也允许其他角色插话、打断、补充、反驳、护着或转移气氛。
+4. 不要按固定条数生成，按剧情需要自然生成。
+5. 如果当前事件需要很多条消息才能自然推进，可以多发；如果事情简单，也可以少发。
+6. 每条消息都要像真实群聊里的自然气泡，而不是总结、汇报、旁白或任务说明。
+7. 角色之间要互相接住对方的话，不要各说各的。
+8. 当前状态必须有一点变化：例如有人被逼问、有人让步、有人行动、有人解释、冲突升级或缓和、下一步变明确。
+9. 不要替用户发言，不要控制用户。
+10. 不要复述 System 里的背景资料，不要把记忆流当成当前用户新输入。
 
-【群聊推进规则｜最高优先级】
-1. 群聊不是每个人轮流打卡，也不是一个人只能说一句。
-2. 一轮回复选择 2 到 4 个最相关角色参与即可，但主推进角色可以连续说 2 到 4 条。
-3. 其他角色可以插话、反驳、提醒、补充，每人 1 到 2 条。
-4. 一轮总 MESSAGE 数建议 7 到 12 条，最多 14 条。
-5. speech 为主，action 为辅；speech 建议 6 到 9 条，action 建议 1 到 2 条。
-6. 每一轮必须形成一个小推进，而不是停在原地。
-7. 推进可以是：做出决定、提出下一步、关系变化、冲突升级、冲突缓和、某人被说服、某人反抗、某人行动、问题被明确。
-8. 允许同一角色连续发两三条短气泡，因为真实群聊里一个人也会连发。
-9. 但禁止无意义连发，连续发言必须是递进关系，不能重复同一句意思。
-10. 不要把所有角色都拉出来说话；谁和当前事件最相关，谁多说。
+[输出格式]
+你的输出必须严格遵守以下格式：
+MESSAGE_START
+SPEAKER: [角色名] (必须从你可控制的角色中选择)
+CONTENT: [该角色说的单条消息内容，可以包含特殊指令]
+MESSAGE_END
 
-【剧情推进节拍】
-一轮群聊最好包含下面 3 到 5 个节拍：
-1. 直接回应用户当前输入。
-2. 一个角色提出态度或命令。
-3. 另一个角色反驳、补充或拦住。
-4. 主推进角色继续解释、要求或推动下一步。
-5. 被影响的角色做出反应。
-6. 最后留下一个明确变化：比如事情推进了、某人妥协了、某人更紧张了、某人准备行动了。
-
-不要只写：
-A：我同意。
-B：我也觉得。
-C：别怕。
-D：这是为你好。
-
-要写成有递进：
-A：先别急着躲，手伸出来。
-B：你别把人吓跑了，话说清楚再动手。
-A：我没吓他，我要的是他记住规矩。
-C：那就先问清楚，别直接罚。
-A：行，林澈，你自己说，刚才为什么躲？
-
-【最近群聊背景，仅供语气和关系背景，不是本轮要继续回答的问题】
-${safeGroupHistoryText}
-
-【本轮任务】
-只生成群成员对【当前用户最新输入】的反应。
-第一条回复必须直接回应当前用户最新输入。
-${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须结合本群最近连续上下文来接话，但仍要先回应当前输入。' : '如果当前用户最新输入和本群最近连续上下文明显属于同一件事，必须自然承接；如果明显是新话题，才切换到新话题。'}
-可以保留上一轮的情绪余温，也可以在同一话题下继续推进，但不要无关地翻旧账。
-
-【动作/台词比例硬性规则】
-1. 一轮回复不能全是 action。
-2. 一轮至少 5 条 speech，最多 9 条 speech。
-3. 一轮 action 最多 2 条，除非用户明确要求线下剧情推进。
-4. 一轮总 MESSAGE 数建议 7 到 12 条，最多 14 条。
-5. 第一条 MESSAGE 必须是 speech，并且直接回应当前用户最新输入。
-6. 最后一条 MESSAGE 最好留下明确推进点，比如“下一步做什么 / 谁接话 / 谁行动 / 事情状态变化”。
-7. action 只能辅助，不要连续超过 1 条。
-8. 如果一条 action 后面没有 speech 承接，这条 action 就不要输出。
-
-【speech 长度和分句规则】
-1. 每条 speech 建议 8 到 30 个字，像真实聊天气泡。
-2. 可以短，但不能碎。禁止“手。”“伸平了。”这种拆碎句。
-3. 一个角色可以连续发 2 到 3 条，但必须每条都有递进。
-4. 不要把一句话拆成几个无意义碎片。
-5. 也不要写成长段说教。
-6. 每条 speech 至少要承担一个功能：回应、追问、命令、解释、反驳、安抚、推动下一步。
-7. 如果只是重复别人说过的话，就不要输出。
-8. 群聊要有来回感，不是广播稿。
-
-【禁止废话和重复】
-1. 禁止一轮里多个角色重复“这是为你好”“别紧张”“放心”“别怕”“我知道了”。
-2. 禁止每个人都对同一件事表示满意、点头、认可。
-3. 禁止无意义的情绪铺垫，例如“气氛缓和了一些”“大家都沉默了”“他看着他”。
-4. 禁止没有新信息的补充发言。
-5. 禁止把一句简单意思拆给多个角色说。
-6. 如果某句话删掉也不影响剧情推进，就不要生成。
-7. 角色必须围绕当前事件做出有用反应，不要水字数。
-
-【动作生成规则】
-1. action 必须根据当前上下文临场生成，不允许套固定神态模板。
-2. 每条 action 必须至少包含一个具体上下文元素，例如：当前提到的人、物品、红包、座位、门口、手机、聊天内容、刚刚的发言、当前场景里的具体物件。
-3. action 只写可被看见的行为，少写抽象心理和泛泛神态。
-4. 不要用“似乎 / 仿佛 / 眼底 / 嘴角 / 视线 / 神色 / 气场 / 氛围”来凑动作。
-5. 不要总写点头、看向、嘴角、眼神、口型、茶杯。
-6. 如果当前上下文没有合适动作，请不要硬写 action，直接输出 speech。
-7. 每轮最多 1 到 2 条 action；除非用户明确要求线下剧情推进，否则不要连续输出动作。
-8. action 不能脱离本轮话题，不能只是通用氛围描写。
-9. 如果动作和当前用户最新输入无关，就不要生成。
-
-示例：
-错误：
-TYPE: action
-他紧绷的嘴角似乎柔和了一丝，轻轻点了点头。
-
-正确：
-TYPE: action
-他把刚拆开的红包往林澈那边推了推，手指在屏幕上停了一下，示意对方收下。
-
-错误：
-TYPE: action
-他挤了挤眼睛，做了一个“以后我罩你”的口型。
-
-正确：
-TYPE: speech
-以后这种事别一个人扛，先在群里喊我。
-
-【额外提醒】
-每个角色可以输出多条 MESSAGE，但必须以 speech 为主，action 只是辅助。禁止连续输出多个 action。
+[重要]
+1. 不要输出解释。
+2. 不要输出 markdown。
+3. 不要输出 JSON。
+4. 不要写“以下是回复”。
+5. CONTENT 可以是正常台词，也可以包含 [voice:内容]、[sticker:表情名]、[picture:描述] 等特殊指令。
 `;
 
         const finalRequestMessages = [
@@ -19894,7 +19656,7 @@ TYPE: speech
                 ...finalRequestMessages,
                 {
                     role: 'user',
-                    content: '你上一次输出全是 action，没有任何角色说话，这是错误的。请重新输出 MESSAGE 脚本：必须包含 5 到 9 条 TYPE: speech，第一条必须是 speech，总 MESSAGE 数控制在 7 到 12 条，speech 数量必须大于 action 数量，action 最多 2 条，允许主推进角色连续发两三条，但每条都要递进，禁止轮流附和。'
+                    content: '你上一次输出没有有效角色台词，格式或内容不适合群聊。请重新输出 MESSAGE 脚本：必须让角色自然说话，不能全是动作，不能控制用户，不要写解释，不要限制条数，按当前剧情自然推进。'
                 }
             ];
 
@@ -19911,9 +19673,6 @@ TYPE: speech
             ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
         }
 
-        messageMatches = limitGroupMessagesForProgress(messageMatches, 12);
-        ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
-
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的群聊脚本。");
         }
@@ -19929,7 +19688,6 @@ TYPE: speech
 
         let lastRenderedType = '';
         let renderedSpeechCount = 0;
-        let renderedActionCount = 0;
         const actionContextText = [
             latestGroupInputText || '',
             groupRecentContextDigest || '',
@@ -19938,15 +19696,8 @@ TYPE: speech
 
         for (const match of messageMatches) {
             const speakerName = match[1].trim();
-            let messageType = String(match[2] || 'speech').trim().toLowerCase();
             let content = match[3].trim();
-
-            if (!match[2]) {
-                messageType = inferGroupMessageType(content);
-            }
-            if (messageType !== 'speech' && messageType !== 'action') {
-                messageType = 'speech';
-            }
+            const explicitType = String(match[2] || '').trim().toLowerCase();
 
             const speakerProfile = (group.members.map(id => getProfileInGroup(id)))
                                       .find(p => p && p.name === speakerName);
@@ -19961,33 +19712,22 @@ TYPE: speech
                 content = content.replace(memoryMatch[0], '').trim();
             }
 
-            if (messageType === 'action') {
-                if (!shouldForceSpeechFallback && renderedSpeechCount === 0 && speechCount > 0) {
-                    console.warn('[跳过开场动作卡片，优先显示台词]', { speakerName, content });
-                    continue;
-                }
-                if (lastRenderedType === 'action') {
-                    console.warn('[跳过连续动作卡片]', { speakerName, content });
-                    continue;
-                }
-                if (shouldForceSpeechFallback && renderedActionCount >= 1) {
-                    console.warn('[重试后仍无台词，仅保留第一条动作卡片]', { speakerName, content });
-                    continue;
-                }
-                if (renderedActionCount >= renderedSpeechCount && renderedSpeechCount > 0) {
-                    console.warn('[跳过过量动作卡片]', { speakerName, content });
-                    continue;
-                }
+            content = sanitizeForbiddenRoleWords(content).trim();
+            if (!content) continue;
+
+            const shouldRenderAction = explicitType === 'action' || (!explicitType && looksLikeOfflineAction(content));
+
+            if (shouldRenderAction) {
                 const actionText = cleanOfflineActionText(content)
                     .replace(/^[“””]+|[“””]+$/g, '')
                     .trim();
 
-                if (actionText && isRepeatedRecentAction(group, actionText)) {
-                    console.warn('[跳过重复动作]', { actionText });
-                    continue;
-                }
-
-                if (actionText && !shouldSkipOfflineActionByQuality(actionText, actionContextText)) {
+                if (
+                    actionText &&
+                    !isRepeatedRecentAction(group, actionText) &&
+                    !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
+                    lastRenderedType !== 'action'
+                ) {
                     await sleep(800 + Math.random() * 700);
                     await createAndAddMessage(
                         {
@@ -20001,32 +19741,20 @@ TYPE: speech
                         true,
                         'chat'
                     );
-                    renderedActionCount++;
                     lastRenderedType = 'action';
                 }
                 continue;
             }
 
-            let speechText = cleanAiSpeechText(sanitizeForbiddenRoleWords(cleanGroupSpeechContent(content))).trim();
-            if (speakerProfile && speechText && !(group.mutedMembers || []).includes(speakerProfile.id)) {
-                if (isTooShortGroupSpeech(speechText)) {
-                    console.warn('[跳过过短 speech]', { speakerName, speechText });
-                } else if (isLowValueGroupSpeech(speechText)) {
-                    console.warn('[跳过低价值 speech]', { speakerName, speechText });
-                } else {
-                    await sleep(800 + Math.random() * 700);
-                    const savedSpeechMessage = await createAndAddMessage(
-                        { type: 'text', content: speechText },
-                        speakerProfile.id,
-                        group,
-                        true,
-                        'chat'
-                    );
-                    if (savedSpeechMessage) {
-                        renderedSpeechCount++;
-                        lastRenderedType = 'speech';
-                    }
-                }
+            const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(content);
+            const speechText = hasStructuredDirective ? content : cleanAiSpeechText(content).trim();
+            if (!speechText) continue;
+
+            if (speakerProfile && !(group.mutedMembers || []).includes(speakerProfile.id)) {
+                await sleep(800 + Math.random() * 700);
+                await processAndDisplayAiResponse(speechText, speakerProfile, group, 'chat');
+                renderedSpeechCount++;
+                lastRenderedType = 'speech';
             }
         }
 
@@ -20950,7 +20678,7 @@ function getGroupMessageTypeStats(messageMatches) {
     const parsedMessageTypes = (Array.isArray(messageMatches) ? messageMatches : []).map(match => {
         let t = String(match?.[2] || 'speech').trim().toLowerCase();
         const content = String(match?.[3] || '').trim();
-        if (!match?.[2]) t = inferGroupMessageType(content);
+        if (!match?.[2]) t = looksLikeOfflineAction(content) ? 'action' : 'speech';
         if (t !== 'speech' && t !== 'action') t = 'speech';
         return t;
     });
