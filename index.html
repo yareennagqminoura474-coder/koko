@@ -16849,7 +16849,7 @@ case 'music_share':
                     actionWrapper.dataset.messageId = message.id;
 
                     const safeDiv = document.createElement('div');
-                    safeDiv.textContent = stripOuterActionBrackets(message.content);
+                    safeDiv.textContent = cleanOfflineActionText(message.content);
 
                     const activeChat = state.contacts.find(c => c.id === state.activeChatId);
 
@@ -17159,6 +17159,18 @@ function stripOuterActionBrackets(text) {
         }
         s = s.replace(/^\*+/, '').replace(/\*+$/, '').trim();
     }
+    return s;
+}
+
+function cleanOfflineActionText(text) {
+    let s = stripOuterActionBrackets(text);
+    if (!s) return '';
+    // \u53bb\u6389\u5f00\u5934\u7684 [\u52a8\u4f5c/\u4eba\u540d]\u3001\u3010\u52a8\u4f5c\uff1a\u4eba\u540d\u3011\u3001(\u52a8\u4f5c-\u4eba\u540d) \u7b49\u524d\u7f00
+    s = s.replace(/^\s*[\[\u3010(\uff08]?\s*\u52a8\u4f5c\s*[/\uff0f:\uff1a\-\u2014]?\s*[^\u3011\]\uff09):\uff1a\-\s]{0,20}[\]\u3011)\uff09:\uff1a\-\u2014]?\s*/i, '').trim();
+    // \u515c\u5e95\u53bb\u6389 "\u52a8\u4f5c\uff1a" "\u52a8\u4f5c-"
+    s = s.replace(/^\s*\u52a8\u4f5c\s*[:\uff1a\-\u2014]\s*/i, '').trim();
+    // \u53bb\u6389\u6b8b\u7559\u524d\u7f00\u62ec\u53f7
+    s = s.replace(/^[\]\u3011)\uff09]+\s*/g, '').trim();
     return s;
 }
 
@@ -19230,6 +19242,13 @@ MESSAGE_END
 5. 群成员自由聊天的重点是互相说话，不是旁白描述。
 6. 如果有 action，下一条必须尽量是 speech。
 
+【speech 长度和分句规则】
+1. 每条 speech 建议控制在 10 到 28 个字，通常 1 句，最多 2 句。
+2. 不要把一句完整的话拆成几个字一条。
+3. 除了"嗯""好""行""别闹"这类特殊极短回应外，普通 speech 至少 8 个字。
+4. speech 不要过长，单条尽量不超过 36 个字。
+5. 群成员说话要自然、完整，不要碎片化。
+
 【动作生成规则】
 1. action 必须根据当前上下文临场生成，不允许套固定神态模板。
 2. 每条 action 必须至少包含一个具体上下文元素，例如：当前提到的人、物品、红包、座位、门口、手机、聊天内容、刚刚的发言、当前场景里的具体物件。
@@ -19391,8 +19410,8 @@ TYPE: speech
                     console.warn('[跳过过量动作卡片]', { speakerName, content });
                     continue;
                 }
-                const actionText = stripOuterActionBrackets(content)
-                    .replace(/^["“”]+|["“”]+$/g, '')
+                const actionText = cleanOfflineActionText(content)
+                    .replace(/^[“””]+|[“””]+$/g, '')
                     .trim();
                 if (actionText && isRepeatedRecentAction(group, actionText)) {
                     console.warn('[跳过重复动作]', { actionText });
@@ -19420,17 +19439,21 @@ TYPE: speech
 
             content = cleanGroupSpeechContent(content);
             if (speakerProfile && content) {
-                await sleep(800 + Math.random() * 700);
-                const savedSpeechMessage = await createAndAddMessage(
-                    { type: 'text', content },
-                    speakerProfile.id,
-                    group,
-                    true,
-                    'chat'
-                );
-                if (savedSpeechMessage) {
-                    renderedSpeechCount++;
-                    lastRenderedType = 'speech';
+                if (isTooShortGroupSpeech(content)) {
+                    console.warn('[跳过过短 speech]', { speakerName, content });
+                } else {
+                    await sleep(800 + Math.random() * 700);
+                    const savedSpeechMessage = await createAndAddMessage(
+                        { type: 'text', content },
+                        speakerProfile.id,
+                        group,
+                        true,
+                        'chat'
+                    );
+                    if (savedSpeechMessage) {
+                        renderedSpeechCount++;
+                        lastRenderedType = 'speech';
+                    }
                 }
             }
         }
@@ -19693,12 +19716,22 @@ ${allowPreviousCallback ? '当前用户明确提到了上一轮内容，必须�
 【动作/台词比例硬性规则】
 1. 一轮回复绝对不能全是 action，必须至少包含 2 条 speech。
 2. speech 数量必须大于或等于 action 数量。
-3. 第一条 MESSAGE 必须是 speech，并且必须直接回应当前用户最新输入。
+3. 第一条 MESSAGE 必须是 speech，并且必须直接回应当前用户最新输入，长度建议 12 到 24 个字，表达完整意思。
 4. action 只能作为辅助氛围，不能连续超过 1 条。
 5. 如果输出了 action，下一条必须尽量接 speech。
 6. 群聊是聊天，不是小说旁白。角色必须开口说话。
-7. 禁止一整轮只写“他看着、他点头、他拿出、他递给”这类动作。
+7. 禁止一整轮只写”他看着、他点头、他拿出、他递给”这类动作。
 8. 如果角色送红包、转账、拿东西、靠近等动作后，必须紧跟一句 speech 解释或回应。
+
+【speech 长度和分句规则】
+1. speech 不要太短，也不要太长。
+2. 每条 speech 建议控制在 10 到 28 个字，通常 1 句，最多 2 句。
+3. 正常说话不要拆成几个字一条，禁止把一句完整的话拆成”手。””伸平了。”这种碎片。
+4. 除了”嗯””好””行””别怕”这种极短回应外，普通 speech 至少要有 8 个字。
+5. 不要连续输出多个极短 speech。
+6. speech 要像正常人说话，简洁自然，但要表达完整意思。
+7. 如果一句话表达不完，可以说成一条稍完整的话，不要硬拆。
+8. 单条 speech 不要超过 36 个字，避免太啰嗦。
 
 【动作生成规则】
 1. action 必须根据当前上下文临场生成，不允许套固定神态模板。
@@ -19871,8 +19904,8 @@ TYPE: speech
                     console.warn('[跳过过量动作卡片]', { speakerName, content });
                     continue;
                 }
-                const actionText = stripOuterActionBrackets(content)
-                    .replace(/^["“”]+|["“”]+$/g, '')
+                const actionText = cleanOfflineActionText(content)
+                    .replace(/^[“””]+|[“””]+$/g, '')
                     .trim();
 
                 if (actionText && isRepeatedRecentAction(group, actionText)) {
@@ -19902,17 +19935,21 @@ TYPE: speech
 
             content = cleanGroupSpeechContent(content);
             if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
-                await sleep(800 + Math.random() * 700);
-                const savedSpeechMessage = await createAndAddMessage(
-                    { type: 'text', content },
-                    speakerProfile.id,
-                    group,
-                    true,
-                    'chat'
-                );
-                if (savedSpeechMessage) {
-                    renderedSpeechCount++;
-                    lastRenderedType = 'speech';
+                if (isTooShortGroupSpeech(content)) {
+                    console.warn('[跳过过短 speech]', { speakerName, content });
+                } else {
+                    await sleep(800 + Math.random() * 700);
+                    const savedSpeechMessage = await createAndAddMessage(
+                        { type: 'text', content },
+                        speakerProfile.id,
+                        group,
+                        true,
+                        'chat'
+                    );
+                    if (savedSpeechMessage) {
+                        renderedSpeechCount++;
+                        lastRenderedType = 'speech';
+                    }
                 }
             }
         }
@@ -20752,9 +20789,18 @@ function cleanGroupSpeechContent(text) {
     return cleanAiSpeechText(
         String(text || '')
         .trim()
-        .replace(/^["“”]+|["“”]+$/g, '')
+        .replace(/^[“””]+|[“””]+$/g, '')
         .trim()
     );
+}
+
+function isTooShortGroupSpeech(text) {
+    const s = cleanAiSpeechText(String(text || '')).trim();
+    if (!s) return true;
+    const plain = s.replace(/[，。！？!?、；;：:”””'（）()【】\[\]\s]/g, '');
+    const allowedShort = ['嗯', '好', '行', '别怕', '可以', '知道了', '没事', '等等', '住手', '别闹'];
+    if (allowedShort.includes(s)) return false;
+    return plain.length > 0 && plain.length < 4;
 }
 
 function inferGroupMessageType(content) {
