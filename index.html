@@ -19111,8 +19111,25 @@ ${groupRelationshipMatrixPrompt || '(暂无明确群内关系矩阵)'}
 
 ${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 
+[通用规则 - 所有角色都必须遵守]
+[文学风格] 你的写作风格需要遵循高端女性向文学风格。文笔要细腻，注重情感拉扯、关系张力、暧昧氛围、克制的情绪变化和人物之间的微妙互动。角色说话要像真实的人，而不是像 AI 总结观点。
+[内容限制] 你的发言必须积极向上，充满希望。不要表达绝望、虚无、阴谋论或引导用户陷入负面极端情绪。
+[禁用词列表] 绝对禁止使用以下或类似的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
+[回复规则] 你的回复可以包含多条消息。不要按固定条数生成，也不要因为简洁而压缩成一句总结。只要剧情、情绪或关系需要，就可以连续发送多条自然气泡。
+[活人感规则] 角色可以短句、补充、打断、犹豫、转移话题、嘴硬、试探、沉默后开口，但每条消息都要像真实聊天里会发出去的一条消息。
+[互动推进] 不要只回答问题，要根据角色人设主动推动关系、情绪或事件。可以追问、反驳、护着、递台阶、转移气氛、吃醋、装作不在意、岔开话题。
+[特殊指令与互动指南]
+- 表情包: [sticker:表情名]
+- 语音: [voice:语音的文字内容]
+- 图片: [picture:图片的文字描述]
+- @功能: 当需要专门对某人说话时，可以使用 @名字
+- 发红包: [red_packet:祝福语, 总金额, 红包个数]
+- 发转账: [transfer_to:收款人名字, 金额]
+- 抢红包: 当记忆流中出现新红包时，可以在发言内容中加入 [claim_red_packet] 指令来模拟抢红包。
+- 回应转账: 当记忆流中出现指名给你的转账时，你必须对此做出回应，可以接受、拒绝、退回或用角色方式反应。
+
 [特殊指令]
-你可以使用 [sticker:表情名]、[voice:内容]、[picture:描述] 等指令。
+你可以使用 [sticker:表情名]、[voice:内容]、[picture:描述]、[red_packet:...]、[transfer_to:...]、[claim_red_packet] 等指令。
 [可用表情包列表]
 ${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
 `;
@@ -19126,7 +19143,7 @@ ${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
 
 你的任务是：
 1. 分析上下文：阅读 System 中提供的【统一时序记忆流】，看看大家最后聊了什么。
-2. 选择发言人：从你“可控制的角色”列表中，选择当前最适合继续说话的角色。
+2. 选择发言人：从你“可控制的角色”列表中，选择当前最适合继续说话的角色。可以是一个角色连续说，也可以是多个角色互相接话，按当前氛围自然推进。
 3. 生成对话：让他们围绕记忆流中的最后一个话题继续深入，或者开启一个符合人设、世界观、关系和私聊记忆的新话题。
 4. 禁止回复用户：绝对不要和用户“${myProfile.name}”说话，这是 AI 成员之间的对话。
 5. 不要按固定条数生成，按当前氛围自然推进。可以多条，也可以少条，关键是自然和有推进。
@@ -19493,8 +19510,25 @@ ${groupRelationshipMatrixPrompt || '(暂无明确群内关系矩阵)'}
 
 ${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 
+[通用规则 - 所有角色都必须遵守]
+[文学风格] 你的写作风格需要遵循高端女性向文学风格。文笔要细腻，注重情感拉扯、关系张力、暧昧氛围、克制的情绪变化和人物之间的微妙互动。角色说话要像真实的人，而不是像 AI 总结观点。
+[内容限制] 你的发言必须积极向上，充满希望。不要表达绝望、虚无、阴谋论或引导用户陷入负面极端情绪。
+[禁用词列表] 绝对禁止使用以下或类似的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
+[回复规则] 你的回复可以包含多条消息。不要按固定条数生成，也不要因为简洁而压缩成一句总结。只要剧情、情绪或关系需要，就可以连续发送多条自然气泡。
+[活人感规则] 角色可以短句、补充、打断、犹豫、转移话题、嘴硬、试探、沉默后开口，但每条消息都要像真实聊天里会发出去的一条消息。
+[互动推进] 不要只回答问题，要根据角色人设主动推动关系、情绪或事件。可以追问、反驳、护着、递台阶、转移气氛、吃醋、装作不在意、岔开话题。
+[特殊指令与互动指南]
+- 表情包: [sticker:表情名]
+- 语音: [voice:语音的文字内容]
+- 图片: [picture:图片的文字描述]
+- @功能: 当需要专门对某人说话时，可以使用 @名字
+- 发红包: [red_packet:祝福语, 总金额, 红包个数]
+- 发转账: [transfer_to:收款人名字, 金额]
+- 抢红包: 当记忆流中出现新红包时，可以在发言内容中加入 [claim_red_packet] 指令来模拟抢红包。
+- 回应转账: 当记忆流中出现指名给你的转账时，你必须对此做出回应，可以接受、拒绝、退回或用角色方式反应。
+
 [特殊指令]
-你可以使用 [sticker:表情名]、[voice:内容]、[picture:描述] 等指令。
+你可以使用 [sticker:表情名]、[voice:内容]、[picture:描述]、[red_packet:...]、[transfer_to:...]、[claim_red_packet] 等指令。
 [可用表情包列表]
 ${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
 `;
@@ -20040,6 +20074,96 @@ function getConfiguredLongTermMemoryLength(fallback = 30) {
     return fallback;
 }
 
+function formatMessageForUnifiedMemory(msg, fallbackContact) {
+    if (!msg) return '';
+
+    switch (msg.type) {
+        case 'text':
+        case 'html':
+        case 'video_call_text': {
+            const baseText = typeof msg.content === 'string'
+                ? msg.content.replace(/<[^>]+>/g, '').trim()
+                : '';
+            if (!baseText) return '';
+            if (msg.quote?.content) {
+                const senderName = msg.quote.senderName || '对方';
+                return `[回复“${senderName}”说的“${String(msg.quote.content).slice(0, 30)}...”] ${baseText}`;
+            }
+            return baseText;
+        }
+
+        case 'voice':
+            return `[语音:${msg.content?.text || ''}]`;
+
+        case 'image':
+        case 'uploaded_image':
+            return msg.isEmoticon && msg.emoticonName
+                ? `[表情包:${msg.emoticonName}]`
+                : '[图片]';
+
+        case 'picture_description':
+            return `[图片描述:${msg.content?.description || ''}]`;
+
+        case 'red_packet':
+            return `[红包:${msg.content?.blessing || ''}]`;
+
+        case 'transfer':
+            return `[转账:${msg.content?.amount || ''}]`;
+
+        case 'music_share':
+            return `[音乐:${msg.content?.title || ''}]`;
+
+        case 'gift':
+            return `[礼物:${msg.content?.title || ''}]`;
+
+        case 'takeout': {
+            const shopName = msg.content?.shopName || '外卖';
+            const items = Array.isArray(msg.content?.items)
+                ? msg.content.items.map(item => `${item.name || '商品'}x${item.count || 1}`).join('、')
+                : '';
+            return `[外卖:${shopName}${items ? ` / ${items}` : ''}]`;
+        }
+
+        case 'location_share':
+            return `[位置:${msg.content?.name || ''}]`;
+
+        case 'game_wheel':
+            return `[转盘游戏:${msg.content?.name || ''}]`;
+
+        case 'post_share':
+            return '[分享帖子]';
+
+        case 'product_share':
+            return `[分享商品:${msg.content?.productDetails?.name || ''}]`;
+
+        case 'chat_history_share':
+            return `[聊天记录:${msg.content?.sourceChatName || ''}]`;
+
+        case 'offlineSpeech':
+            return typeof msg.content === 'string'
+                ? msg.content
+                : (msg.content?.text || msg.content?.content || '');
+
+        case 'offlineAction':
+            return `[动作:${typeof msg.content === 'string' ? msg.content : (msg.content?.text || msg.content?.content || '')}]`;
+
+        default:
+            if (typeof msg.content === 'string') {
+                return msg.content.replace(/<[^>]+>/g, '').trim();
+            }
+            if (msg.content && typeof msg.content === 'object') {
+                return String(
+                    msg.content.text ||
+                    msg.content.content ||
+                    msg.content.description ||
+                    msg.content.title ||
+                    ''
+                ).trim();
+            }
+            return '';
+    }
+}
+
 function buildUnifiedGroupMemoryString(group, getProfileInGroup, myProfile, linkedPrivateMemberIds = []) {
     const memoryLimit = getConfiguredLongTermMemoryLength(40);
     const unifiedMemoryStream = [];
@@ -20070,13 +20194,11 @@ function buildUnifiedGroupMemoryString(group, getProfileInGroup, myProfile, link
             const contact = state.contacts.find(c => c && !c.isGroup && c.id === memberId);
             if (!contact || !Array.isArray(contact.history) || contact.history.length === 0) return;
 
-            contact.history.slice(-30).forEach(msg => {
+            contact.history.slice(-memoryLimit).forEach(msg => {
                 if (!msg || msg.sender === 'system_instruction') return;
-                if (!['text', 'html'].includes(msg.type)) return;
+                if (['system_notification', 'loading', 'error', 'heart_voice'].includes(msg.type)) return;
 
-                const content = typeof msg.content === 'string'
-                    ? msg.content.replace(/<[^>]+>/g, '').trim()
-                    : '';
+                const content = formatMessageForUnifiedMemory(msg, contact);
                 if (!content) return;
 
                 const authorProfile = (msg.sender === 'user' || msg.sender === 'myProfile')
@@ -20573,25 +20695,7 @@ function buildRecentGroupChatDigestForContact(contact, limit = 20) {
                         ? (myProfile.name || '我')
                         : (m.characterName || actorProfile?.name || profile?.name || m.senderName || m.sender || '群成员');
 
-                let content = '';
-                if (typeof m.content === 'string') {
-                    content = m.content;
-                } else if (m.content && typeof m.content === 'object') {
-                    content = m.content.text || m.content.content || m.content.description || JSON.stringify(m.content);
-                }
-
-                if (m.type === 'offlineAction') {
-                    content = `【动作】${stripOuterActionBrackets(content)}`;
-                } else if (m.type === 'offlineSpeech') {
-                    content = `【线下发言】${content}`;
-                } else if (m.type === 'image' || m.type === 'uploaded_image') {
-                    content = `【图片】${content || '发送了一张图片'}`;
-                } else if (m.type === 'transfer') {
-                    content = `【转账】${content}`;
-                } else if (m.type === 'red_packet') {
-                    content = `【红包】${content}`;
-                }
-
+                let content = formatMessageForUnifiedMemory(m, actorProfile || profile || contact);
                 content = String(content || '').replace(/<[^>]+>/g, '').trim();
                 if (!content) return '';
 
@@ -20669,10 +20773,9 @@ function buildPrivateRelatedGroupMemoryDigest(contact, limit = 10) {
                 .slice(-limit)
                 .forEach(msg => {
                     const senderName = getDisplayNameById(msg.characterId || msg.sender);
-                    const text = typeof msg.content === 'string'
-                        ? msg.content
-                        : (msg.content?.text || msg.content?.content || msg.content?.description || '');
-                    const cleanText = String(text || '').replace(/<[^>]+>/g, '').trim();
+                    const cleanText = String(
+                        formatMessageForUnifiedMemory(msg, contact) || ''
+                    ).replace(/<[^>]+>/g, '').trim();
                     if (cleanText) {
                         lines.push(`- 群聊《${group.name || '群聊'}》中 ${senderName}：${cleanText}`);
                     }
@@ -21175,6 +21278,7 @@ function getGroupMessageTypeStats(messageMatches) {
 }
 
 function limitGroupMessagesForProgress(messageMatches, maxMessages = 12) {
+    // 已废弃：不要调用。普通群聊不再按条数裁剪，避免破坏 koko 原版活人感。
     if (!Array.isArray(messageMatches)) return [];
 
     const result = [];
@@ -22611,6 +22715,22 @@ ${qzoneContextText}
 5. 不要机械复述设定，不要解释你在扮演角色。
 6. 不要限制回复条数、不限制单轮消息数量，按角色和上下文自然表达。
 7. 不要替用户发言，不要控制用户。
+
+[通用规则 - 当前角色必须遵守]
+[文学风格] 文笔要细腻，带有真实聊天里的停顿、试探、情绪拉扯和关系张力。不要写成说明文，不要像任务总结，也不要像 AI 在汇报。
+[内容限制] 回复必须积极向上，充满希望。不要表达绝望、虚无、阴谋论，或引导用户陷入负面极端情绪。
+[禁用词列表] 绝对禁止使用以下或类似的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
+[回复规则] 你的回复可以包含多条消息。不要按固定条数生成，也不要因为简洁而压缩成一句总结。只要情绪、关系或剧情需要，就可以连续发送多条自然消息。
+[活人感规则] 你可以补充、停顿、试探、嘴硬、岔开、追问、沉默后开口，但每一条都要像真实私聊里会发出去的一条消息。
+[互动推进] 不要只被动回答问题。要根据角色人设主动推动关系、情绪或事件，可以递台阶、护着、反驳、试探、转移气氛、装作不在意。
+[特殊指令与互动指南]
+- 表情包: [sticker:表情名]
+- 语音: [voice:语音的文字内容]
+- 图片: [picture:图片的文字描述]
+- 红包: [red_packet:祝福语, 金额]
+- 转账: [transfer:金额]
+- 这些指令只在角色真会这样做、当前场景也合适时再使用，不要滥用。
+[称呼禁令] 禁止“小管家”“小管家婆”“小助手”“AI助手”“机器人”等词。
 
 [用户信息]
 - 用户昵称：${myProfile.name}
