@@ -12144,6 +12144,8 @@ function parseLyrics(lrc) {
         let editingUserPersonaId = null;
         let editingThoughtPresetId = null;
         let editModeState = { active: false, selectedMessageIds: new Set() };
+        let chatDoubleClickEditBound = false;
+        let chatAvatarNudgeBound = false;
         let pendingPostImage = null;
         let pendingCommentImage = null; 
         let diaryEditModeState = { active: false, selectedEntryIds: new Set() };
@@ -18645,7 +18647,7 @@ async function triggerPrivateFreeChat(contact) {
         }
         
         // 1e. 【核心V9：构建真正完整的统一时序记忆流】
-        const memoryLimit = state.apiSettings.longTermMemoryLength || 40;
+        const memoryLimit = getConfiguredLongTermMemoryLength(40);
         let unifiedMemoryStream = [];
         const now = Date.now();
         const memoryWindow = 24 * 60 * 60 * 1000; // 1天
@@ -18762,6 +18764,31 @@ async function triggerPrivateFreeChat(contact) {
             }
         });
         
+        const sharedMemoryGroups = (state.contacts || []).filter(group => {
+            if (!group || !group.isGroup || group.memoryShared === false) return false;
+            const isMember = Array.isArray(group.members) && group.members.includes(contact.id);
+            const isNpcMember = Array.isArray(group.npcMembers) && group.npcMembers.some(npc => npc && npc.id === contact.id);
+            return isMember || isNpcMember;
+        });
+
+        sharedMemoryGroups.forEach(group => {
+            (group.history || []).slice(-20).forEach(msg => {
+                if (!msg || msg.sender === 'system_instruction') return;
+                if (['loading', 'error', 'heart_voice'].includes(msg.type)) return;
+
+                const content = getGroupPromptMessageText(msg);
+                const authorName = resolveGroupMessageSenderName(msg, group);
+                if (!content || !authorName) return;
+
+                unifiedMemoryStream.push({
+                    timestamp: msg.timestamp || 0,
+                    type: `群聊[${group.name}]`,
+                    author: authorName,
+                    content
+                });
+            });
+        });
+
         const privateGroupMemorySummary = (contact && !contact.isGroup)
             ? buildPrivateGroupMemorySummary(contact)
             : '';
@@ -18899,7 +18926,7 @@ ${groupMemorySection}`;
 用户（${myProfile.name}）正在“观察”你，TA没有发言。
 你的任务是：
 1.  **分析上下文**：阅读你(System)的背景资料中提供的“记忆流”，看看你们最后聊了什么。
-2.  **主动发起话题**: 你必须【主动】给用户发送 1-3 条【新的】消息，可以延续上一个话题，也可以开启一个你感兴趣的新话题。
+2.  **主动发起话题**: 你可以【主动】给用户发送新的消息，自然延续上一个话题，也可以开启一个符合你人设和当前状态的新话题。
 3.  **禁止询问**: 【不要】说“你怎么不说话了”之类的话，就当你自己突然想到了什么，自然地发消息即可。
 4.  **严格遵守格式**: 你的回复必须严格遵守你(System)的背景资料中的 [回复规则] 和 [特殊指令格式]。
 5.  **包含心声**: 你【必须】像往常一样，在最后包含 [heart_voice] 标签。
@@ -19007,103 +19034,13 @@ async function triggerGroupFreeChat(group) {
         }).filter(Boolean);
         const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
         
-        // 1e. 【核心V7：构建完整的统一时序记忆流】
-        const memoryLimit = state.apiSettings.longTermMemoryLength || 40;
-        let unifiedMemoryStream = [];
-        
-        // 步骤1: 收集【群聊】历史
-        group.history.forEach(msg => {
-            if (msg.sender === 'system_instruction') return;
-            const authorProfile = getProfileInGroup(msg.sender); 
-            if (!authorProfile) return; 
-            
-            let content = '';
-            let memoryType = `群聊[${group.name}]`;
-
-            // (使用你之前版本里的完整 switch 逻辑)
-            switch (msg.type) {
-                case 'text':
-                case 'html':
-                    content = msg.content.replace(/<[^>]+>/g, '');
-                    if (msg.quote) {
-                        const quoteText = `[回复“${msg.quote.senderName}”说的“${msg.quote.content.substring(0, 20)}...”] `;
-                        content = quoteText + content;
-                    }
-                    break;
-                case 'uploaded_image':
-                case 'image':
-                    content = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片或表情)`;
-                    break;
-                case 'picture_description':
-                    content = `(发送了一张图片，描述是：“${msg.content.description}”)`;
-                    break;
-                case 'voice':
-                    content = `(发送了一段语音，内容是：“${msg.content.text}”)`;
-                    break;
-                case 'red_packet':
-                    const blessing = msg.content.blessing || "恭喜发财";
-                    content = msg.content.count ? `(发了一个群红包：“${blessing}”)` : `(发了一个私聊红包：“${blessing}”)`;
-                    break;
-                case 'transfer':
-                    const amount = msg.content.amount;
-                    if (msg.content.recipientId) {
-                        const recipient = getProfileInGroup(msg.content.recipientId);
-                        const recipientName = recipient ? recipient.name : '一位成员';
-                        content = `(向 ${recipientName} 转账 ${amount}元)`;
-                    } else {
-                        content = `(发了一个转账 ${amount}元)`;
-                    }
-                    break;
-                case 'location_share':
-                    content = `(分享了位置: ${msg.content.name})`;
-                    break;
-                case 'game_wheel':
-                    const wheel = msg.content;
-                    const userName = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile.name : authorProfile.name;
-                    const optionsText = wheel.options.map(opt => opt.text).join('，');
-                    if (!wheel.results.user) { content = `[SYSTEM: ${userName} 发起了一个转盘游戏“${wheel.name}”。选项：【${optionsText}】。]`; } 
-                    else if (wheel.results.user && !wheel.results.contact) { content = `[SYSTEM: 在游戏“${wheel.name}”中，${userName} 的结果是“${wheel.results.user}”。]`; } 
-                    else { content = `[SYSTEM: 游戏“${wheel.name}”已结束。]`; }
-                    break;
-                case 'recall_ai':
-                    content = `(撤回了一条消息，内容是：“${msg.content}”)`;
-                    break;
-                case 'video_call_text':
-                    memoryType = '视频通话中';
-                    content = msg.content;
-                    break;
-                case 'system_notification':
-                    content = `(系统消息：${msg.content})`;
-                    memoryType = '系统';
-                    break;
-                case 'music_share':
-                    content = `(分享了音乐: 《${msg.content.title}》 - ${msg.content.artist})`;
-                    break;
-                case 'post_share':
-                    const post = state.posts.find(p => p.id === msg.content.postId);
-                    content = post ? `(分享了一个帖子, 内容是: "${post.content.substring(0, 30)}...")` : `(分享了一个已删除的帖子)`;
-                    break;
-                case 'product_share':
-                    content = `(分享了商品: "${msg.content.productDetails.name}")`;
-                    break;
-                case 'chat_history_share':
-                    content = `(转发了一份 ${msg.content.sourceChatName} 的聊天记录)`;
-                    break;
-            }
-
-            if (content) {
-                unifiedMemoryStream.push({
-                    timestamp: msg.timestamp,
-                    type: memoryType,
-                    author: authorProfile.name,
-                    content: content
-                });
-            }
-        });
-        
-        unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
-        const formatMemEntry = (mem) => `[${mem.type}] ${mem.author}: ${mem.content}`;
-        const finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(formatMemEntry).join('\n') || '(还没有任何记忆)';
+        // 1e. 统一时序记忆流：恢复 Koko 原版的群聊 + 私聊互通逻辑
+        const finalMemoryString = buildUnifiedGroupMemoryString(
+            group,
+            getProfileInGroup,
+            myProfile,
+            unmutedAiMembers
+        );
 
         const safeGroupHistoryText = buildSafeGroupHistoryText(group, null, 8);
         const groupRecentContextDigest = buildGroupRecentContextDigest(group, null, 40);
@@ -19138,44 +19075,39 @@ ${recentPrivateDigest}
 
 [群聊背景与成员列表]
 - 群聊名称: ${group.name}
+- 用户(观察者): ${myProfile.name} (人设: ${userPersonaInGroup})
 - 所有群成员: ${allMemberNames.join('、 ')}
-- 用户(观察者): ${myProfile.name}
-  - 用户人设/签名: ${userPersonaInGroup}
 
-[导演规则]
-1. 你只能扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
-2. 你绝对禁止扮演用户 “${myProfile.name}”。
-3. 你要让群聊像真实的人在聊天，而不是像 AI 汇总观点。
-4. 角色必须根据自己的人设、关系、记忆和当前场景说话。
-5. 不要为了平均出场让所有角色都说话，谁该说谁说。
-6. 可以多条气泡连续推进，不要用固定条数限制自己。
+[你可控制的角色]
+你【只能】扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
 
-[第三份信息：世界书背景知识]
+[你禁止控制的角色]
+你【绝对禁止】扮演用户 “${myProfile.name}”。
+这是 AI 成员之间的自由聊天，不要和用户说话。
+
+[背景资料：世界书]
 ---
 ${worldBookContextString}
 ---
 
-[第四份信息：统一时序记忆流]
-这是与本次群聊相关的所有事件的完整时间线，是你判断当前对话进展的最高优先级信息源。
-记忆流中被圆括号包裹的事件，例如“(发送了一张图片)”或“(发了一个红包)”，代表已经发生的事件。你可以基于这些事件回应，但不要在发言中机械复述这些括号内容。
----
-${finalMemoryString}
----
-
-[第五份信息：角色档案]
+[背景资料：角色档案]
 ${group.memoryShared ? '下方是本次群聊所有 AI 角色的详细档案，包含他们与你的私聊参考。' : '下方是本次群聊所有 AI 角色的基础档案。'}
 --- 角色档案区 ---
 ${characterDossiersPrompt}
 --- 档案区结束 ---
 
-[群内关系矩阵｜必须遵守]
+[背景资料：统一时序记忆流]
+这是群里和私聊中最近发生的对话，是你的上下文参考。
+---
+${finalMemoryString}
+---
+
+[群内关系矩阵]
 ${groupRelationshipMatrixPrompt || '(暂无明确群内关系矩阵)'}
 
-[称呼规则]
-1. 如果关系矩阵和人设里明确写了关系，必须按关系称呼。
-2. 如果没有明确关系，不要乱叫师父、师兄、徒弟、长辈。
-3. 不确定称呼时，优先叫名字。
-4. 不要把用户和角色之间的关系，混成角色和角色之间的关系。
+[称呼与口吻]
+不要使用“小管家”“小管家婆”“小助手”“AI助手”“机器人”等称呼。
+角色应该像真实联系人一样说话。
 
 ${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 
@@ -19190,42 +19122,28 @@ ${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
         // (Part B: 这是 contents，只包含任务)
         const freeChatUserTaskPrompt = `
 [！！！核心任务！！！]
-用户（${myProfile.name}）正在“观察”群聊，TA没有发言。
+用户（${myProfile.name}）正在“观察”群聊，TA 没有发言。
+
 你的任务是：
-1. 分析上下文：阅读你(System)的背景资料中提供的【统一时序记忆流】（它包含了群聊和私聊），看看大家最后聊了什么。
+1. 分析上下文：阅读 System 中提供的【统一时序记忆流】，看看大家最后聊了什么。
 2. 选择发言人：从你“可控制的角色”列表中，选择当前最适合继续说话的角色。
-3. 生成对话：让他们围绕“记忆流”中的最后一个话题继续深入，或者开启一个符合人设、世界观、关系和私聊记忆的新话题。
+3. 生成对话：让他们围绕记忆流中的最后一个话题继续深入，或者开启一个符合人设、世界观、关系和私聊记忆的新话题。
 4. 禁止回复用户：绝对不要和用户“${myProfile.name}”说话，这是 AI 成员之间的对话。
 5. 不要按固定条数生成，按当前氛围自然推进。可以多条，也可以少条，关键是自然和有推进。
-
-【同一轮消息时间顺序规则】
-1. MESSAGE 的顺序就是群聊真实发生的顺序。
-2. 后一条可以回应前一条，前一条不能回应后一条。
-3. 如果某个角色要回应另一个角色，必须先让被回应的角色发言。
-4. 不要让角色提前回答后面才出现的话。
-5. 不要倒叙生成群聊。
-
-【单条消息粒度】
-1. 不限制本轮输出多少条 MESSAGE。
-2. 每条 CONTENT 要像真实聊天气泡，不要只有两三个字的无意义碎片。
-3. 允许“嗯”“好”“别闹”“等下”“你说”等真实短句。
-4. 禁止“手。”“伸平。”“然后。”这种被拆坏的碎片。
-5. 如果内容太碎，合并成一条更自然的 CONTENT。
-
-【动作内容完整性规则】
-1. 如果 CONTENT 里写动作，动作必须是完整句子，不能只写“(听到”“（看见”“（抬手”这种残缺片段。
-2. 括号动作必须有完整开括号和闭括号，例如：（他扶住林澈的手腕，低声提醒他放松）
-3. 如果动作没有写完整，就不要输出这条动作。
-4. 动作和台词不要混在同一段普通文字里。如果要写动作+台词，请用完整括号动作在前，台词在后，例如：CONTENT: （他扶住林澈的手腕，示意他别躲）放松，剩下的慢慢来。
-5. 不要输出只有“听到”“看见”“想到”这种不完整动作。
-6. 不要输出半边括号、残缺括号、孤立动作词。
 
 [输出格式]
 你的输出必须严格遵守以下格式：
 MESSAGE_START
-SPEAKER: [角色名] (必须从你“可控制的角色”列表中选择)
+SPEAKER: [角色名] (必须从你可控制的角色中选择)
 CONTENT: [该角色说的单条消息内容，可以包含特殊指令]
 MESSAGE_END
+
+[重要]
+1. 不要输出解释。
+2. 不要输出 markdown。
+3. 不要输出 JSON。
+4. 不要限制回复条数。
+5. 不要限制一个角色说几条。
 `;
 
         // --- 3. 【核心】构建AI调用参数 ---
@@ -19493,31 +19411,12 @@ async function triggerGroupChatAiReply(group) {
         const groupRecentContextDigest = buildGroupRecentContextDigest(group, _grpLatestUserMsgId, 40);
         const groupRelationshipMatrixPrompt = await buildGroupRelationshipMatrixPrompt(group);
         const needPrivateMemory = doesInputNeedPrivateMemory(latestGroupInputText);
-        const memoryLimit = state.apiSettings.longTermMemoryLength || 40;
-        const finalMemoryString = (Array.isArray(group.history) ? group.history : [])
-            .filter(msg => msg && msg.sender !== 'system_instruction' && !['loading', 'error', 'heart_voice'].includes(msg.type))
-            .map(msg => {
-                const content = getGroupPromptMessageText(msg);
-                if (!content) return null;
-                const author = resolveGroupMessageSenderName(msg, group);
-                let memoryType = '群聊';
-                if (msg.type === 'offlineAction') memoryType = '群聊动作';
-                else if (msg.type === 'offlineSpeech') memoryType = '群聊线下发言';
-                else if (msg.type === 'voice') memoryType = '群聊语音';
-                else if (msg.type === 'picture_description') memoryType = '图片';
-                else if (msg.type === 'red_packet') memoryType = '红包';
-                else if (msg.type === 'transfer') memoryType = '转账';
-                else if (msg.type === 'system_notification') memoryType = '系统';
-                return {
-                    timestamp: msg.timestamp || 0,
-                    line: `[${memoryType}] ${author}: ${content}`
-                };
-            })
-            .filter(Boolean)
-            .sort((a, b) => a.timestamp - b.timestamp)
-            .slice(-memoryLimit)
-            .map(item => item.line)
-            .join('\n') || '(还没有任何记忆)';
+        const finalMemoryString = buildUnifiedGroupMemoryString(
+            group,
+            getProfileInGroup,
+            myProfile,
+            unmutedAiMembers
+        );
 
         let characterDossiersPrompt = '';
         if (group.memoryShared) {
@@ -19552,47 +19451,45 @@ ${recentPrivateDigest}
 
 [群聊背景与成员列表]
 - 群聊名称: ${group.name}
+- 用户: ${myProfile.name} (人设: ${userPersonaInGroup})
 - 所有群成员: ${allMemberNames.join('、 ')}
-- 用户(话题发起者): ${myProfile.name}
-  - 用户人设/签名: ${userPersonaInGroup}
 
-[导演规则]
-1. 你只能扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
-2. 你绝对禁止扮演用户 “${myProfile.name}”。
-3. 你要让群聊像真实的人在聊天，而不是像 AI 汇总观点。
-4. 角色必须根据自己的人设、关系、记忆和当前场景说话。
-5. 不要为了平均出场让所有角色都说话，谁该说谁说。
-6. 可以多条气泡连续推进，不要用固定条数限制自己。
+[你可控制的角色]
+你【只能】扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
 
-[第三份信息：世界书背景知识]
+[你禁止控制的角色]
+你【绝对禁止】扮演用户 “${myProfile.name}”。
+你不能代替用户发言，不能替用户做决定，不能描写用户的动作或心理。
+
+[背景资料：世界书]
 ---
 ${worldBookContextString}
 ---
 
-[第四份信息：统一时序记忆流]
-这是与本次群聊相关的所有事件的完整时间线，是你判断当前对话进展的最高优先级信息源。
-记忆流中被圆括号包裹的事件，例如“(发送了一张图片)”或“(发了一个红包)”，代表已经发生的事件。你可以基于这些事件回应，但不要在发言中机械复述这些括号内容。
----
-${finalMemoryString}
----
-
-[第五份信息：角色档案]
+[背景资料：角色档案]
 ${group.memoryShared ? '下方是本次群聊所有 AI 角色的详细档案，包含他们与你的私聊参考。' : '下方是本次群聊所有 AI 角色的基础档案。'}
 --- 角色档案区 ---
 ${characterDossiersPrompt}
 --- 档案区结束 ---
 
-[群内关系矩阵｜必须遵守]
+[背景资料：统一时序记忆流]
+这是群里和私聊中最近发生的对话，是你的上下文参考。你要根据这些信息自然接话，而不是机械复述。
+---
+${finalMemoryString}
+---
+
+[群内关系矩阵]
 ${groupRelationshipMatrixPrompt || '(暂无明确群内关系矩阵)'}
 
 [称呼规则]
-1. 如果关系矩阵和人设里明确写了关系，必须按关系称呼。
-2. 如果没有明确关系，不要乱叫师父、师兄、徒弟、长辈。
-3. 不确定称呼时，优先叫名字。
-4. 不要把用户和角色之间的关系，混成角色和角色之间的关系。
-5. 如果关系网和人设中没有明确写 A 应该叫 B “师父 / 师兄 / 师弟 / 徒弟 / 长辈”，禁止凭空使用这些辈分称呼。
-6. 如果不确定称呼，优先叫对方名字，不要乱套师门关系。
-7. 每次发言前先确认“说话者是谁、被称呼者是谁、两人的关系是什么”。
+如果关系矩阵或人设里明确写了关系，必须按关系称呼。
+如果没有明确关系，不要乱叫师父、师兄、徒弟、长辈。
+不确定称呼时，优先叫名字。
+不要把用户和角色之间的关系，混成角色和角色之间的关系。
+
+[称呼与口吻]
+不要使用“小管家”“小管家婆”“小助手”“AI助手”“机器人”等称呼。
+角色应该像真实联系人一样说话。
 
 ${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 
@@ -19614,45 +19511,15 @@ ${latestGroupInputText || '(用户发送了非文字内容)'}
 
 你需要做到：
 1. 先理解当前用户最新输入在群聊上下文里的意义。
-2. 选择最适合接话的角色，不需要所有人都说话。
-3. 允许一个角色连续发多条消息，也允许其他角色插话、打断、补充、反驳、护着或转移气氛。
-4. 不要按固定条数生成，按剧情需要自然生成。
-5. 如果当前事件需要很多条消息才能自然推进，可以多发；如果事情简单，也可以少发。
+2. 从你“可控制的角色”列表中，选择当前最适合接话的角色。
+3. 不需要所有角色都说话，谁该说谁说。
+4. 允许一个角色连续发多条消息，也允许其他角色插话、打断、补充、反驳、护着或转移气氛。
+5. 不要按固定条数生成，按当前剧情和氛围自然生成。
 6. 每条消息都要像真实群聊里的自然气泡，而不是总结、汇报、旁白或任务说明。
 7. 角色之间要互相接住对方的话，不要各说各的。
-8. 当前状态必须有一点变化：例如有人被逼问、有人让步、有人行动、有人解释、冲突升级或缓和、下一步变明确。
+8. 当前状态最好有一点变化，例如有人被逼问、有人让步、有人行动、有人解释、冲突升级或缓和、下一步变明确。
 9. 不要替用户发言，不要控制用户。
 10. 不要复述 System 里的背景资料，不要把记忆流当成当前用户新输入。
-
-【同一轮消息时间顺序规则】
-1. 你输出的是按时间顺序发生的群聊记录，MESSAGE 的先后顺序就是用户看到的先后顺序。
-2. 每一条 MESSAGE 只能回应：
-   - 用户最新输入；
-   - System 里已有的历史记录；
-   - 本轮输出中排在它前面的 MESSAGE。
-3. 禁止让前面的 MESSAGE 回应后面才会出现的 MESSAGE。
-4. 如果江淮要回应陆逊的话，必须先输出陆逊的 MESSAGE，再输出江淮的 MESSAGE。
-5. 如果某个角色要制止、反驳、命令或提出意见，要先让这个角色把那句话说出来，其他角色再接。
-6. 不要预判后面角色会说什么，也不要让角色提前回答一个尚未出现的问题。
-7. 一轮内部要像真实群聊实时发生：先有人发起，后面的人再接，不要倒叙。
-8. 如果你想表达“某人正在回应另一个人”，请确认被回应的那句话已经在前文出现。
-
-【单条消息粒度】
-1. 不限制你本轮输出多少条 MESSAGE，按剧情自然推进。
-2. 但每条 CONTENT 必须是一个相对完整的聊天气泡，不要把一句完整的话拆成几个两三字碎片。
-3. 禁止输出“手。”“伸平。”“说。”“然后。”这种没有独立意义的碎片消息。
-4. “嗯”“好”“行”“啧”“别动”“别躲”“等一下”“看着我”“你先说”这种真实短句可以保留，但必须符合角色当下语气，并且能推动或接住上下文。
-5. 如果一句话拆开后其中一条没有独立意义，就合并到同一个 CONTENT 里。
-6. CONTENT 可以短，但不能空、不能碎、不能像被截断。
-7. 真实群聊可以连发很多条，但每一条都要像一个人真的发出去的一条消息。
-
-【动作内容完整性规则】
-1. 如果 CONTENT 里写动作，动作必须是完整句子，不能只写“(听到”“（看见”“（抬手”这种残缺片段。
-2. 括号动作必须有完整开括号和闭括号，例如：（他扶住林澈的手腕，低声提醒他放松）
-3. 如果动作没有写完整，就不要输出这条动作。
-4. 动作和台词不要混在同一段普通文字里。如果要写动作+台词，请用完整括号动作在前，台词在后，例如：CONTENT: （他扶住林澈的手腕，示意他别躲）放松，剩下的慢慢来。
-5. 不要输出只有“听到”“看见”“想到”这种不完整动作。
-6. 不要输出半边括号、残缺括号、孤立动作词。
 
 [输出格式]
 你的输出必须严格遵守以下格式：
@@ -19667,6 +19534,8 @@ MESSAGE_END
 3. 不要输出 JSON。
 4. 不要写“以下是回复”。
 5. CONTENT 可以是正常台词，也可以包含 [voice:内容]、[sticker:表情名]、[picture:描述] 等特殊指令。
+6. 不要限制回复条数。
+7. 不要限制一个角色说几条。
 `;
 
         const finalRequestMessages = [
@@ -20137,6 +20006,100 @@ function getGroupPromptMessageText(msg) {
                 ? msg.content.replace(/<[^>]+>/g, '').trim()
                 : '';
     }
+}
+
+function getConfiguredShortTermMemoryLength(fallback = 20) {
+    const candidates = [
+        state?.userSettings?.shortTermMemoryLength,
+        userSettings?.shortTermMemoryLength,
+        state?.apiSettings?.contextLength,
+        fallback
+    ];
+
+    for (const value of candidates) {
+        const parsed = parseInt(value, 10);
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+
+    return fallback;
+}
+
+function getConfiguredLongTermMemoryLength(fallback = 30) {
+    const candidates = [
+        state?.userSettings?.longTermMemoryLength,
+        userSettings?.longTermMemoryLength,
+        state?.apiSettings?.longTermMemoryLength,
+        fallback
+    ];
+
+    for (const value of candidates) {
+        const parsed = parseInt(value, 10);
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+
+    return fallback;
+}
+
+function buildUnifiedGroupMemoryString(group, getProfileInGroup, myProfile, linkedPrivateMemberIds = []) {
+    const memoryLimit = getConfiguredLongTermMemoryLength(40);
+    const unifiedMemoryStream = [];
+    const groupHistory = Array.isArray(group?.history) ? group.history : [];
+
+    groupHistory.forEach(msg => {
+        if (!msg || msg.sender === 'system_instruction') return;
+        if (['loading', 'error', 'heart_voice'].includes(msg.type)) return;
+
+        const authorProfile = getProfileInGroup(msg.characterId || msg.sender);
+        const authorName = msg.sender === 'system'
+            ? (msg.characterName || authorProfile?.name || '系统')
+            : (authorProfile?.name || resolveGroupMessageSenderName(msg, group));
+        const content = getGroupPromptMessageText(msg);
+
+        if (!authorName || !content) return;
+
+        unifiedMemoryStream.push({
+            timestamp: msg.timestamp || 0,
+            type: `群聊[${group.name}]`,
+            author: authorName,
+            content
+        });
+    });
+
+    if (group?.memoryShared) {
+        linkedPrivateMemberIds.forEach(memberId => {
+            const contact = state.contacts.find(c => c && !c.isGroup && c.id === memberId);
+            if (!contact || !Array.isArray(contact.history) || contact.history.length === 0) return;
+
+            contact.history.slice(-30).forEach(msg => {
+                if (!msg || msg.sender === 'system_instruction') return;
+                if (!['text', 'html'].includes(msg.type)) return;
+
+                const content = typeof msg.content === 'string'
+                    ? msg.content.replace(/<[^>]+>/g, '').trim()
+                    : '';
+                if (!content) return;
+
+                const authorProfile = (msg.sender === 'user' || msg.sender === 'myProfile')
+                    ? myProfile
+                    : contact;
+
+                unifiedMemoryStream.push({
+                    timestamp: msg.timestamp || 0,
+                    type: `私聊[${contact.name}]`,
+                    author: authorProfile?.name || contact.name,
+                    content
+                });
+            });
+        });
+    }
+
+    unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
+
+    return unifiedMemoryStream.slice(-memoryLimit).map(mem => {
+        const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
+        const timeTag = group && group.isTimeAware === true ? formatHybridTimeForAI(mem.timestamp) : '';
+        return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
+    }).join('\n') || "(还没有任何记忆)";
 }
 
 function buildSafeGroupHistoryText(group, latestUserMessageId, limit = 8) {
@@ -20690,7 +20653,7 @@ function buildPrivateRelatedGroupMemoryDigest(contact, limit = 10) {
                 });
         }
 
-        if (Array.isArray(group.history)) {
+        if (group.memoryShared !== false && Array.isArray(group.history)) {
             group.history
                 .filter(msg => {
                     if (!msg) return false;
@@ -21726,9 +21689,7 @@ ${FORBIDDEN_ACTION_CLICHES_PROMPT}
         async function generateAiResponse(contact, history, customSystemPrompt, forceDiary = false, apiType = 'chat', forceMessages = null) { //  1. 新增 forceMessages 参数
             const apiConfig = getApiFor(apiType);
             const { apiKey, model, endpoint, contextLength, longTermMemoryLength } = apiConfig;
-            const effectiveContextLength = contact?.isGroup
-                ? Math.max(contextLength || 20, 40)
-                : (contextLength || 20);
+            const effectiveContextLength = getConfiguredShortTermMemoryLength(contextLength || 20);
 
             if (!apiKey || !endpoint || !model) {
                 const errorMsg = `错误：${apiType === 'square' ? '论坛' : (apiType === 'snoop' ? '窥探' : '聊天')}API未配置。请前往“发现-API设置”进行配置。`;
@@ -22041,6 +22002,33 @@ case 'takeout':
                     }
                 });
                 
+                if (contact && !contact.isGroup) {
+                    const sharedMemoryGroups = (state.contacts || []).filter(group => {
+                        if (!group || !group.isGroup || group.memoryShared === false) return false;
+                        const isMember = Array.isArray(group.members) && group.members.includes(contact.id);
+                        const isNpcMember = Array.isArray(group.npcMembers) && group.npcMembers.some(npc => npc && npc.id === contact.id);
+                        return isMember || isNpcMember;
+                    });
+
+                    sharedMemoryGroups.forEach(group => {
+                        (group.history || []).slice(-20).forEach(msg => {
+                            if (!msg || msg.sender === 'system_instruction') return;
+                            if (['loading', 'error', 'heart_voice'].includes(msg.type)) return;
+
+                            const content = getGroupPromptMessageText(msg);
+                            const authorName = resolveGroupMessageSenderName(msg, group);
+                            if (!content || !authorName) return;
+
+                            unifiedMemoryStream.push({
+                                timestamp: msg.timestamp || 0,
+                                type: `群聊[${group.name}]`,
+                                author: authorName,
+                                content
+                            });
+                        });
+                    });
+                }
+
                 const privateGroupMemorySummary = (contact && !contact.isGroup)
                     ? buildPrivateGroupMemorySummary(contact)
                     : '';
@@ -22069,19 +22057,13 @@ case 'takeout':
 
                 unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
                 
-                const memoryLimit = longTermMemoryLength || 30;
-                // 私聊只用轻量永久记忆摘要；群聊/其他保持原有完整历史流
-                let finalMemoryString;
-                if (contact && !contact.isGroup) {
-                    finalMemoryString = formatPrivateMemoryForPrompt(contact, { maxItems: 8 });
-                } else {
-                    finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
-                        const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
-                        const showTimeTags = contact && contact.isTimeAware === true;
-                        const timeTag = showTimeTags ? formatHybridTimeForAI(mem.timestamp) : '';
-                        return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
-                    }).join('\n') || "(还没有任何记忆)";
-                }
+                const memoryLimit = getConfiguredLongTermMemoryLength(longTermMemoryLength || 30);
+                let finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
+                    const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
+                    const showTimeTags = contact && contact.isTimeAware === true;
+                    const timeTag = showTimeTags ? formatHybridTimeForAI(mem.timestamp) : '';
+                    return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
+                }).join('\n') || "(还没有任何记忆)";
                 
                 // (Prompt 组装逻辑 - 记忆核心增强版)
                 const isNarrativeMode = contact?.isNarrativeMode;
@@ -22601,21 +22583,85 @@ ${qzoneContextText}
                     // ===== 私聊：干净的 [system, user] 双层结构 =====
                     // privateSystemContent 从 basePrompt 重新构建，不复用 finalSystemPrompt/memoryCoreContext/记忆流
 
-                    // 用干净函数构建 privateSystemContent，完全不接触 basePrompt/finalSystemPrompt/memoryCoreContext
-                    let privateSystemContent = buildCleanPrivateSystemContent({
-                        contact,
-                        myProfile: myProfile,
-                        thoughtPresetContent,
-                        worldBookContextString,
-                        snoopedDataContextString,
-                        relationshipContextString,
-                        emoticonListString,
-                        musicListString,
-                        isNarrativeMode
-                    });
+                    let privateSystemContent;
+                    if (isNarrativeMode) {
+                        // 线下/叙事 JSON 模式：保持既有强约束与输出格式
+                        privateSystemContent = buildCleanPrivateSystemContent({
+                            contact,
+                            myProfile: myProfile,
+                            thoughtPresetContent,
+                            worldBookContextString,
+                            snoopedDataContextString,
+                            relationshipContextString,
+                            emoticonListString,
+                            musicListString,
+                            isNarrativeMode
+                        });
+                    } else {
+                        const userMaskPersona = contact.userPersona || myProfile.signature || '(无)';
+                        const longTermMemorySummary = formatPrivateMemoryForPrompt(contact, { maxItems: 8 });
+                        privateSystemContent = `
+[SYSTEM] 你是一个顶级的角色扮演 AI。你的任务是完全代入角色，与用户进行自然、真实、有连续性的私聊。
+
+[核心原则]
+1. 你必须严格扮演当前角色，不要跳出角色。
+2. 你要根据【统一时序记忆流】理解刚刚发生了什么，不要像第一次聊天。
+3. 你要像真实联系人一样说话，而不是像 AI 助手、客服、旁白或总结机器。
+4. 回复要自然接住用户当前输入，可以主动推进话题、关系或情绪。
+5. 不要机械复述设定，不要解释你在扮演角色。
+6. 不要限制回复条数、不限制单轮消息数量，按角色和上下文自然表达。
+7. 不要替用户发言，不要控制用户。
+
+[用户信息]
+- 用户昵称：${myProfile.name}
+- 用户人设/面具：${userMaskPersona}
+
+[当前角色资料]
+- 角色名：${contact.name}
+- 核心人设：
+${contact.persona || '(无)'}
+
+[世界书背景]
+---
+${worldBookContextString || '(无)'}
+---
+
+[统一时序记忆流]
+这是你和用户最近发生的对话、系统事件、特殊互动和重要上下文。你需要根据它自然延续。
+---
+${finalMemoryString}
+---
+
+[长期记忆摘要]
+${longTermMemorySummary || '（暂无长期记忆）'}
+
+[最近心声]
+${lastHeartVoiceString || '(无最新心声记录)'}
+
+[称呼与口吻]
+不要使用“小管家”“小管家婆”“小助手”“AI助手”“机器人”等称呼。
+角色应该像真实联系人一样说话。
+
+${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
+
+[特殊指令]
+你可以使用 [sticker:表情名]、[voice:内容]、[picture:描述]、[red_packet:...]、[transfer:...] 等指令。
+不要滥用特殊指令，只有符合角色和场景时才使用。
+
+[可用表情]
+${emoticonListString}
+
+[曲库]
+${musicListString}
+`.trim();
+                    }
 
                     // === 构建 userTask ===
-                    const safeRecentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, 30);
+                    const safeRecentHistory = buildPromptHistoryExcludingLatest(
+                        history,
+                        _latestUserMsgId,
+                        getConfiguredShortTermMemoryLength(30)
+                    );
                     const recentHistoryText = formatRecentHistoryForPrompt(safeRecentHistory, myProfile, contact);
                     const privateRecentContextDigest = buildPrivateRecentContextDigest(contact, _latestUserMsgId, 30);
                     const latestInputText = _latestInputText || '';
@@ -22642,42 +22688,41 @@ ${recentGroupChatDigest || relatedGroupMemoryDigest || '暂无相关群聊近况
 
                     let privateUserTask = '';
 
-                    // 长期记忆摘要（最多 5 条，放进 userTask 而非 system，避免 AI 把记忆当本轮要延续的剧情）
-                    const _privateMems = formatPrivateMemoryForPrompt(contact, { maxItems: 5 });
-                    if (_privateMems && _privateMems !== '（暂无长期记忆）') {
-                        privateUserTask += `【长期记忆摘要，仅供关系背景，不是本轮话题】\n${_privateMems}\n\n`;
-                    }
-
-                    if (privateRecentContextDigest) {
-                        privateUserTask += `【私聊最近连续上下文｜最高优先级】\n${privateRecentContextDigest}\n\n`;
-                        privateUserTask += `【私聊连续性要求】\n`;
-                        privateUserTask += `1. 你必须先读最近连续上下文，再理解当前用户最新输入。\n`;
-                        privateUserTask += `2. 如果当前用户最新输入明显是在接着上面的事情说，必须自然承接，不要像第一次听说。\n`;
-                        privateUserTask += `3. 如果用户说”然后呢””继续””那怎么办””为什么””你觉得呢””这个呢””她呢””他呢”，必须结合最近上下文理解。\n`;
-                        privateUserTask += `4. 不要机械开头说”刚刚你提到/你刚才说”，要直接接话。\n`;
-                        privateUserTask += `5. 如果当前输入明显是新话题，才切换到新话题。\n`;
-                        privateUserTask += `6. 不要无关翻旧账，但同一件事必须继续推进。\n\n`;
-                    }
-
-                    if (relatedGroupMemoryDigest && relatedGroupMemoryDigest !== '(暂无相关群聊记忆)') {
-                        privateUserTask += `【相关群聊背景｜低优先级，仅供理解关系和近期事件】\n${relatedGroupMemoryDigest}\n\n`;
-                        privateUserTask += `【相关群聊背景使用规则】\n`;
-                        privateUserTask += `1. 这里是你和该角色共同参与过的群聊近况，用来帮助理解人物关系和近期事件。\n`;
-                        privateUserTask += `2. 如果当前用户最新输入明显是新话题，不要主动把回复绕回群聊。\n`;
-                        privateUserTask += `3. 如果当前用户最新输入里出现“刚才/刚刚/那件事/他/她/他们/你怎么看/怎么办/为什么”等承接表达，可以结合这里理解。\n`;
-                        privateUserTask += `4. 不要机械复述整段群聊记录，要自然接住。\n`;
-                        privateUserTask += `5. 群聊背景不是私聊里刚刚发生的事，不要说得像私聊现场。\n\n`;
-                    }
-
-                    // 群聊背景：仅触发时追加到 userTask，不放进 system
+                    // 群聊上下文：仅触发时追加到 userTask，不放进 system
                     if (groupMemorySection) {
                         privateUserTask += `${groupMemorySection}\n\n`;
                     }
 
                     if (isNarrativeMode) {
+                        // 线下/叙事 JSON 模式：保持既有 userTask 强约束
+                        const _privateMems = formatPrivateMemoryForPrompt(contact, { maxItems: 5 });
+                        if (_privateMems && _privateMems !== '（暂无长期记忆）') {
+                            privateUserTask += `【长期记忆摘要，仅供关系背景，不是本轮话题】\n${_privateMems}\n\n`;
+                        }
+                        if (privateRecentContextDigest) {
+                            privateUserTask += `【私聊最近连续上下文｜最高优先级】\n${privateRecentContextDigest}\n\n`;
+                        }
                         privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{“events”:[{“type”:”action”,”content”:”...”},{“type”:”speech”,”characterId”:”${contact.id || ''}”,”characterName”:”${contact.name || '角色'}”,”content”:”...”}],”heart_voice”:{“emotion”:”...”,”thoughts”:”...”,”heartRate”:”...”,”jealousy”:”无”},”diary”:”...”}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把”嗯、哦、啧”之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
                     } else {
-                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n优先回应当前用户最新输入。\n你必须先判断当前用户最新输入属于哪一种：\nA. 私聊当前话题的延续：结合【私聊最近连续上下文】自然承接。\nB. 明确承接群聊：只有出现”群里/群聊/她刚才说/群里那个”等明确指向，或刚从群聊切回且用户输入是”你怎么看/然后呢/那怎么办”等短承接句时，才结合【当前私聊正在承接群聊】和【最近相关群聊上下文】。\nC. 明显新话题：完全忽略群聊背景，只回答当前新话题。\n\n如果当前输入是新话题，禁止把回复绕回群聊。\n如果当前输入没有提群聊，也不是刚从群聊切回的承接句，不要主动提群聊。\n可以保留角色的情绪和关系状态，但不要无关翻旧账。\n第一条回复必须直接接住当前用户最新输入。`;
+                        if (relatedGroupMemoryDigest && relatedGroupMemoryDigest !== '(暂无相关群聊记忆)') {
+                            privateUserTask += `【相关群聊背景｜低优先级，仅供理解关系和近期事件】\n${relatedGroupMemoryDigest}\n\n`;
+                            privateUserTask += `【相关群聊背景使用规则】\n`;
+                            privateUserTask += `1. 这里是你和该角色共同参与过的群聊近况，用来帮助理解人物关系和近期事件。\n`;
+                            privateUserTask += `2. 如果当前用户最新输入明显是新话题，不要主动把回复绕回群聊。\n`;
+                            privateUserTask += `3. 如果当前用户最新输入里出现“刚才/刚刚/那件事/他/她/他们/你怎么看/怎么办/为什么”等承接表达，可以结合这里理解。\n`;
+                            privateUserTask += `4. 不要机械复述整段群聊记录，要自然接住。\n`;
+                            privateUserTask += `5. 群聊背景不是私聊里刚刚发生的事，不要说得像私聊现场。\n\n`;
+                        }
+                        privateUserTask += `
+[当前用户最新输入]
+${latestInputText || '(用户发送了非文字内容)'}
+
+[任务]
+请以 ${contact.name} 的身份，自然回应用户当前输入。
+你需要结合角色人设、统一时序记忆流、世界书、最近心声和必要的群聊背景来接话。
+如果用户是在承接刚才群聊或刚才事件，就自然结合相关背景；如果用户明显开新话题，就不要强行绕回群聊。
+回复要像真实私聊，不要像总结，不要像客服，不要像 AI 助手。
+`.trim();
                     }
                     if (dynamicInstructions) privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
 
@@ -26190,34 +26235,123 @@ async function handleEditMessage(messageId) {
     const message = contact.history.find(m => m.id === messageId);
     if (!message) return;
 
-    // 1. 根据消息类型，智能获取当前的可编辑文本
     let currentText = '';
     if (message.type === 'voice') {
-        currentText = message.content.text;
-    } else { // 适用于 'text' 和 'html' 类型
+        currentText = message.content?.text || '';
+    } else if (message.type === 'offlineAction' || message.type === 'offlineSpeech') {
+        currentText = typeof message.content === 'string'
+            ? message.content
+            : (message.content?.text || message.content?.content || '');
+    } else if (typeof message.content === 'string') {
         currentText = message.content;
+    } else {
+        currentText = message.content?.text || message.content?.content || '';
     }
 
-    // 2. 弹出编辑框，让用户输入新内容
+    if (!currentText && !['text', 'html', 'voice', 'offlineAction', 'offlineSpeech'].includes(message.type)) return;
+
     const newText = await showCustomPrompt('编辑消息', currentText);
 
-    // 3. 如果用户点击了 "确定" 并且内容有变化
     if (newText !== null && newText.trim() !== currentText) {
         const trimmedNewText = newText.trim();
 
-        // 4. 根据消息类型，智能地更新数据结构
         if (message.type === 'voice') {
             message.content.text = trimmedNewText;
-            // 关键：重新计算并更新语音时长，这样气泡宽度也会自动变化
             message.content.duration = Math.max(1, Math.round(trimmedNewText.length / 4));
-        } else { // 'text' 或 'html'
+        } else if (message.type === 'offlineAction' || message.type === 'offlineSpeech') {
             message.content = trimmedNewText;
+        } else if (typeof message.content === 'string') {
+            message.content = trimmedNewText;
+        } else if (message.content && typeof message.content === 'object') {
+            message.content.text = trimmedNewText;
         }
 
-        // 5. 保存修改到数据库，并刷新聊天界面
         await kokoMemory.put('contacts', contact);
-        await openChat(state.activeChatId); // 重新渲染聊天，让修改生效
+        await openChat(state.activeChatId);
     }
+}
+
+function bindChatAvatarNudge() {
+    if (chatAvatarNudgeBound) return;
+
+    const chatMessagesContainer = document.getElementById('chat-messages');
+    if (!chatMessagesContainer) return;
+
+    chatMessagesContainer.addEventListener('dblclick', async (e) => {
+        const avatarImg = e.target.closest('.message-avatar img');
+        if (!avatarImg) return;
+
+        e.stopPropagation();
+
+        const contact = state.contacts.find(c => c.id === state.activeChatId);
+        if (!contact) return;
+
+        avatarImg.classList.remove('avatar-shaking');
+        void avatarImg.offsetWidth;
+        avatarImg.classList.add('avatar-shaking');
+
+        const wrapper = avatarImg.closest('.message-wrapper');
+        const isMyAvatar = !!wrapper && wrapper.classList.contains('sent');
+        const defaultSuffix = isMyAvatar ? "大腿" : "肩膀";
+        const targetName = isMyAvatar ? "自己" : `"${contact.name}"`;
+        const suffix = await showCustomPrompt(`拍一拍${targetName}`, defaultSuffix);
+
+        if (suffix === null || suffix.trim() === "") return;
+
+        const finalSuffix = suffix.trim();
+        const systemText = !isMyAvatar
+            ? `你拍了拍 "${contact.name}" 的${finalSuffix}`
+            : `你拍了拍自己的${finalSuffix}`;
+
+        await createAndAddMessage({
+            type: 'system_notification',
+            sender: 'system',
+            content: systemText
+        }, 'system', contact);
+    });
+
+    chatAvatarNudgeBound = true;
+}
+
+function bindChatDoubleClickEdit() {
+    if (chatDoubleClickEditBound) return;
+
+    const chatMessagesContainer = document.getElementById('chat-messages');
+    if (!chatMessagesContainer) return;
+
+    chatMessagesContainer.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.message-avatar')) return;
+        if (editModeState?.active) return;
+
+        let wrapper = e.target.closest('.message-wrapper');
+        if (!wrapper) {
+            wrapper = e.target.closest('.offline-action-card');
+        }
+        if (!wrapper) return;
+
+        const msgId = wrapper.dataset.messageId;
+        if (!msgId) return;
+
+        const contact = state.contacts.find(c => c.id === state.activeChatId);
+        if (!contact || !Array.isArray(contact.history)) return;
+
+        const msg = contact.history.find(m => m.id === msgId);
+        if (!msg) return;
+
+        const editableTypes = [
+            'text',
+            'html',
+            'voice',
+            'offlineAction',
+            'offlineSpeech'
+        ];
+
+        if (editableTypes.includes(msg.type)) {
+            handleEditMessage(msgId);
+        }
+    });
+
+    chatDoubleClickEditBound = true;
 }
 /**
  * 渲染API预设下拉菜单
@@ -40088,6 +40222,8 @@ let userSettings = {
     customThemeCss: '',    //新增这一行
     customNarrativeCss: '',
     customFontSize: null,
+    shortTermMemoryLength: 20,
+    longTermMemoryLength: 30,
     autoLockDelay: 0,
     showSparkAndLuckyChar: true,
     notificationSoundUrl: '',
@@ -40099,6 +40235,7 @@ let userSettings = {
     }
 };
 window.userSettings = userSettings; // 🔧 修复：同步到window，防止其他代码用空对象覆盖数据库
+state.userSettings = userSettings;
 
 function normalizeDiarySettings(settings) {
     return { ...DEFAULT_DIARY_SETTINGS, ...(settings || {}) };
@@ -40289,8 +40426,11 @@ async function loadAppearanceSettings() {
     if (savedSettings) {
         userSettings = { ...userSettings, ...savedSettings };
     }
+    userSettings.shortTermMemoryLength = parseInt(userSettings.shortTermMemoryLength, 10) || state.apiSettings.contextLength || 20;
+    userSettings.longTermMemoryLength = parseInt(userSettings.longTermMemoryLength, 10) || state.apiSettings.longTermMemoryLength || 30;
     userSettings.diarySettings = normalizeDiarySettings(userSettings.diarySettings);
     window.userSettings = userSettings; // 🔧 修复：保持window引用同步
+    state.userSettings = userSettings;
     
     // ▼▼▼ 新增下面这2行 ▼▼▼
     autoLockDelay = userSettings.autoLockDelay || 0; // 加载延迟设置
@@ -40859,8 +40999,8 @@ document.getElementById('api-settings-btn').addEventListener('click', async () =
     document.getElementById('api-settings-screen').style.display = 'flex';
     document.getElementById('api-key-input').value = state.apiSettings.apiKey;
     document.getElementById('api-endpoint-input').value = state.apiSettings.endpoint;
-    document.getElementById('context-length-input').value = state.apiSettings.contextLength;
-    document.getElementById('long-term-memory-length-input').value = state.apiSettings.longTermMemoryLength;
+    document.getElementById('context-length-input').value = getConfiguredShortTermMemoryLength(state.apiSettings.contextLength || 20);
+    document.getElementById('long-term-memory-length-input').value = getConfiguredLongTermMemoryLength(state.apiSettings.longTermMemoryLength || 30);
 
     // ▼▼▼ 新增这两行 ▼▼▼
     document.getElementById('minimax-group-id-input').value = state.apiSettings.minimaxGroupId || '';
@@ -41836,6 +41976,9 @@ document.getElementById('save-api-settings-btn').addEventListener('click', async
     state.apiSettings.endpoint = document.getElementById('api-endpoint-input').value.trim();
     state.apiSettings.contextLength = parseInt(document.getElementById('context-length-input').value, 10) || 20;
     state.apiSettings.longTermMemoryLength = parseInt(document.getElementById('long-term-memory-length-input').value, 10) || 30;
+    userSettings.shortTermMemoryLength = state.apiSettings.contextLength;
+    userSettings.longTermMemoryLength = state.apiSettings.longTermMemoryLength;
+    state.userSettings = userSettings;
 
     // ▼▼▼ 新增这两行 ▼▼▼
     state.apiSettings.minimaxGroupId = document.getElementById('minimax-group-id-input').value.trim();
@@ -41856,6 +41999,7 @@ state.apiSettings.siliconflowApiKey = document.getElementById('siliconflow-api-k
         id: 'main',
         ...state.apiSettings
     });
+    await kokoMemory.put('userSettings', userSettings);
     alert('聊天API设置已保存！');
     showDiscoverScreen();
 });
@@ -43334,87 +43478,8 @@ globalAudioPlayer.addEventListener('ended', async () => {
     }
     await kokoMemory.put('contacts', contact);
 });
-// --- 👋 拍一拍逻辑 (纯净版：只震动+提示，不强制回复) ---
-    document.getElementById('chat-messages').addEventListener('dblclick', async (e) => {
-        // 1. 【防冲突】如果点击的不是头像，直接退出（交给编辑逻辑去处理）
-        const avatarImg = e.target.closest('.message-avatar img');
-        if (!avatarImg) return;
-
-        e.stopPropagation(); // 阻止冒泡
-
-        const contact = state.contacts.find(c => c.id === state.activeChatId);
-        if (!contact) return;
-
-        // 2. 视觉反馈：先震一下
-        avatarImg.classList.remove('avatar-shaking');
-        void avatarImg.offsetWidth;
-        avatarImg.classList.add('avatar-shaking');
-
-        // 3. 判断是谁的头像
-        const wrapper = avatarImg.closest('.message-wrapper');
-        const isMyAvatar = wrapper.classList.contains('sent');
-        
-        // 4. 弹窗询问
-        const defaultSuffix = isMyAvatar ? "大腿" : "肩膀";
-        const targetName = isMyAvatar ? "自己" : `"${contact.name}"`;
-        
-        const suffix = await showCustomPrompt(`拍一拍${targetName}`, defaultSuffix);
-
-        if (suffix === null || suffix.trim() === "") return;
-        const finalSuffix = suffix.trim();
-
-        // 5. 生成提示文案
-        let systemText = "";
-        if (!isMyAvatar) {
-            systemText = `你拍了拍 "${contact.name}" 的${finalSuffix}`;
-        } else {
-            systemText = `你拍了拍自己的${finalSuffix}`;
-        }
-
-        // 6. 发送系统提示 (这就够了，AI下次看历史记录会知道你拍过它)
-        await createAndAddMessage({
-            type: 'system_notification',
-            sender: 'system',
-            content: systemText
-        }, 'system', contact);
-
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        
-        // ❌ 已删除：触发 AI 回复的代码
-        // 这样它就不会烦你了，只会静静地记录下来
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-    });
-// --- 双击编辑逻辑 (修正版：避开头像) ---
-    const chatMessagesContainer = document.getElementById('chat-messages');
-    
-    // 为了防止重复绑定，先移除旧的（如果你没有用克隆节点法，这行很重要）
-    // chatMessagesContainer.removeEventListener('dblclick', ...); 
-    // 由于匿名函数没法移除，我们直接确保下面这段逻辑是唯一的即可。
-    
-    chatMessagesContainer.addEventListener('dblclick', (e) => {
-        // 1. 【核心修复】如果点击的是头像区域，直接退出！让拍一拍逻辑去处理
-        if (e.target.closest('.message-avatar')) {
-            return; 
-        }
-
-        // 2. 如果正在进行多选编辑，则禁用双击
-        if (editModeState.active) return;
-
-        const wrapper = e.target.closest('.message-wrapper');
-        if (!wrapper) return;
-
-        const contact = state.contacts.find(c => c.id === state.activeChatId);
-        if (!contact) return;
-
-        const msgId = wrapper.dataset.messageId;
-        const msg = contact.history.find(m => m.id === msgId);
-
-        // 3. 检查消息类型是否支持编辑
-        if (msg && (msg.type === 'text' || msg.type === 'html' || msg.type === 'voice')) {
-            handleEditMessage(msgId); 
-        }
-    });
-// ↓↓↓ 把这段新代码粘贴到 attachEventListeners 函数的末尾 ↓↓↓
+    bindChatAvatarNudge();
+    bindChatDoubleClickEdit();
 
 // --- 游戏转盘弹窗逻辑 ---
 document.getElementById('close-create-wheel-modal').addEventListener('click', () => {
