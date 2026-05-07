@@ -19198,12 +19198,27 @@ ${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
 4. 禁止回复用户：绝对不要和用户“${myProfile.name}”说话，这是 AI 成员之间的对话。
 5. 不要按固定条数生成，按当前氛围自然推进。可以多条，也可以少条，关键是自然和有推进。
 
+【同一轮消息时间顺序规则】
+1. MESSAGE 的顺序就是群聊真实发生的顺序。
+2. 后一条可以回应前一条，前一条不能回应后一条。
+3. 如果某个角色要回应另一个角色，必须先让被回应的角色发言。
+4. 不要让角色提前回答后面才出现的话。
+5. 不要倒叙生成群聊。
+
 【单条消息粒度】
 1. 不限制本轮输出多少条 MESSAGE。
 2. 每条 CONTENT 要像真实聊天气泡，不要只有两三个字的无意义碎片。
 3. 允许“嗯”“好”“别闹”“等下”“你说”等真实短句。
 4. 禁止“手。”“伸平。”“然后。”这种被拆坏的碎片。
 5. 如果内容太碎，合并成一条更自然的 CONTENT。
+
+【动作内容完整性规则】
+1. 如果 CONTENT 里写动作，动作必须是完整句子，不能只写“(听到”“（看见”“（抬手”这种残缺片段。
+2. 括号动作必须有完整开括号和闭括号，例如：（他扶住林澈的手腕，低声提醒他放松）
+3. 如果动作没有写完整，就不要输出这条动作。
+4. 动作和台词不要混在同一段普通文字里。如果要写动作+台词，请用完整括号动作在前，台词在后，例如：CONTENT: （他扶住林澈的手腕，示意他别躲）放松，剩下的慢慢来。
+5. 不要输出只有“听到”“看见”“想到”这种不完整动作。
+6. 不要输出半边括号、残缺括号、孤立动作词。
 
 [输出格式]
 你的输出必须严格遵守以下格式：
@@ -19330,92 +19345,59 @@ MESSAGE_END
                 continue;
             }
 
-            const mixed = splitLeadingActionAndSpeechContent(content);
+            const segments = parseGroupContentSegments(content);
 
-            if (mixed.action) {
-                const actionText = cleanOfflineActionText(mixed.action)
-                    .replace(/^[“””]+|[“””]+$/g, '')
-                    .trim();
-                if (
-                    actionText &&
-                    !isPurePunctuationOrGarbageContent(actionText) &&
-                    !isRepeatedRecentAction(group, actionText) &&
-                    !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
-                    lastRenderedType !== 'action'
-                ) {
-                    await sleep(800 + Math.random() * 700);
-                    await createAndAddMessage(
-                        {
-                            type: 'offlineAction',
-                            content: actionText,
-                            characterId: speakerProfile?.id || '',
-                            characterName: speakerProfile?.name || ''
-                        },
-                        'system',
-                        group,
-                        true,
-                        'chat'
-                    );
-                    lastRenderedType = 'action';
+            for (const seg of segments) {
+                if (!seg || !seg.content) continue;
+
+                if (seg.type === 'action') {
+                    const actionText = cleanCompleteOfflineActionText(seg.content);
+                    if (!actionText) continue;
+
+                    if (
+                        actionText &&
+                        !isRepeatedRecentAction(group, actionText) &&
+                        !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
+                        lastRenderedType !== 'action'
+                    ) {
+                        await sleep(800 + Math.random() * 700);
+                        await createAndAddMessage(
+                            {
+                                type: 'offlineAction',
+                                content: actionText,
+                                characterId: speakerProfile?.id || '',
+                                characterName: speakerProfile?.name || ''
+                            },
+                            'system',
+                            group,
+                            true,
+                            'chat'
+                        );
+                        lastRenderedType = 'action';
+                    }
+                    continue;
                 }
-            }
 
-            if (mixed.action) {
-                content = mixed.speech || '';
-            }
+                const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(seg.content);
+                let speechText = hasStructuredDirective ? seg.content.trim() : cleanAiSpeechText(seg.content).trim();
+                if (!speechText) continue;
 
-            if (!content) continue;
-
-            const shouldRenderAction = (!mixed.action && explicitType === 'action') || (!explicitType && looksLikeOfflineAction(content));
-
-            if (shouldRenderAction) {
-                const actionText = cleanOfflineActionText(content)
-                    .replace(/^[“””]+|[“””]+$/g, '')
-                    .trim();
-                if (
-                    actionText &&
-                    !isPurePunctuationOrGarbageContent(actionText) &&
-                    !isRepeatedRecentAction(group, actionText) &&
-                    !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
-                    lastRenderedType !== 'action'
-                ) {
-                    await sleep(800 + Math.random() * 700);
-                    await createAndAddMessage(
-                        {
-                            type: 'offlineAction',
-                            content: actionText,
-                            characterId: speakerProfile?.id || '',
-                            characterName: speakerProfile?.name || ''
-                        },
-                        'system',
-                        group,
-                        true,
-                        'chat'
-                    );
-                    lastRenderedType = 'action';
+                if (isPurePunctuationOrGarbageContent(speechText)) {
+                    console.warn('[跳过纯标点 speech]', { speakerName, speechText });
+                    continue;
                 }
-                continue;
-            }
 
-            const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(content);
-            const speechText = hasStructuredDirective ? content : cleanAiSpeechText(content).trim();
-            if (!speechText) continue;
+                if (!hasStructuredDirective && isMeaninglessTinyGroupContent(speechText)) {
+                    console.warn('[跳过无意义碎片 CONTENT]', { speakerName, content: speechText });
+                    continue;
+                }
 
-            if (!hasStructuredDirective && isPurePunctuationOrGarbageContent(speechText)) {
-                console.warn('[跳过纯标点 speech]', { speakerName, speechText });
-                continue;
-            }
-
-            if (!hasStructuredDirective && isMeaninglessTinyGroupContent(speechText)) {
-                console.warn('[跳过无意义碎片 CONTENT]', { speakerName, content: speechText });
-                continue;
-            }
-
-            if (speakerProfile) {
-                await sleep(800 + Math.random() * 700);
-                await processAndDisplayAiResponse(speechText, speakerProfile, group, 'chat');
-                renderedSpeechCount++;
-                lastRenderedType = 'speech';
+                if (speakerProfile) {
+                    await sleep(800 + Math.random() * 700);
+                    await processAndDisplayAiResponse(speechText, speakerProfile, group, 'chat');
+                    renderedSpeechCount++;
+                    lastRenderedType = 'speech';
+                }
             }
         }
 
@@ -19642,6 +19624,19 @@ ${latestGroupInputText || '(用户发送了非文字内容)'}
 9. 不要替用户发言，不要控制用户。
 10. 不要复述 System 里的背景资料，不要把记忆流当成当前用户新输入。
 
+【同一轮消息时间顺序规则】
+1. 你输出的是按时间顺序发生的群聊记录，MESSAGE 的先后顺序就是用户看到的先后顺序。
+2. 每一条 MESSAGE 只能回应：
+   - 用户最新输入；
+   - System 里已有的历史记录；
+   - 本轮输出中排在它前面的 MESSAGE。
+3. 禁止让前面的 MESSAGE 回应后面才会出现的 MESSAGE。
+4. 如果江淮要回应陆逊的话，必须先输出陆逊的 MESSAGE，再输出江淮的 MESSAGE。
+5. 如果某个角色要制止、反驳、命令或提出意见，要先让这个角色把那句话说出来，其他角色再接。
+6. 不要预判后面角色会说什么，也不要让角色提前回答一个尚未出现的问题。
+7. 一轮内部要像真实群聊实时发生：先有人发起，后面的人再接，不要倒叙。
+8. 如果你想表达“某人正在回应另一个人”，请确认被回应的那句话已经在前文出现。
+
 【单条消息粒度】
 1. 不限制你本轮输出多少条 MESSAGE，按剧情自然推进。
 2. 但每条 CONTENT 必须是一个相对完整的聊天气泡，不要把一句完整的话拆成几个两三字碎片。
@@ -19650,6 +19645,14 @@ ${latestGroupInputText || '(用户发送了非文字内容)'}
 5. 如果一句话拆开后其中一条没有独立意义，就合并到同一个 CONTENT 里。
 6. CONTENT 可以短，但不能空、不能碎、不能像被截断。
 7. 真实群聊可以连发很多条，但每一条都要像一个人真的发出去的一条消息。
+
+【动作内容完整性规则】
+1. 如果 CONTENT 里写动作，动作必须是完整句子，不能只写“(听到”“（看见”“（抬手”这种残缺片段。
+2. 括号动作必须有完整开括号和闭括号，例如：（他扶住林澈的手腕，低声提醒他放松）
+3. 如果动作没有写完整，就不要输出这条动作。
+4. 动作和台词不要混在同一段普通文字里。如果要写动作+台词，请用完整括号动作在前，台词在后，例如：CONTENT: （他扶住林澈的手腕，示意他别躲）放松，剩下的慢慢来。
+5. 不要输出只有“听到”“看见”“想到”这种不完整动作。
+6. 不要输出半边括号、残缺括号、孤立动作词。
 
 [输出格式]
 你的输出必须严格遵守以下格式：
@@ -19788,94 +19791,59 @@ MESSAGE_END
                 continue;
             }
 
-            const mixed = splitLeadingActionAndSpeechContent(content);
+            const segments = parseGroupContentSegments(content);
 
-            if (mixed.action) {
-                const actionText = cleanOfflineActionText(mixed.action)
-                    .replace(/^[“””]+|[“””]+$/g, '')
-                    .trim();
+            for (const seg of segments) {
+                if (!seg || !seg.content) continue;
 
-                if (
-                    actionText &&
-                    !isPurePunctuationOrGarbageContent(actionText) &&
-                    !isRepeatedRecentAction(group, actionText) &&
-                    !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
-                    lastRenderedType !== 'action'
-                ) {
-                    await sleep(800 + Math.random() * 700);
-                    await createAndAddMessage(
-                        {
-                            type: 'offlineAction',
-                            content: actionText,
-                            characterId: speakerProfile?.id || '',
-                            characterName: speakerProfile?.name || ''
-                        },
-                        'system',
-                        group,
-                        true,
-                        'chat'
-                    );
-                    lastRenderedType = 'action';
+                if (seg.type === 'action') {
+                    const actionText = cleanCompleteOfflineActionText(seg.content);
+                    if (!actionText) continue;
+
+                    if (
+                        actionText &&
+                        !isRepeatedRecentAction(group, actionText) &&
+                        !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
+                        lastRenderedType !== 'action'
+                    ) {
+                        await sleep(800 + Math.random() * 700);
+                        await createAndAddMessage(
+                            {
+                                type: 'offlineAction',
+                                content: actionText,
+                                characterId: speakerProfile?.id || '',
+                                characterName: speakerProfile?.name || ''
+                            },
+                            'system',
+                            group,
+                            true,
+                            'chat'
+                        );
+                        lastRenderedType = 'action';
+                    }
+                    continue;
                 }
-            }
 
-            if (mixed.action) {
-                content = mixed.speech || '';
-            }
+                const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(seg.content);
+                let speechText = hasStructuredDirective ? seg.content.trim() : cleanAiSpeechText(seg.content).trim();
+                if (!speechText) continue;
 
-            if (!content) continue;
-
-            const shouldRenderAction = (!mixed.action && explicitType === 'action') || (!explicitType && looksLikeOfflineAction(content));
-
-            if (shouldRenderAction) {
-                const actionText = cleanOfflineActionText(content)
-                    .replace(/^[“””]+|[“””]+$/g, '')
-                    .trim();
-
-                if (
-                    actionText &&
-                    !isPurePunctuationOrGarbageContent(actionText) &&
-                    !isRepeatedRecentAction(group, actionText) &&
-                    !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
-                    lastRenderedType !== 'action'
-                ) {
-                    await sleep(800 + Math.random() * 700);
-                    await createAndAddMessage(
-                        {
-                            type: 'offlineAction',
-                            content: actionText,
-                            characterId: speakerProfile?.id || '',
-                            characterName: speakerProfile?.name || ''
-                        },
-                        'system',
-                        group,
-                        true,
-                        'chat'
-                    );
-                    lastRenderedType = 'action';
+                if (isPurePunctuationOrGarbageContent(speechText)) {
+                    console.warn('[跳过纯标点 speech]', { speakerName, speechText });
+                    continue;
                 }
-                continue;
-            }
 
-            const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(content);
-            const speechText = hasStructuredDirective ? content : cleanAiSpeechText(content).trim();
-            if (!speechText) continue;
+                if (!hasStructuredDirective && isMeaninglessTinyGroupContent(speechText)) {
+                    console.warn('[跳过无意义碎片 CONTENT]', { speakerName, content: speechText });
+                    continue;
+                }
 
-            if (!hasStructuredDirective && isPurePunctuationOrGarbageContent(speechText)) {
-                console.warn('[跳过纯标点 speech]', { speakerName, speechText });
-                continue;
-            }
-
-            if (!hasStructuredDirective && isMeaninglessTinyGroupContent(speechText)) {
-                console.warn('[跳过无意义碎片 CONTENT]', { speakerName, content: speechText });
-                continue;
-            }
-
-            if (speakerProfile && !(group.mutedMembers || []).includes(speakerProfile.id)) {
-                await sleep(800 + Math.random() * 700);
-                await processAndDisplayAiResponse(speechText, speakerProfile, group, 'chat');
-                renderedSpeechCount++;
-                lastRenderedType = 'speech';
+                if (speakerProfile && !(group.mutedMembers || []).includes(speakerProfile.id)) {
+                    await sleep(800 + Math.random() * 700);
+                    await processAndDisplayAiResponse(speechText, speakerProfile, group, 'chat');
+                    renderedSpeechCount++;
+                    lastRenderedType = 'speech';
+                }
             }
         }
 
@@ -20762,6 +20730,132 @@ function splitLeadingActionAndSpeechContent(content) {
     }
 
     return { action: '', speech: raw };
+}
+
+function isCompleteOfflineActionText(text) {
+    const s = String(text || '').trim();
+    if (!s) return false;
+
+    if (isPurePunctuationOrGarbageContent(s)) return false;
+    if (/^[（(【\[]/.test(s) && !/[）)】\]]$/.test(s)) return false;
+    if (!/[，。！？!?、；;：:]/.test(s) && s.length < 8) return false;
+
+    const badFragments = [
+        '听到', '看见', '看到', '想到', '抬手', '伸手', '垂眼',
+        '皱眉', '点头', '沉默', '停顿', '愣住', '顿住'
+    ];
+    if (badFragments.includes(s.replace(/[，。！？!?、；;：:“”"'（）()【】\[\]\s…]/g, ''))) {
+        return false;
+    }
+
+    const hasActionVerb = /(看|望|听|伸|抬|按|扶|握|放|收|站|坐|靠|垂|皱|笑|叹|停|推|递|拿|落|移|靠近|退开|拦|挡|拉|拍|捏|攥|松|扶住|按住|扣住|递给|推到|放下)/.test(s);
+    const hasSubjectOrObject = /(他|她|对方|男人|少年|青年|少女|女生|男生|角色|那人|手|手腕|肩|衣袖|桌|椅|手机|红包|戒尺|门|沙发|杯|屏幕)/.test(s);
+
+    return hasActionVerb && hasSubjectOrObject;
+}
+
+function cleanCompleteOfflineActionText(text) {
+    let s = cleanOfflineActionText(text)
+        .replace(/^["“”]+|["“”]+$/g, '')
+        .trim();
+
+    s = s.replace(/^[（(【\[]+/g, '').replace(/[）)】\]]+$/g, '').trim();
+
+    if (!isCompleteOfflineActionText(s)) return '';
+
+    return s;
+}
+
+function parseGroupContentSegments(content) {
+    const raw = String(content || '').trim();
+    const segments = [];
+    if (!raw) return segments;
+
+    let rest = sanitizeForbiddenRoleWords(raw).trim();
+    if (!rest) return segments;
+    if (isPurePunctuationOrGarbageContent(rest)) return segments;
+
+    const directiveRegex = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i;
+
+    const bracketRegex = /[（(]\s*([^（）()]{4,260})\s*[）)]/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = bracketRegex.exec(rest)) !== null) {
+        const before = rest.slice(lastIndex, match.index).trim();
+        if (before && !isPurePunctuationOrGarbageContent(before)) {
+            segments.push({ type: 'speech', content: before });
+        }
+
+        const actionText = cleanCompleteOfflineActionText(match[1]);
+        if (actionText) {
+            segments.push({ type: 'action', content: actionText });
+        } else {
+            console.warn('[跳过不完整/低质量括号动作]', { raw: match[0], inner: match[1] });
+        }
+
+        lastIndex = bracketRegex.lastIndex;
+    }
+
+    const tail = rest.slice(lastIndex).trim();
+    if (tail) {
+        segments.push({ type: 'speech', content: tail });
+    }
+
+    if (segments.length === 0) {
+        const explicitAction = cleanCompleteOfflineActionText(rest);
+        if (looksLikeOfflineAction(rest) && explicitAction) {
+            segments.push({ type: 'action', content: explicitAction });
+        } else {
+            segments.push({ type: 'speech', content: rest });
+        }
+    }
+
+    return segments.map(seg => {
+        if (seg.type === 'action') {
+            return {
+                type: 'action',
+                content: cleanCompleteOfflineActionText(seg.content)
+            };
+        }
+
+        let speechRaw = String(seg.content || '').trim();
+        const orphanRightBracketIndex = speechRaw.search(/[）)】\]]/);
+        const firstLeftBracketIndex = speechRaw.search(/[（(【\[]/);
+        if (
+            orphanRightBracketIndex >= 0 &&
+            orphanRightBracketIndex <= 120 &&
+            (firstLeftBracketIndex === -1 || orphanRightBracketIndex < firstLeftBracketIndex)
+        ) {
+            speechRaw = speechRaw.slice(orphanRightBracketIndex + 1).trim();
+        }
+
+        if (/^[（(【\[]/.test(speechRaw) && !/[）)】\]]/.test(speechRaw)) {
+            console.warn('[跳过残缺开括号 speech]', { speech: speechRaw });
+            speechRaw = '';
+        }
+
+        const hasStructuredDirective = directiveRegex.test(speechRaw);
+        const speech = hasStructuredDirective
+            ? speechRaw
+            : cleanAiSpeechText(speechRaw).trim();
+
+        return {
+            type: 'speech',
+            content: speech
+        };
+    }).filter(seg => {
+        if (!seg.content) return false;
+        if (seg.type === 'speech') {
+            const hasStructuredDirective = directiveRegex.test(seg.content);
+            if (!hasStructuredDirective && isPurePunctuationOrGarbageContent(seg.content)) return false;
+            if (!hasStructuredDirective && isMeaninglessTinyGroupContent(seg.content)) return false;
+        }
+        if (seg.type === 'action') {
+            if (!isCompleteOfflineActionText(seg.content)) return false;
+        }
+        return true;
+    });
 }
 
 function isMeaninglessTinyGroupContent(text) {
