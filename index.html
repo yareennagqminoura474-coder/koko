@@ -19240,6 +19240,24 @@ MESSAGE_END
             ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
         }
 
+        const continued = await continueGroupReplyIfThin({
+            rawResponse,
+            messageMatches,
+            requestMessages,
+            group,
+            mode: 'free',
+            maxContinueRounds: 2
+        });
+
+        rawResponse = continued.rawResponse;
+        messageMatches = continued.messageMatches;
+        ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
+
+        console.log('[群聊自由聊天最终回复规模]', {
+            groupName: group.name,
+            stats: getGroupReplyThinnessStats(messageMatches)
+        });
+
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的自由聊天内容。");
         }
@@ -19654,6 +19672,24 @@ MESSAGE_END
             messageMatches = Array.from(rawResponse.matchAll(messageRegex));
             ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
         }
+
+        const continued = await continueGroupReplyIfThin({
+            rawResponse,
+            messageMatches,
+            requestMessages: finalRequestMessages,
+            group,
+            mode: 'group',
+            maxContinueRounds: 2
+        });
+
+        rawResponse = continued.rawResponse;
+        messageMatches = continued.messageMatches;
+        ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
+
+        console.log('[群聊最终回复规模]', {
+            groupName: group.name,
+            stats: getGroupReplyThinnessStats(messageMatches)
+        });
 
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的群聊脚本。");
@@ -21285,50 +21321,197 @@ function getGroupMessageTypeStats(messageMatches) {
     return { parsedMessageTypes, speechCount, actionCount };
 }
 
-function limitGroupMessagesForProgress(messageMatches, maxMessages = 12) {
-    // 已废弃：不要调用。普通群聊不再按条数裁剪，避免破坏 koko 原版活人感。
-    if (!Array.isArray(messageMatches)) return [];
-
-    const result = [];
+function getGroupReplyThinnessStats(messageMatches) {
+    const matches = Array.isArray(messageMatches) ? messageMatches : [];
+    const speakers = new Set();
+    let totalTextLen = 0;
     let speechCount = 0;
     let actionCount = 0;
-    const speakerSpeechCounts = new Map();
 
-    for (const match of messageMatches) {
+    matches.forEach(match => {
         const speakerName = String(match?.[1] || '').trim();
-        let type = String(match?.[2] || 'speech').trim().toLowerCase();
+        let type = String(match?.[2] || '').trim().toLowerCase();
         const content = String(match?.[3] || '').trim();
 
-        if (!content) continue;
-        if (type !== 'speech' && type !== 'action') type = inferGroupMessageType(content);
+        if (!content) return;
+        if (!type) type = looksLikeOfflineAction(content) ? 'action' : 'speech';
+        if (speakerName) speakers.add(speakerName);
 
-        if (type === 'action') {
-            if (actionCount >= 2) continue;
-            if (speechCount === 0) continue;
-            actionCount++;
-            result.push(match);
-            if (result.length >= maxMessages) break;
-            continue;
-        }
+        const cleanContent = cleanAiSpeechText(content)
+            .replace(/\[[^\]]+\]/g, '')
+            .replace(/\s+/g, '');
 
-        if (type === 'speech') {
-            if (speechCount >= 9) continue;
+        totalTextLen += cleanContent.length;
 
-            const count = speakerSpeechCounts.get(speakerName) || 0;
-            if (count >= 3) continue;
+        if (type === 'action') actionCount++;
+        else speechCount++;
+    });
 
-            speakerSpeechCounts.set(speakerName, count + 1);
-            speechCount++;
-            result.push(match);
-            if (result.length >= maxMessages) break;
-        }
+    return {
+        messageCount: matches.length,
+        speakerCount: speakers.size,
+        speechCount,
+        actionCount,
+        totalTextLen
+    };
+}
+
+function isGroupReplyTooThin(messageMatches, mode = 'user') {
+    const stats = getGroupReplyThinnessStats(messageMatches);
+
+    if (stats.messageCount <= 6) return true;
+    if (stats.totalTextLen < 260) return true;
+    if (stats.speechCount <= 4) return true;
+
+    if (mode === 'group' && stats.messageCount <= 10 && stats.speakerCount <= 1) return true;
+
+    return false;
+}
+
+async function continueGroupReplyIfThin({
+    rawResponse,
+    messageMatches,
+    requestMessages,
+    group,
+    mode = 'group',
+    maxContinueRounds = 2
+}) {
+    let combinedRaw = String(rawResponse || '');
+    let combinedMatches = Array.isArray(messageMatches) ? [...messageMatches] : [];
+
+    for (let i = 0; i < maxContinueRounds; i++) {
+        if (!isGroupReplyTooThin(combinedMatches, mode)) break;
+
+        console.warn('[群聊回复太薄，自动续写]', {
+            groupName: group?.name,
+            round: i + 1,
+            stats: getGroupReplyThinnessStats(combinedMatches)
+        });
+
+        const continuePrompt = `
+你刚才的群聊回复太短、太像总结，没有展开出 koko 原版那种真实群聊的来回感。
+请在不重复前文的基础上，继续刚才这一轮群聊。
+
+要求：
+1. 继续输出 MESSAGE 脚本。
+2. 不要重新开始，不要总结，不要解释。
+3. 直接接着上一条 MESSAGE 往后推进。
+4. 让角色之间继续接话、插话、补充、打断、试探、反驳或递台阶。
+5. 可以连续输出很多个 MESSAGE 块。
+6. 不要限制回复条数。
+7. 不要控制用户。
+8. 不要输出 markdown，不要输出 JSON。
+
+继续使用格式：
+MESSAGE_START
+SPEAKER: [角色名]
+CONTENT: [该角色说的单条消息内容，可以包含特殊指令]
+MESSAGE_END
+`;
+
+        const continuationMessages = [
+            ...requestMessages,
+            {
+                role: 'assistant',
+                content: combinedRaw
+            },
+            {
+                role: 'user',
+                content: continuePrompt
+            }
+        ];
+
+        const moreRaw = await generateAiResponse(
+            null,
+            [],
+            null,
+            false,
+            'chat',
+            continuationMessages
+        );
+
+        const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*(?:TYPE:\s*(speech|action)\s*)?CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
+        const moreMatches = Array.from(String(moreRaw || '').matchAll(messageRegex));
+
+        if (!moreMatches.length) break;
+
+        combinedRaw += '\n' + moreRaw;
+        combinedMatches.push(...moreMatches);
     }
 
-    if (result.length === 0 && messageMatches.length > 0) {
-        return messageMatches.slice(0, Math.min(maxMessages, messageMatches.length));
+    return {
+        rawResponse: combinedRaw,
+        messageMatches: combinedMatches
+    };
+}
+
+function isPrivateReplyTooThin(rawText) {
+    const s = String(rawText || '')
+        .replace(/\[[^\]]+\]/g, '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/\s+/g, '');
+
+    if (!s) return true;
+
+    const lineCount = String(rawText || '')
+        .split(/\n+/)
+        .map(x => x.trim())
+        .filter(Boolean)
+        .length;
+
+    if (s.length < 120) return true;
+    if (lineCount <= 2 && s.length < 220) return true;
+
+    return false;
+}
+
+async function continuePrivateReplyIfThin({
+    rawResponse,
+    requestMessages,
+    contact,
+    maxContinueRounds = 1
+}) {
+    let combinedRaw = String(rawResponse || '');
+
+    for (let i = 0; i < maxContinueRounds; i++) {
+        if (!isPrivateReplyTooThin(combinedRaw)) break;
+
+        console.warn('[私聊回复太薄，自动续写]', {
+            contactName: contact?.name,
+            round: i + 1,
+            preview: combinedRaw.slice(0, 300)
+        });
+
+        const continuePrompt = `
+你刚才的私聊回复太短、太像一句总结，没有达到真实联系人连续发消息的感觉。
+请在不重复前文的基础上，继续以当前角色身份补充几条自然私聊消息。
+
+要求：
+1. 不要解释，不要总结。
+2. 直接接着刚才的语气继续说。
+3. 可以追问、补充、嘴硬、岔开、试探、表达情绪。
+4. 不要限制回复条数。
+5. 不要像 AI 助手。
+`;
+
+        const moreRaw = await generateAiResponse(
+            null,
+            [],
+            null,
+            false,
+            'chat',
+            [
+                ...requestMessages,
+                { role: 'assistant', content: combinedRaw },
+                { role: 'user', content: continuePrompt }
+            ]
+        );
+
+        if (!moreRaw || !String(moreRaw).trim()) break;
+        combinedRaw += '\n' + String(moreRaw).trim();
     }
 
-    return result;
+    return combinedRaw;
 }
 
 async function saveGroupCrossSceneMemory(group, content, relatedContactIds = []) {
@@ -21802,6 +21985,11 @@ ${FORBIDDEN_ACTION_CLICHES_PROMPT}
             const apiConfig = getApiFor(apiType);
             const { apiKey, model, endpoint, contextLength, longTermMemoryLength } = apiConfig;
             const effectiveContextLength = getConfiguredShortTermMemoryLength(contextLength || 20);
+            const parsedMaxTokens = parseInt(apiConfig.maxTokens, 10);
+
+            if (apiType === 'chat' && Number.isFinite(parsedMaxTokens) && parsedMaxTokens > 0 && parsedMaxTokens < 3000) {
+                console.warn('[提示] 当前 maxTokens 较低，可能导致群聊回复数量偏少。建议设置为 3000-5000。');
+            }
 
             if (!apiKey || !endpoint || !model) {
                 const errorMsg = `错误：${apiType === 'square' ? '论坛' : (apiType === 'snoop' ? '窥探' : '聊天')}API未配置。请前往“发现-API设置”进行配置。`;
@@ -23129,7 +23317,27 @@ ${latestInputText || '(用户发送了非文字内容)'}
                     }
                     data = await response.json();
                 }
-                return sanitizeForbiddenRoleWords(data.choices[0].message.content.trim());
+                let responseContent = sanitizeForbiddenRoleWords(data.choices[0].message.content.trim());
+
+                const shouldAutoContinuePrivateReply = !!(
+                    contact &&
+                    !contact.isGroup &&
+                    !customSystemPrompt &&
+                    !forceMessages &&
+                    apiType === 'chat' &&
+                    !isNarrativeMode
+                );
+
+                if (shouldAutoContinuePrivateReply) {
+                    responseContent = await continuePrivateReplyIfThin({
+                        rawResponse: responseContent,
+                        requestMessages,
+                        contact,
+                        maxContinueRounds: 1
+                    });
+                }
+
+                return responseContent;
             } catch (error) {
                 console.error('API调用失败:', error);
                 return sanitizeForbiddenRoleWords(`抱歉，调用API时遇到问题: ${error.message}`);
