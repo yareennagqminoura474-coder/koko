@@ -20643,31 +20643,139 @@ function buildRecentGroupChatDigestForContact(contact, limit = 20) {
     return lines.length ? lines.join('\n\n') : '暂无相关群聊近况';
 }
 
-function shouldUseGroupContextInPrivateChat(latestInputText, contact, recentGroupChatDigest) {
+function getDisplayNameById(id) {
+    if (id === 'user' || id === 'myProfile') return state.myProfile?.name || '我';
+    const contact = (state.contacts || []).find(x => x && x.id === id);
+    if (contact) return contact.name || id;
+    for (const group of (state.contacts || []).filter(x => x && x.isGroup)) {
+        const npc = (group.npcMembers || []).find(n => n && n.id === id);
+        if (npc) return npc.name || id;
+    }
+    return id || '未知';
+}
+
+function buildPrivateRelatedGroupMemoryDigest(contact, limit = 10) {
+    if (!contact || contact.isGroup) return '(暂无相关群聊记忆)';
+
+    const lines = [];
+    const contactId = contact.id;
+    const contactName = contact.name || '';
+
+    if (Array.isArray(contact.groupRelatedMemories)) {
+        contact.groupRelatedMemories.slice(-limit).forEach(m => {
+            const text = String(m.content || '').trim();
+            if (text) lines.push(`- 来自群聊《${m.groupName || '群聊'}》：${text}`);
+        });
+    }
+
+    const groups = (state.contacts || []).filter(c => c && c.isGroup);
+    groups.forEach(group => {
+        const isMember = Array.isArray(group.members) && group.members.includes(contactId);
+        const isNpcMember = Array.isArray(group.npcMembers) && group.npcMembers.some(n => n && n.id === contactId);
+        if (!isMember && !isNpcMember) return;
+
+        if (Array.isArray(group.crossSceneMemories)) {
+            group.crossSceneMemories
+                .filter(m => {
+                    if (!m) return false;
+                    if (Array.isArray(m.relatedContactIds) && m.relatedContactIds.length) {
+                        return m.relatedContactIds.includes(contactId);
+                    }
+                    return contactName && String(m.content || '').includes(contactName);
+                })
+                .slice(-limit)
+                .forEach(m => {
+                    const text = String(m.content || '').trim();
+                    if (text) lines.push(`- 来自群聊《${group.name || '群聊'}》：${text}`);
+                });
+        }
+
+        if (Array.isArray(group.history)) {
+            group.history
+                .filter(msg => {
+                    if (!msg) return false;
+                    if (msg.sender === 'system_instruction') return false;
+                    if (msg.sender === 'system' && msg.type !== 'offlineAction') return false;
+                    if (['system_notification', 'loading', 'error', 'heart_voice'].includes(msg.type)) return false;
+                    if (msg.sender === contactId || msg.characterId === contactId) return true;
+                    const text = typeof msg.content === 'string'
+                        ? msg.content
+                        : (msg.content?.text || msg.content?.content || msg.content?.description || '');
+                    return contactName && String(text || '').includes(contactName);
+                })
+                .slice(-limit)
+                .forEach(msg => {
+                    const senderName = getDisplayNameById(msg.characterId || msg.sender);
+                    const text = typeof msg.content === 'string'
+                        ? msg.content
+                        : (msg.content?.text || msg.content?.content || msg.content?.description || '');
+                    const cleanText = String(text || '').replace(/<[^>]+>/g, '').trim();
+                    if (cleanText) {
+                        lines.push(`- 群聊《${group.name || '群聊'}》中 ${senderName}：${cleanText}`);
+                    }
+                });
+        }
+    });
+
+    const deduped = [];
+    const seen = new Set();
+    lines.forEach(line => {
+        const key = line.replace(/\s+/g, '').slice(0, 140);
+        if (seen.has(key)) return;
+        seen.add(key);
+        deduped.push(line);
+    });
+
+    return deduped.slice(-limit).join('\n') || '(暂无相关群聊记忆)';
+}
+
+function shouldUseGroupContextInPrivateChat(latestInputText, contact, recentGroupChatDigest, relatedGroupMemoryDigest = '') {
     const text = String(latestInputText || '').trim();
     if (!contact || contact.isGroup) return false;
-    if (!recentGroupChatDigest || recentGroupChatDigest === '暂无相关群聊近况') return false;
+    const hasAnyGroupMemory =
+        (recentGroupChatDigest && recentGroupChatDigest !== '暂无相关群聊近况') ||
+        (relatedGroupMemoryDigest && relatedGroupMemoryDigest !== '(暂无相关群聊记忆)');
 
-    // 1. 明确提到群聊关键词，直接启用
+    if (!hasAnyGroupMemory) return false;
+
     const explicitGroupKeywords = [
         '群里', '群聊', '刚刚群', '刚才群', '群里面',
-        '她刚才说', '他刚才说', '他们刚才说', '她在群里', '他在群里',
-        '刚才那个群', '群里那个', '群里的', '你们刚才', '刚才你们'
+        '她刚才说', '他刚才说', '他们刚才说',
+        '她在群里', '他在群里',
+        '刚才那个群', '群里那个', '群里的',
+        '你们刚才', '刚才你们'
     ];
     if (explicitGroupKeywords.some(k => text.includes(k))) return true;
 
-    // 2. 短句/指代句：只在刚从群聊切回私聊（3分钟内）才启用
+    const softFollowUpKeywords = [
+        '刚才', '刚刚', '刚那', '刚那个',
+        '那件事', '这件事', '那个事',
+        '他怎么', '她怎么', '他们怎么',
+        '他是不是', '她是不是',
+        '你怎么看', '你觉得呢',
+        '怎么办', '为什么', '然后呢',
+        '什么意思', '是不是不高兴', '是不是生气'
+    ];
+    if (softFollowUpKeywords.some(k => text.includes(k))) return true;
+
+    const normalizedText = text.replace(/\s+/g, '');
+    const isShortText = normalizedText.length <= 12;
     const ambiguousFollowUpPatterns = [
         '你怎么看', '你觉得呢', '什么意思', '她什么意思', '他什么意思',
         '然后呢', '继续', '那怎么办', '怎么办', '为什么',
         '这个呢', '那个呢', '她呢', '他呢', '所以呢'
     ];
-    const isAmbiguousFollowUp = ambiguousFollowUpPatterns.some(k => text === k || text.includes(k));
+    const isAmbiguousFollowUp = isShortText && ambiguousFollowUpPatterns.some(k =>
+        normalizedText === k ||
+        normalizedText === `那${k}` ||
+        normalizedText === `所以${k}` ||
+        normalizedText === `那现在${k}` ||
+        normalizedText === `所以现在${k}`
+    );
 
     const justFromGroup =
-        state.lastOpenedChatWasGroup === true &&
-        state.lastGroupChatExitAt &&
-        (Date.now() - state.lastGroupChatExitAt < 3 * 60 * 1000);
+        state.lastOpenedChatWasGroup === true ||
+        (state.lastGroupChatExitAt && Date.now() - state.lastGroupChatExitAt < 5 * 60 * 1000);
 
     if (justFromGroup && isAmbiguousFollowUp) return true;
 
@@ -20732,6 +20840,43 @@ function splitLeadingActionAndSpeechContent(content) {
     return { action: '', speech: raw };
 }
 
+function looksLikeActionSentence(text) {
+    const s = String(text || '').trim();
+    if (!s) return false;
+
+    if (isPurePunctuationOrGarbageContent(s)) return false;
+
+    const plain = s.replace(/[，。！？!?、；;：:“”"'（）()【】\[\]\s…]/g, '');
+    if (!plain || plain.length < 6) return false;
+
+    const actionVerbs = /(看|望|听|伸|抬|按|扶|握|放|收|站|坐|靠|垂|皱|笑|叹|停|推|递|拿|落|移|靠近|退开|拦|挡|拉|拍|捏|攥|松|扶住|按住|扣住|递给|推到|放下|转身|俯身|低头|抬头|盯着|抓住|护住|避开|躲开)/;
+    const subjectWords = /(他|她|对方|男人|少年|青年|少女|女生|男生|那人|手|手腕|肩|衣袖|桌|椅|手机|红包|戒尺|门|沙发|杯|屏幕|眼神|声音|动作|指尖|胳膊|背|腰|膝盖)/;
+
+    return actionVerbs.test(s) && subjectWords.test(s);
+}
+
+function isBrokenActionFragment(text) {
+    const s = String(text || '').trim();
+    if (!s) return true;
+
+    if (/^[（(【\[]/.test(s) && !/[）)】\]]/.test(s) && s.length < 12) return true;
+
+    const plain = s.replace(/[，。！？!?、；;：:“”"'（）()【】\[\]\s…]/g, '');
+    const badFragments = [
+        '听到', '看见', '看到', '想到', '抬手', '伸手', '垂眼',
+        '皱眉', '点头', '沉默', '停顿', '愣住', '顿住', '看着',
+        '望向', '转头', '低头', '抬头'
+    ];
+
+    if (badFragments.includes(plain)) return true;
+
+    if (plain.length <= 4 && /(听|看|想|抬|伸|垂|皱|点|停|愣|望)/.test(plain)) {
+        return true;
+    }
+
+    return false;
+}
+
 function isCompleteOfflineActionText(text) {
     const s = String(text || '').trim();
     if (!s) return false;
@@ -20761,9 +20906,18 @@ function cleanCompleteOfflineActionText(text) {
 
     s = s.replace(/^[（(【\[]+/g, '').replace(/[）)】\]]+$/g, '').trim();
 
-    if (!isCompleteOfflineActionText(s)) return '';
+    if (!s) return '';
+    if (isBrokenActionFragment(s)) return '';
 
-    return s;
+    if (typeof isCompleteOfflineActionText === 'function' && isCompleteOfflineActionText(s)) {
+        return s;
+    }
+
+    if (typeof looksLikeActionSentence === 'function' && looksLikeActionSentence(s)) {
+        return s;
+    }
+
+    return '';
 }
 
 function parseGroupContentSegments(content) {
@@ -20774,10 +20928,65 @@ function parseGroupContentSegments(content) {
     let rest = sanitizeForbiddenRoleWords(raw).trim();
     if (!rest) return segments;
     if (isPurePunctuationOrGarbageContent(rest)) return segments;
+    let consumedBrokenFragment = false;
 
     const directiveRegex = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i;
 
     const bracketRegex = /[（(]\s*([^（）()]{4,260})\s*[）)]/g;
+    const splitBrokenRightBracketAction = (text) => {
+        const s = String(text || '').trim();
+        if (!s || !/[）)]/.test(s)) return null;
+
+        const idx1 = s.indexOf('）');
+        const idx2 = s.indexOf(')');
+        let idx = -1;
+        if (idx1 >= 0 && idx2 >= 0) idx = Math.min(idx1, idx2);
+        else idx = Math.max(idx1, idx2);
+
+        if (idx <= 0) return null;
+
+        const before = s.slice(0, idx).trim();
+        const after = s.slice(idx + 1).trim();
+        const actionText = cleanCompleteOfflineActionText(before);
+        if (!actionText) return null;
+
+        return {
+            action: actionText,
+            speech: cleanAiSpeechText(after).trim()
+        };
+    };
+    const splitBrokenLeftBracketAction = (text) => {
+        const s = String(text || '').trim();
+        if (!s || !/^[（(【\[]/.test(s)) return null;
+
+        const inner = s.replace(/^[（(【\[]+/, '').trim();
+        if (!inner) return null;
+
+        if (isBrokenActionFragment(inner)) {
+            return { action: '', speech: '' };
+        }
+
+        const speechStartRegex = /(别|你|我|他说|她说|林澈|师父|师兄|够了|放松|等一下|等等|听我说|先别|别听|停|住手)/;
+        const brokenMatch = inner.match(speechStartRegex);
+        if (brokenMatch && brokenMatch.index > 6) {
+            const maybeAction = inner.slice(0, brokenMatch.index).trim();
+            const maybeSpeech = inner.slice(brokenMatch.index).trim();
+            const actionText = cleanCompleteOfflineActionText(maybeAction);
+            if (actionText) {
+                return {
+                    action: actionText,
+                    speech: cleanAiSpeechText(maybeSpeech).trim()
+                };
+            }
+        }
+
+        const actionText = cleanCompleteOfflineActionText(inner);
+        if (actionText) {
+            return { action: actionText, speech: '' };
+        }
+
+        return null;
+    };
     let lastIndex = 0;
     let match;
 
@@ -20797,12 +21006,37 @@ function parseGroupContentSegments(content) {
         lastIndex = bracketRegex.lastIndex;
     }
 
-    const tail = rest.slice(lastIndex).trim();
+    let tail = rest.slice(lastIndex).trim();
+    if (tail) {
+        const brokenRight = splitBrokenRightBracketAction(tail);
+        if (brokenRight) {
+            if (brokenRight.action) segments.push({ type: 'action', content: brokenRight.action });
+            if (brokenRight.speech && !isPurePunctuationOrGarbageContent(brokenRight.speech)) {
+                segments.push({ type: 'speech', content: brokenRight.speech });
+            }
+            tail = '';
+        }
+    }
+
+    if (tail) {
+        const brokenLeft = splitBrokenLeftBracketAction(tail);
+        if (brokenLeft) {
+            if (brokenLeft.action) segments.push({ type: 'action', content: brokenLeft.action });
+            if (brokenLeft.speech && !isPurePunctuationOrGarbageContent(brokenLeft.speech)) {
+                segments.push({ type: 'speech', content: brokenLeft.speech });
+            }
+            if (!brokenLeft.action && !brokenLeft.speech) {
+                consumedBrokenFragment = true;
+            }
+            tail = '';
+        }
+    }
+
     if (tail) {
         segments.push({ type: 'speech', content: tail });
     }
 
-    if (segments.length === 0) {
+    if (segments.length === 0 && !consumedBrokenFragment) {
         const explicitAction = cleanCompleteOfflineActionText(rest);
         if (looksLikeOfflineAction(rest) && explicitAction) {
             segments.push({ type: 'action', content: explicitAction });
@@ -20820,20 +21054,17 @@ function parseGroupContentSegments(content) {
         }
 
         let speechRaw = String(seg.content || '').trim();
-        const orphanRightBracketIndex = speechRaw.search(/[）)】\]]/);
-        const firstLeftBracketIndex = speechRaw.search(/[（(【\[]/);
-        if (
-            orphanRightBracketIndex >= 0 &&
-            orphanRightBracketIndex <= 120 &&
-            (firstLeftBracketIndex === -1 || orphanRightBracketIndex < firstLeftBracketIndex)
-        ) {
-            speechRaw = speechRaw.slice(orphanRightBracketIndex + 1).trim();
+        const brokenRight = splitBrokenRightBracketAction(speechRaw);
+        if (brokenRight) {
+            speechRaw = brokenRight.speech || '';
         }
 
         if (/^[（(【\[]/.test(speechRaw) && !/[）)】\]]/.test(speechRaw)) {
             console.warn('[跳过残缺开括号 speech]', { speech: speechRaw });
             speechRaw = '';
         }
+
+        speechRaw = speechRaw.replace(/^[\s\S]{2,160}[）)】\]]\s*/g, '').trim();
 
         const hasStructuredDirective = directiveRegex.test(speechRaw);
         const speech = hasStructuredDirective
@@ -20852,7 +21083,7 @@ function parseGroupContentSegments(content) {
             if (!hasStructuredDirective && isMeaninglessTinyGroupContent(seg.content)) return false;
         }
         if (seg.type === 'action') {
-            if (!isCompleteOfflineActionText(seg.content)) return false;
+            if (!cleanCompleteOfflineActionText(seg.content)) return false;
         }
         return true;
     });
@@ -21055,6 +21286,22 @@ async function autoSaveGroupRecentMemoryForMembers(group, limit = 12) {
     const content = `最近群聊《${group.name || '群聊'}》里发生了这些：${recentText.slice(0, 300)}`;
 
     await saveGroupCrossSceneMemory(group, content, relatedContactIds);
+
+    for (const id of relatedContactIds) {
+        const contact = (state.contacts || []).find(c => c && c.id === id && !c.isGroup);
+        if (!contact) continue;
+
+        contact.groupRelatedMemories = contact.groupRelatedMemories || [];
+        contact.groupRelatedMemories.push({
+            id: 'grm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+            groupId: group.id,
+            groupName: group.name || '群聊',
+            content,
+            timestamp: Date.now()
+        });
+        contact.groupRelatedMemories = contact.groupRelatedMemories.slice(-50);
+        await kokoMemory.put('contacts', contact);
+    }
 
     console.log('[群聊自动同步到私聊记忆]', {
         groupName: group.name,
@@ -21800,6 +22047,9 @@ case 'takeout':
                 const recentGroupChatDigest = (contact && !contact.isGroup)
                     ? buildRecentGroupChatDigestForContact(contact, 20)
                     : '';
+                const relatedGroupMemoryDigest = (contact && !contact.isGroup)
+                    ? buildPrivateRelatedGroupMemoryDigest(contact, 10)
+                    : '';
                 
                 // (你原来的短信记忆逻辑)
                 if (contact && contact.smsHistory) {
@@ -22372,22 +22622,22 @@ ${qzoneContextText}
 
                     // 判断是否需要在本轮触发群聊上下文（不再无条件注入 system）
                     const shouldUseGroupContext = shouldUseGroupContextInPrivateChat(
-                        latestInputText, contact, recentGroupChatDigest
+                        latestInputText, contact, recentGroupChatDigest, relatedGroupMemoryDigest
                     );
 
                     // 群聊上下文只作为 userTask 里的可选背景，且仅在触发时追加
-                    const groupMemorySection = shouldUseGroupContext ? `【可选相关群聊背景｜仅本轮触发】
-${privateGroupMemorySummary || '暂无相关群聊记忆'}
+                    const groupMemorySection = shouldUseGroupContext ? `【当前私聊正在承接群聊｜高优先级】
+${privateGroupMemorySummary || relatedGroupMemoryDigest || '暂无相关群聊记忆'}
 
-【最近相关群聊上下文｜仅在当前输入承接群聊时使用】
-${recentGroupChatDigest || '暂无相关群聊近况'}
+【最近相关群聊上下文｜本轮必须参考】
+${recentGroupChatDigest || relatedGroupMemoryDigest || '暂无相关群聊近况'}
 
 使用规则：
-1. 只有当前用户最新输入明确在问群聊内容，或者刚从群聊切回私聊且当前输入是承接句时，才使用这里。
-2. 如果当前用户最新输入是新话题，必须忽略这里，不要把群聊记忆作为本轮话题。
-3. 群聊内容只是背景，不是私聊里刚刚发生的事。
-4. 不要机械复述群聊记录。
-5. 不要不管用户说什么都绕回群聊。
+1. 当前用户最新输入很可能在接群聊里的事件，你必须结合这里理解。
+2. 不要回答成“我不知道群里发生了什么”。
+3. 不要机械复述群聊记录，要像真实角色一样自然接话。
+4. 如果用户问“你怎么看/怎么办/为什么/他是不是……”，优先结合群聊事件回答。
+5. 如果用户明显切新话题，才忽略这里。
 ` : '';
 
                     let privateUserTask = '';
@@ -22409,6 +22659,16 @@ ${recentGroupChatDigest || '暂无相关群聊近况'}
                         privateUserTask += `6. 不要无关翻旧账，但同一件事必须继续推进。\n\n`;
                     }
 
+                    if (relatedGroupMemoryDigest && relatedGroupMemoryDigest !== '(暂无相关群聊记忆)') {
+                        privateUserTask += `【相关群聊背景｜低优先级，仅供理解关系和近期事件】\n${relatedGroupMemoryDigest}\n\n`;
+                        privateUserTask += `【相关群聊背景使用规则】\n`;
+                        privateUserTask += `1. 这里是你和该角色共同参与过的群聊近况，用来帮助理解人物关系和近期事件。\n`;
+                        privateUserTask += `2. 如果当前用户最新输入明显是新话题，不要主动把回复绕回群聊。\n`;
+                        privateUserTask += `3. 如果当前用户最新输入里出现“刚才/刚刚/那件事/他/她/他们/你怎么看/怎么办/为什么”等承接表达，可以结合这里理解。\n`;
+                        privateUserTask += `4. 不要机械复述整段群聊记录，要自然接住。\n`;
+                        privateUserTask += `5. 群聊背景不是私聊里刚刚发生的事，不要说得像私聊现场。\n\n`;
+                    }
+
                     // 群聊背景：仅触发时追加到 userTask，不放进 system
                     if (groupMemorySection) {
                         privateUserTask += `${groupMemorySection}\n\n`;
@@ -22417,7 +22677,7 @@ ${recentGroupChatDigest || '暂无相关群聊近况'}
                     if (isNarrativeMode) {
                         privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{“events”:[{“type”:”action”,”content”:”...”},{“type”:”speech”,”characterId”:”${contact.id || ''}”,”characterName”:”${contact.name || '角色'}”,”content”:”...”}],”heart_voice”:{“emotion”:”...”,”thoughts”:”...”,”heartRate”:”...”,”jealousy”:”无”},”diary”:”...”}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把”嗯、哦、啧”之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
                     } else {
-                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n优先回应当前用户最新输入。\n你必须先判断当前用户最新输入属于哪一种：\nA. 私聊当前话题的延续：结合【私聊最近连续上下文】自然承接。\nB. 明确承接群聊：只有出现”群里/群聊/她刚才说/群里那个”等明确指向，或刚从群聊切回且用户输入是”你怎么看/然后呢/那怎么办”等短承接句时，才结合【可选相关群聊背景】。\nC. 明显新话题：完全忽略群聊背景，只回答当前新话题。\n\n如果当前输入是新话题，禁止把回复绕回群聊。\n如果当前输入没有提群聊，也不是刚从群聊切回的承接句，不要主动提群聊。\n可以保留角色的情绪和关系状态，但不要无关翻旧账。\n第一条回复必须直接接住当前用户最新输入。`;
+                        privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【本轮任务】\n优先回应当前用户最新输入。\n你必须先判断当前用户最新输入属于哪一种：\nA. 私聊当前话题的延续：结合【私聊最近连续上下文】自然承接。\nB. 明确承接群聊：只有出现”群里/群聊/她刚才说/群里那个”等明确指向，或刚从群聊切回且用户输入是”你怎么看/然后呢/那怎么办”等短承接句时，才结合【当前私聊正在承接群聊】和【最近相关群聊上下文】。\nC. 明显新话题：完全忽略群聊背景，只回答当前新话题。\n\n如果当前输入是新话题，禁止把回复绕回群聊。\n如果当前输入没有提群聊，也不是刚从群聊切回的承接句，不要主动提群聊。\n可以保留角色的情绪和关系状态，但不要无关翻旧账。\n第一条回复必须直接接住当前用户最新输入。`;
                     }
                     if (dynamicInstructions) privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
 
@@ -22436,15 +22696,16 @@ ${recentGroupChatDigest || '暂无相关群聊近况'}
                         ];
                     }
 
-                    console.log('[私聊群聊上下文触发检查]', {
+                    console.log('[私聊群聊记忆读取检查]', {
                         contactName: contact.name,
                         latestInputText,
                         shouldUseGroupContext,
+                        relatedGroupMemoryPreview: relatedGroupMemoryDigest ? relatedGroupMemoryDigest.slice(0, 1200) : '',
+                        recentGroupChatDigestPreview: recentGroupChatDigest ? recentGroupChatDigest.slice(0, 1200) : '',
+                        privateGroupMemorySummaryPreview: privateGroupMemorySummary ? privateGroupMemorySummary.slice(0, 1200) : '',
                         lastOpenedChatWasGroup: state.lastOpenedChatWasGroup,
                         lastGroupChatExitAt: state.lastGroupChatExitAt,
-                        lastGroupChatId: state.lastGroupChatId,
-                        recentGroupChatDigestPreview: recentGroupChatDigest ? recentGroupChatDigest.slice(0, 800) : '',
-                        privateGroupMemorySummaryPreview: privateGroupMemorySummary ? privateGroupMemorySummary.slice(0, 800) : ''
+                        lastGroupChatId: state.lastGroupChatId
                     });
 
                     console.log('[私聊上下文连续性检查]', {
