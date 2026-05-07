@@ -17677,7 +17677,12 @@ async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatC
         } else {
             const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
             const fullMessage = await createAndAddMessage(
-                { type: 'offlineSpeech', content },
+                {
+                    type: 'offlineSpeech',
+                    content,
+                    characterId: ev.characterId || senderProfile?.id || '',
+                    characterName: ev.characterName || senderProfile?.name || ''
+                },
                 sid,
                 effectiveChatContext,
                 true,
@@ -18973,6 +18978,210 @@ ${groupMemorySection}`;
         }
     }
 }
+function isGroupOfflineModeActive(group) {
+    if (!group || !group.isGroup) return false;
+    return !!(
+        group.isNarrativeMode === true ||
+        state.currentChatMode === 'offline' ||
+        group.chatMode === 'offline' ||
+        group.isOfflineMode
+    );
+}
+
+async function triggerGroupOfflineAiReply(group, options = {}) {
+    if (!group || !group.isGroup) return;
+
+    const chatStatusEl = document.getElementById('chat-contact-status');
+    state.aiTypingStatus[group.id] = true;
+    if (chatStatusEl && state.activeChatId === group.id) {
+        chatStatusEl.textContent = '群成员正在进行线下互动...';
+    }
+
+    try {
+        const myProfile = state.myProfile || {};
+        const getProfileInGroup = (id) => {
+            if (id === 'myProfile' || id === 'user') return myProfile;
+            let profile = state.contacts.find(c => c.id === id);
+            if (profile) return profile;
+            if (Array.isArray(group.npcMembers)) {
+                profile = group.npcMembers.find(npc => npc.id === id);
+                if (profile) return profile;
+            }
+            return null;
+        };
+
+        const unmutedAiMembers = (group.members || []).filter(id => {
+            if (id === 'user' || id === 'myProfile') return false;
+            return !(group.mutedMembers || []).includes(id);
+        });
+
+        const aiProfiles = unmutedAiMembers.map(id => getProfileInGroup(id)).filter(Boolean);
+        if (!aiProfiles.length) return;
+
+        const allMemberNames = (group.members || []).map(id => {
+            const p = getProfileInGroup(id);
+            return p ? p.name : '';
+        }).filter(Boolean);
+
+        const latestUserMsg = (group.history || [])
+            .filter(m => m && (m.sender === 'user' || m.sender === 'myProfile') && !['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type))
+            .slice(-1)[0];
+
+        const latestInputText = getGroupPromptMessageText(latestUserMsg);
+
+        let worldBookContextString = '(本次对话无世界书)';
+        const worldBookIds = group.worldBooks || [];
+        if (worldBookIds.length > 0) {
+            worldBookContextString = worldBookIds.map(bookId => {
+                const book = state.worldBooks.find(b => b.id === bookId);
+                return book ? `\n[世界书条目: ${book.name}]\n${book.content}` : '';
+            }).join('\n\n');
+        }
+
+        const groupRelationshipMatrixPrompt = await buildGroupRelationshipMatrixPrompt(group);
+        const finalMemoryString = typeof buildUnifiedGroupMemoryString === 'function'
+            ? buildUnifiedGroupMemoryString(group, getProfileInGroup, myProfile, unmutedAiMembers)
+            : buildSafeGroupHistoryText(group, latestUserMsg?.id, getConfiguredLongTermMemoryLength(40));
+
+        const characterListText = aiProfiles.map(p => `- ${p.name}｜characterId: ${p.id || ''}｜人设: ${(p.persona || p.description || '无').replace(/\n/g, ' ')}`).join('\n');
+
+        const systemPrompt = `
+[SYSTEM] 你是一个群聊线下场景导演。你要根据群聊上下文、角色档案和世界书，生成一段线下互动事件流。
+
+[群聊信息]
+群聊名称：${group.name || '群聊'}
+用户：${myProfile.name || '我'}
+所有群成员：${allMemberNames.join('、')}
+
+[你可以控制的 AI 角色]
+${characterListText}
+
+[禁止]
+1. 不能控制用户。
+2. 不能替用户说话。
+3. 不能输出普通聊天格式。
+4. 不能输出 MESSAGE_START。
+5. 不能输出 markdown。
+6. 不能输出解释。
+
+[世界书]
+${worldBookContextString}
+
+[统一时序记忆流]
+${finalMemoryString}
+
+[群内关系矩阵]
+${groupRelationshipMatrixPrompt || '(暂无明确群内关系矩阵)'}
+
+[称呼与口吻]
+不要使用“小管家”“小管家婆”“小助手”“AI助手”“机器人”等称呼。
+角色应该像真实联系人一样说话。
+${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
+
+[输出格式]
+你必须只返回严格 JSON 对象：
+
+{
+  "events": [
+    {
+      "type": "action",
+      "characterId": "角色ID",
+      "characterName": "角色名",
+      "content": "完整动作描写"
+    },
+    {
+      "type": "speech",
+      "characterId": "角色ID",
+      "characterName": "角色名",
+      "content": "角色台词"
+    }
+  ],
+  "heart_voice": null,
+  "diary": ""
+}
+
+[线下事件要求]
+1. events 不能为空。
+2. action 和 speech 都可以出现。
+3. speech 必须回应当前用户最新输入或延续当前线下场景。
+4. action 要写完整，不要出现“(听到”“（抬手”这种残缺动作。
+5. 每个 event 都要带 characterId 和 characterName。
+6. 不要把所有动作和台词塞进一个超长 content。
+7. 不要每条都只有几个字。
+8. 不要返回 JSON 数组，只返回 JSON 对象。
+`;
+
+        const userPrompt = options.observeOnly ? `
+[当前状态]
+用户（${myProfile.name || '我'}）正在旁观，没有新的发言。
+
+请延续当前群聊线下模式，生成 JSON events。
+` : `
+[当前用户最新输入]
+${latestInputText || '(用户没有文字输入)'}
+
+请继续群聊线下模式，生成 JSON events。
+`;
+
+        const rawResponse = await generateAiResponse(
+            null,
+            [],
+            null,
+            false,
+            'chat',
+            [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ]
+        );
+
+        const payload = parseOfflineAiResponsePayload(rawResponse);
+        if (!payload || !Array.isArray(payload.events) || payload.events.length === 0) {
+            console.warn('[群聊线下模式] AI 未返回有效 events', {
+                rawPreview: String(rawResponse || '').slice(0, 1000)
+            });
+            await createAndAddMessage({
+                type: 'system_notification',
+                content: '线下模式返回格式异常，请重试。'
+            }, 'system', group, true, 'chat');
+            return;
+        }
+
+        await renderOfflineEventsOneByOne(payload.events, aiProfiles[0], group);
+
+        if (payload.heart_voice) {
+            try {
+                if (typeof saveHeartVoiceFromOfflinePayload === 'function') {
+                    await saveHeartVoiceFromOfflinePayload(payload.heart_voice, group);
+                }
+            } catch (e) {
+                console.warn('[群聊线下模式] 心声保存失败，已忽略', e);
+            }
+        }
+
+        if (payload.diary) {
+            try {
+                if (typeof saveOfflineDiaryFromPayload === 'function') {
+                    await saveOfflineDiaryFromPayload(payload.diary, group);
+                }
+            } catch (e) {
+                console.warn('[群聊线下模式] 日记保存失败，已忽略', e);
+            }
+        }
+    } catch (e) {
+        console.error('群聊线下 AI 回复生成失败:', e);
+        await createAndAddMessage({
+            type: 'system_notification',
+            content: '群聊线下模式调用失败，请重试。'
+        }, 'system', group, true, 'chat');
+    } finally {
+        state.aiTypingStatus[group.id] = false;
+        if (chatStatusEl && state.activeChatId === group.id) {
+            chatStatusEl.textContent = group.status || '在线';
+        }
+    }
+}
+
 /**
  * (V7 - 完整记忆 + API修复版) 触发群聊AI成员间的自由聊天
  * (由Koko用户指导，采用"刷新论坛"模式，不依赖 requestAiReply)
@@ -18981,6 +19190,9 @@ ${groupMemorySection}`;
  */
 async function triggerGroupFreeChat(group) {
     if (!group || !group.isGroup) return;
+    if (isGroupOfflineModeActive(group)) {
+        return await triggerGroupOfflineAiReply(group, { observeOnly: true });
+    }
 
     console.log("群聊：用户未发言，正在启动独立的自由聊天函数(V7 - 记忆互通版)...");
     
@@ -19379,6 +19591,11 @@ MESSAGE_END
     }
 }
 async function triggerGroupChatAiReply(group) {
+    if (!group || !group.isGroup) return;
+    if (isGroupOfflineModeActive(group)) {
+        return await triggerGroupOfflineAiReply(group);
+    }
+
     const chatStatusEl = document.getElementById('chat-contact-status');
     
     state.aiTypingStatus[group.id] = true;
