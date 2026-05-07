@@ -19240,20 +19240,8 @@ MESSAGE_END
             ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
         }
 
-        const continued = await continueGroupReplyIfThin({
-            rawResponse,
-            messageMatches,
-            requestMessages,
-            group,
-            mode: 'free',
-            maxContinueRounds: 2
-        });
-
-        rawResponse = continued.rawResponse;
-        messageMatches = continued.messageMatches;
-        ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
-
-        console.log('[群聊自由聊天最终回复规模]', {
+        // 临时关闭自动续写，避免续写请求失败导致自由聊天整体失败
+        console.log('[群聊自由聊天最终回复规模｜未启用续写]', {
             groupName: group.name,
             stats: getGroupReplyThinnessStats(messageMatches)
         });
@@ -19673,20 +19661,8 @@ MESSAGE_END
             ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
         }
 
-        const continued = await continueGroupReplyIfThin({
-            rawResponse,
-            messageMatches,
-            requestMessages: finalRequestMessages,
-            group,
-            mode: 'group',
-            maxContinueRounds: 2
-        });
-
-        rawResponse = continued.rawResponse;
-        messageMatches = continued.messageMatches;
-        ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
-
-        console.log('[群聊最终回复规模]', {
+        // 临时关闭自动续写，避免续写请求失败导致整轮 API 调用失败
+        console.log('[群聊最终回复规模｜未启用续写]', {
             groupName: group.name,
             stats: getGroupReplyThinnessStats(messageMatches)
         });
@@ -21421,14 +21397,27 @@ MESSAGE_END
             }
         ];
 
-        const moreRaw = await generateAiResponse(
-            null,
-            [],
-            null,
-            false,
-            'chat',
-            continuationMessages
-        );
+        let moreRaw = '';
+        try {
+            moreRaw = await generateAiResponse(
+                null,
+                [],
+                null,
+                false,
+                'chat',
+                continuationMessages
+            );
+        } catch (err) {
+            console.warn('[群聊自动续写失败，保留原回复]', err);
+            break;
+        }
+
+        if (!moreRaw || String(moreRaw).includes('API调用失败') || String(moreRaw).includes('错误：')) {
+            console.warn('[群聊自动续写返回异常，保留原回复]', {
+                preview: String(moreRaw || '').slice(0, 500)
+            });
+            break;
+        }
 
         const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*(?:TYPE:\s*(speech|action)\s*)?CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
         const moreMatches = Array.from(String(moreRaw || '').matchAll(messageRegex));
@@ -21494,20 +21483,33 @@ async function continuePrivateReplyIfThin({
 5. 不要像 AI 助手。
 `;
 
-        const moreRaw = await generateAiResponse(
-            null,
-            [],
-            null,
-            false,
-            'chat',
-            [
-                ...requestMessages,
-                { role: 'assistant', content: combinedRaw },
-                { role: 'user', content: continuePrompt }
-            ]
-        );
+        let moreRaw = '';
+        try {
+            moreRaw = await generateAiResponse(
+                null,
+                [],
+                null,
+                false,
+                'chat',
+                [
+                    ...requestMessages,
+                    { role: 'assistant', content: combinedRaw },
+                    { role: 'user', content: continuePrompt }
+                ]
+            );
+        } catch (err) {
+            console.warn('[私聊自动续写失败，保留原回复]', err);
+            return combinedRaw;
+        }
 
-        if (!moreRaw || !String(moreRaw).trim()) break;
+        if (!moreRaw || String(moreRaw).includes('API调用失败') || String(moreRaw).includes('错误：')) {
+            console.warn('[私聊自动续写返回异常，保留原回复]', {
+                preview: String(moreRaw || '').slice(0, 500)
+            });
+            return combinedRaw;
+        }
+
+        if (!String(moreRaw).trim()) break;
         combinedRaw += '\n' + String(moreRaw).trim();
     }
 
@@ -23319,23 +23321,24 @@ ${latestInputText || '(用户发送了非文字内容)'}
                 }
                 let responseContent = sanitizeForbiddenRoleWords(data.choices[0].message.content.trim());
 
-                const shouldAutoContinuePrivateReply = !!(
-                    contact &&
-                    !contact.isGroup &&
-                    !customSystemPrompt &&
-                    !forceMessages &&
-                    apiType === 'chat' &&
-                    !isNarrativeMode
-                );
-
-                if (shouldAutoContinuePrivateReply) {
-                    responseContent = await continuePrivateReplyIfThin({
-                        rawResponse: responseContent,
-                        requestMessages,
-                        contact,
-                        maxContinueRounds: 1
-                    });
-                }
+                // 临时关闭私聊自动续写，避免续写失败导致原本成功的回复被判失败
+                // const shouldAutoContinuePrivateReply = !!(
+                //     contact &&
+                //     !contact.isGroup &&
+                //     !customSystemPrompt &&
+                //     !forceMessages &&
+                //     apiType === 'chat' &&
+                //     !isNarrativeMode
+                // );
+                //
+                // if (shouldAutoContinuePrivateReply) {
+                //     responseContent = await continuePrivateReplyIfThin({
+                //         rawResponse: responseContent,
+                //         requestMessages,
+                //         contact,
+                //         maxContinueRounds: 1
+                //     });
+                // }
 
                 return responseContent;
             } catch (error) {
