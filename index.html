@@ -19325,7 +19325,48 @@ MESSAGE_END
             content = sanitizeForbiddenRoleWords(content).trim();
             if (!content) continue;
 
-            const shouldRenderAction = explicitType === 'action' || (!explicitType && looksLikeOfflineAction(content));
+            if (isPurePunctuationOrGarbageContent(content)) {
+                console.warn('[跳过纯标点/垃圾 CONTENT]', { speakerName, content });
+                continue;
+            }
+
+            const mixed = splitLeadingActionAndSpeechContent(content);
+
+            if (mixed.action) {
+                const actionText = cleanOfflineActionText(mixed.action)
+                    .replace(/^[“””]+|[“””]+$/g, '')
+                    .trim();
+                if (
+                    actionText &&
+                    !isPurePunctuationOrGarbageContent(actionText) &&
+                    !isRepeatedRecentAction(group, actionText) &&
+                    !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
+                    lastRenderedType !== 'action'
+                ) {
+                    await sleep(800 + Math.random() * 700);
+                    await createAndAddMessage(
+                        {
+                            type: 'offlineAction',
+                            content: actionText,
+                            characterId: speakerProfile?.id || '',
+                            characterName: speakerProfile?.name || ''
+                        },
+                        'system',
+                        group,
+                        true,
+                        'chat'
+                    );
+                    lastRenderedType = 'action';
+                }
+            }
+
+            if (mixed.action) {
+                content = mixed.speech || '';
+            }
+
+            if (!content) continue;
+
+            const shouldRenderAction = (!mixed.action && explicitType === 'action') || (!explicitType && looksLikeOfflineAction(content));
 
             if (shouldRenderAction) {
                 const actionText = cleanOfflineActionText(content)
@@ -19333,6 +19374,7 @@ MESSAGE_END
                     .trim();
                 if (
                     actionText &&
+                    !isPurePunctuationOrGarbageContent(actionText) &&
                     !isRepeatedRecentAction(group, actionText) &&
                     !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
                     lastRenderedType !== 'action'
@@ -19358,6 +19400,11 @@ MESSAGE_END
             const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(content);
             const speechText = hasStructuredDirective ? content : cleanAiSpeechText(content).trim();
             if (!speechText) continue;
+
+            if (!hasStructuredDirective && isPurePunctuationOrGarbageContent(speechText)) {
+                console.warn('[跳过纯标点 speech]', { speakerName, speechText });
+                continue;
+            }
 
             if (!hasStructuredDirective && isMeaninglessTinyGroupContent(speechText)) {
                 console.warn('[跳过无意义碎片 CONTENT]', { speakerName, content: speechText });
@@ -19736,7 +19783,49 @@ MESSAGE_END
             content = sanitizeForbiddenRoleWords(content).trim();
             if (!content) continue;
 
-            const shouldRenderAction = explicitType === 'action' || (!explicitType && looksLikeOfflineAction(content));
+            if (isPurePunctuationOrGarbageContent(content)) {
+                console.warn('[跳过纯标点/垃圾 CONTENT]', { speakerName, content });
+                continue;
+            }
+
+            const mixed = splitLeadingActionAndSpeechContent(content);
+
+            if (mixed.action) {
+                const actionText = cleanOfflineActionText(mixed.action)
+                    .replace(/^[“””]+|[“””]+$/g, '')
+                    .trim();
+
+                if (
+                    actionText &&
+                    !isPurePunctuationOrGarbageContent(actionText) &&
+                    !isRepeatedRecentAction(group, actionText) &&
+                    !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
+                    lastRenderedType !== 'action'
+                ) {
+                    await sleep(800 + Math.random() * 700);
+                    await createAndAddMessage(
+                        {
+                            type: 'offlineAction',
+                            content: actionText,
+                            characterId: speakerProfile?.id || '',
+                            characterName: speakerProfile?.name || ''
+                        },
+                        'system',
+                        group,
+                        true,
+                        'chat'
+                    );
+                    lastRenderedType = 'action';
+                }
+            }
+
+            if (mixed.action) {
+                content = mixed.speech || '';
+            }
+
+            if (!content) continue;
+
+            const shouldRenderAction = (!mixed.action && explicitType === 'action') || (!explicitType && looksLikeOfflineAction(content));
 
             if (shouldRenderAction) {
                 const actionText = cleanOfflineActionText(content)
@@ -19745,6 +19834,7 @@ MESSAGE_END
 
                 if (
                     actionText &&
+                    !isPurePunctuationOrGarbageContent(actionText) &&
                     !isRepeatedRecentAction(group, actionText) &&
                     !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
                     lastRenderedType !== 'action'
@@ -19770,6 +19860,11 @@ MESSAGE_END
             const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(content);
             const speechText = hasStructuredDirective ? content : cleanAiSpeechText(content).trim();
             if (!speechText) continue;
+
+            if (!hasStructuredDirective && isPurePunctuationOrGarbageContent(speechText)) {
+                console.warn('[跳过纯标点 speech]', { speakerName, speechText });
+                continue;
+            }
 
             if (!hasStructuredDirective && isMeaninglessTinyGroupContent(speechText)) {
                 console.warn('[跳过无意义碎片 CONTENT]', { speakerName, content: speechText });
@@ -20624,34 +20719,78 @@ function cleanGroupSpeechContent(text) {
     );
 }
 
+function isPurePunctuationOrGarbageContent(text) {
+    const s = String(text || '').trim();
+    if (!s) return true;
+
+    const stripped = s.replace(/[，。！？!?、；;：:“”"'（）()【】\[\]\s…—\-~·.]/g, '');
+    if (!stripped) return true;
+
+    if (/^[!！?？.。…、，；;：:]+$/.test(s)) return true;
+
+    return false;
+}
+
+function splitLeadingActionAndSpeechContent(content) {
+    const raw = String(content || '').trim();
+    if (!raw) return { action: '', speech: '' };
+
+    let match = raw.match(/^[（(]\s*([\s\S]{2,260}?)\s*[）)]\s*([\s\S]*)$/);
+    if (match) {
+        const actionText = cleanOfflineActionText(match[1]).trim();
+        const speechText = cleanAiSpeechText(match[2] || '').trim();
+
+        if (actionText && looksLikeOfflineAction(actionText)) {
+            return { action: actionText, speech: speechText };
+        }
+
+        if (actionText && /^(他|她|沈逸|江淮|陆逊|林澈|师兄|师父|对方|男人|少年|青年|少女|女生|男生|角色|那人).{0,20}(看|望|伸|抬|按|扶|握|放|收|站|坐|靠|垂|皱|笑|叹|停|推|递|拿|落|移|靠近|退开)/.test(actionText)) {
+            return { action: actionText, speech: speechText };
+        }
+    }
+
+    match = raw.match(/^【\s*动作(?:[/／:：-].*?)?\s*】\s*([\s\S]*)$/);
+    if (match) {
+        const actionText = cleanOfflineActionText(match[1]).trim();
+        return { action: actionText, speech: '' };
+    }
+
+    match = raw.match(/^[（(]\s*([\s\S]{2,260}?)\s*[）)]$/);
+    if (match) {
+        const actionText = cleanOfflineActionText(match[1]).trim();
+        if (actionText) return { action: actionText, speech: '' };
+    }
+
+    return { action: '', speech: raw };
+}
+
 function isMeaninglessTinyGroupContent(text) {
     const s = cleanAiSpeechText(String(text || '')).trim();
     if (!s) return true;
 
-    const plain = s.replace(/[，。！？!?、；;：:“”"'（）()【】\[\]\s]/g, '');
+    if (isPurePunctuationOrGarbageContent(s)) return true;
+
+    const plain = s.replace(/[，。！？!?、；;：:“”"'（）()【】\[\]\s…]/g, '');
 
     const allowedShort = [
         '嗯', '好', '行', '啧', '哦', '别动', '别躲', '别闹',
         '等下', '等等', '等一下', '看着我', '你说', '说清楚',
-        '别急', '别走', '收下', '拿着', '过来', '停手', '住手'
+        '别急', '别走', '收下', '拿着', '过来', '停手', '住手', '放松'
     ];
 
     if (allowedShort.includes(plain)) return false;
 
-    if (plain.length > 0 && plain.length <= 3) {
-        const usefulTinyPatterns = [
-            /别/,
-            /等/,
-            /停/,
-            /走/,
-            /说/,
-            /来/,
-            /收/,
-            /拿/,
-            /看/
-        ];
-        return !usefulTinyPatterns.some(re => re.test(plain));
-    }
+    if (/^[一二三四五六七八九十百千万零〇两\d]+$/.test(plain)) return true;
+
+    const knownNames = (state.contacts || [])
+        .map(c => c && c.name)
+        .filter(Boolean);
+    const myName = state.myProfile?.name;
+    if (myName) knownNames.push(myName);
+
+    if (knownNames.includes(plain)) return true;
+
+    if (plain.length <= 2) return true;
 
     return false;
 }
