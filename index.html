@@ -19198,6 +19198,13 @@ ${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
 4. 禁止回复用户：绝对不要和用户“${myProfile.name}”说话，这是 AI 成员之间的对话。
 5. 不要按固定条数生成，按当前氛围自然推进。可以多条，也可以少条，关键是自然和有推进。
 
+【单条消息粒度】
+1. 不限制本轮输出多少条 MESSAGE。
+2. 每条 CONTENT 要像真实聊天气泡，不要只有两三个字的无意义碎片。
+3. 允许“嗯”“好”“别闹”“等下”“你说”等真实短句。
+4. 禁止“手。”“伸平。”“然后。”这种被拆坏的碎片。
+5. 如果内容太碎，合并成一条更自然的 CONTENT。
+
 [输出格式]
 你的输出必须严格遵守以下格式：
 MESSAGE_START
@@ -19351,6 +19358,11 @@ MESSAGE_END
             const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(content);
             const speechText = hasStructuredDirective ? content : cleanAiSpeechText(content).trim();
             if (!speechText) continue;
+
+            if (!hasStructuredDirective && isMeaninglessTinyGroupContent(speechText)) {
+                console.warn('[跳过无意义碎片 CONTENT]', { speakerName, content: speechText });
+                continue;
+            }
 
             if (speakerProfile) {
                 await sleep(800 + Math.random() * 700);
@@ -19583,6 +19595,15 @@ ${latestGroupInputText || '(用户发送了非文字内容)'}
 9. 不要替用户发言，不要控制用户。
 10. 不要复述 System 里的背景资料，不要把记忆流当成当前用户新输入。
 
+【单条消息粒度】
+1. 不限制你本轮输出多少条 MESSAGE，按剧情自然推进。
+2. 但每条 CONTENT 必须是一个相对完整的聊天气泡，不要把一句完整的话拆成几个两三字碎片。
+3. 禁止输出“手。”“伸平。”“说。”“然后。”这种没有独立意义的碎片消息。
+4. “嗯”“好”“行”“啧”“别动”“别躲”“等一下”“看着我”“你先说”这种真实短句可以保留，但必须符合角色当下语气，并且能推动或接住上下文。
+5. 如果一句话拆开后其中一条没有独立意义，就合并到同一个 CONTENT 里。
+6. CONTENT 可以短，但不能空、不能碎、不能像被截断。
+7. 真实群聊可以连发很多条，但每一条都要像一个人真的发出去的一条消息。
+
 [输出格式]
 你的输出必须严格遵守以下格式：
 MESSAGE_START
@@ -19749,6 +19770,11 @@ MESSAGE_END
             const hasStructuredDirective = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar|qzone)(?:[\s:：]+[^\]]*)?\]/i.test(content);
             const speechText = hasStructuredDirective ? content : cleanAiSpeechText(content).trim();
             if (!speechText) continue;
+
+            if (!hasStructuredDirective && isMeaninglessTinyGroupContent(speechText)) {
+                console.warn('[跳过无意义碎片 CONTENT]', { speakerName, content: speechText });
+                continue;
+            }
 
             if (speakerProfile && !(group.mutedMembers || []).includes(speakerProfile.id)) {
                 await sleep(800 + Math.random() * 700);
@@ -20596,6 +20622,38 @@ function cleanGroupSpeechContent(text) {
         .replace(/^[“””]+|[“””]+$/g, '')
         .trim()
     );
+}
+
+function isMeaninglessTinyGroupContent(text) {
+    const s = cleanAiSpeechText(String(text || '')).trim();
+    if (!s) return true;
+
+    const plain = s.replace(/[，。！？!?、；;：:“”"'（）()【】\[\]\s]/g, '');
+
+    const allowedShort = [
+        '嗯', '好', '行', '啧', '哦', '别动', '别躲', '别闹',
+        '等下', '等等', '等一下', '看着我', '你说', '说清楚',
+        '别急', '别走', '收下', '拿着', '过来', '停手', '住手'
+    ];
+
+    if (allowedShort.includes(plain)) return false;
+
+    if (plain.length > 0 && plain.length <= 3) {
+        const usefulTinyPatterns = [
+            /别/,
+            /等/,
+            /停/,
+            /走/,
+            /说/,
+            /来/,
+            /收/,
+            /拿/,
+            /看/
+        ];
+        return !usefulTinyPatterns.some(re => re.test(plain));
+    }
+
+    return false;
 }
 
 function isProgressiveShortSpeech(text) {
