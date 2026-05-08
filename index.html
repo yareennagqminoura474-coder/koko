@@ -15961,6 +15961,22 @@ async function showRedPacketModal(message, senderProfile) {
             modal.style.display = 'flex';
         }
 
+        function normalizeShortStatusText(text) {
+            let s = String(text || '').trim();
+            s = s.replace(/^状态变更为[:：]\s*/, '');
+            s = s.replace(/[。.!！?？]+$/g, '');
+            s = s.replace(/\s+/g, '');
+            const parts = s.split(/[，,；;、]/).map(part => part.trim()).filter(Boolean);
+            if (parts.length > 1) {
+                const preferred = [...parts].reverse().find(part => part.length <= 8);
+                s = preferred || parts[parts.length - 1];
+            }
+            if (s.length > 8) {
+                s = s.slice(0, 8);
+            }
+            return s || '在线';
+        }
+
         async function openChat(contactId) {
             if (editModeState.active) await exitEditMode();
             const contact = state.contacts.find(c => c.id === contactId);
@@ -16126,7 +16142,7 @@ if (finalBackgroundUrl) {
             } else {
                 // 2. 如果没在输入，就显示TA保存的状态
                 // ▼▼▼ 关键修改：优先读取 contact.status，没有才显示 '在线' ▼▼▼
-                chatStatusEl.textContent = contact.status || '在线';
+                chatStatusEl.textContent = normalizeShortStatusText(contact.status || '在线');
                 // ▲▲▲ 修改结束 ▲▲▲
             }
             // --- 修复结束 ---
@@ -17612,13 +17628,21 @@ function splitOfflineActionForRender(text) {
         const workingSegments = segments.length > 0 ? segments : [raw];
 
         workingSegments.forEach(segment => {
-            if (segment.length <= 100) {
+            if (segment.length <= 70) {
                 collectPiece(segment);
                 return;
             }
 
             const sentences = splitActionSentences(segment);
             if (sentences.length <= 1) {
+                if (segment.length > 90) {
+                    segment
+                        .split(/(?<=[，、；;：:])\s*/)
+                        .map(part => part.trim())
+                        .filter(Boolean)
+                        .forEach(part => collectPiece(part));
+                    return;
+                }
                 collectPiece(segment);
                 return;
             }
@@ -17633,7 +17657,7 @@ function splitOfflineActionForRender(text) {
                 const nextBuffer = buffer
                     ? joinMibuOfflineActionContent(buffer, cleanedSentence)
                     : cleanedSentence;
-                const shouldFlush = buffer && (nextBuffer.length > 80 || sentenceCount >= 3);
+                const shouldFlush = buffer && (nextBuffer.length > 65 || sentenceCount >= 2);
 
                 if (shouldFlush) {
                     collectPiece(buffer);
@@ -17645,7 +17669,7 @@ function splitOfflineActionForRender(text) {
                 buffer = nextBuffer;
                 sentenceCount += 1;
 
-                if (buffer.length >= 60 && sentenceCount >= 2) {
+                if (buffer.length >= 45 && sentenceCount >= 2) {
                     collectPiece(buffer);
                     buffer = '';
                     sentenceCount = 0;
@@ -17676,7 +17700,11 @@ function splitOfflineActionForRender(text) {
         const pieceLen = piece.replace(/\s/g, '').length;
         if (pieceLen < 25 || prevLen < 25 || isWeakMibuOfflineActionFragment(piece)) {
             const joined = normalizeMibuOfflineActionContent(joinMibuOfflineActionContent(prev, piece));
-            if (joined) merged[merged.length - 1] = joined;
+            if (joined && joined.length <= 75) {
+                merged[merged.length - 1] = joined;
+                return;
+            }
+            merged.push(piece);
             return;
         }
 
@@ -18838,7 +18866,7 @@ async function requestAiReply(systemInstruction = null, targetContactId = null) 
                     // ▼▼▼ 修改：不再强制显示“在线”，而是显示角色的真实状态 ▼▼▼
                     const statusEl = document.getElementById('chat-contact-status');
                     if (statusEl) {
-                        statusEl.textContent = contact.status || '在线';
+                        statusEl.textContent = normalizeShortStatusText(contact.status || '在线');
                     }
                     // ▲▲▲ 修改结束 ▲▲▲
                 }
@@ -19183,7 +19211,7 @@ ${worldBookContextString}
         state.aiTypingStatus[contact.id] = false; 
         if (chatStatusEl && state.activeChatId === contact.id) {
             // ▼▼▼ 修改：读取真实状态 ▼▼▼
-            chatStatusEl.textContent = contact.status || '在线';
+            chatStatusEl.textContent = normalizeShortStatusText(contact.status || '在线');
         }
     }
 }
@@ -26866,6 +26894,7 @@ if (heartVoiceMatch) {
             console.log(`拦截了无效状态: ${newStatus}`);
             newStatus = "在线"; 
         }
+        newStatus = normalizeShortStatusText(newStatus);
 
         if (newStatus) {
             // 1. 更新数据
@@ -26874,14 +26903,14 @@ if (heartVoiceMatch) {
             
             if (state.activeChatId === senderProfile.id) {
                 const statusEl = document.getElementById('chat-contact-status');
-                if (statusEl) statusEl.textContent = newStatus;
+                if (statusEl) statusEl.textContent = normalizeShortStatusText(newStatus);
             }
 
             // 2. 发送系统通知
             await createAndAddMessage({ 
                 type: 'system_notification', 
                 sender: 'system', 
-                content: `状态变更为：${newStatus}` 
+                content: `状态变更为：${normalizeShortStatusText(newStatus)}` 
             }, senderProfile.id, effectiveChatContext, false, 'chat');
         }
 
@@ -27239,6 +27268,7 @@ if (fullDialogue) {
                 let extractedStatus = fakeMatch[1].trim();
                 // 去掉末尾可能存在的句号或右括号
                 extractedStatus = extractedStatus.replace(/[。\.\]]$/, '');
+                extractedStatus = normalizeShortStatusText(extractedStatus);
 
                 console.log("捕获到 AI 伪造的状态提示，强制转换为指令:", extractedStatus);
 
@@ -27248,14 +27278,14 @@ if (fullDialogue) {
                 
                 if (state.activeChatId === senderProfile.id) {
                     const statusEl = document.getElementById('chat-contact-status');
-                    if (statusEl) statusEl.textContent = extractedStatus;
+                    if (statusEl) statusEl.textContent = normalizeShortStatusText(extractedStatus);
                 }
 
                 // 2. 发送系统通知 (让用户知道状态变了)
                 await createAndAddMessage({ 
                     type: 'system_notification', 
                     sender: 'system',
-                    content: `状态变更为：${extractedStatus}` 
+                    content: `状态变更为：${normalizeShortStatusText(extractedStatus)}` 
                 }, senderProfile.id, effectiveChatContext, false, 'chat');
 
                 processed = true; // 标记为已处理，这样就不会显示成那个丑陋的文本气泡了
@@ -27551,6 +27581,7 @@ case 'status': {
                                 // 如果AI想设这个，我们强制把它改成默认的，或者直接忽略
                                 newStatus = "在线"; 
                             }
+                            newStatus = normalizeShortStatusText(newStatus);
                             // ▲▲▲ 修复结束 ▲▲▲
 
                             if (newStatus) {
@@ -27560,14 +27591,14 @@ case 'status': {
                                 
                                 if (state.activeChatId === senderProfile.id) {
                                     const statusEl = document.getElementById('chat-contact-status');
-                                    if (statusEl) statusEl.textContent = newStatus;
+                                    if (statusEl) statusEl.textContent = normalizeShortStatusText(newStatus);
                                 }
 
                                 // 2. 发送系统通知
                                 await createAndAddMessage({ 
                                     type: 'system_notification', 
                                     sender: 'system',
-                                    content: `状态变更为：${newStatus}` 
+                                    content: `状态变更为：${normalizeShortStatusText(newStatus)}` 
                                 }, senderProfile.id, effectiveChatContext, false, 'chat');
                             }
                             
