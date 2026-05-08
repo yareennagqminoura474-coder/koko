@@ -20301,6 +20301,10 @@ function buildUnifiedGroupMemoryString(group, getProfileInGroup, myProfile, link
     groupHistory.forEach(msg => {
         if (!msg || msg.sender === 'system_instruction') return;
         if (['loading', 'error', 'heart_voice'].includes(msg.type)) return;
+        if (msg.type === 'system_notification') {
+            const noiseKeywords = ['状态变更为', '发了一条新说说', '评论了', '回复了', '留言', '史莱姆', '进化', '等级提升'];
+            if (noiseKeywords.some(kw => String(msg.content || '').includes(kw))) return;
+        }
 
         const authorProfile = getProfileInGroup(msg.characterId || msg.sender);
         const authorName = msg.sender === 'system'
@@ -20482,6 +20486,35 @@ function buildUnifiedPrivateMemoryString(contact, myProfile, options = {}) {
             });
         });
     }
+
+    const recentPosts = (state.posts || []).filter(post => {
+        if (!post) return false;
+        const isMyPost = post.author?.id === myProfile?.id;
+        const isContactPost = post.author?.id === contact.id;
+        const isInteracted = (post.comments || []).some(comment =>
+            comment.author?.id === myProfile?.id || comment.author?.id === contact.id
+        );
+        return isMyPost || isContactPost || isInteracted;
+    });
+
+    recentPosts.forEach(post => {
+        pushMemory({
+            timestamp: post.timestamp || 0,
+            type: '论坛',
+            author: post.author?.name || '未知',
+            content: `发布了动态: "${String(post.content || '').slice(0, 60)}"`
+        });
+
+        (post.comments || []).forEach(comment => {
+            const replyPart = comment.replyTo ? `回复"${comment.replyTo}": ` : '';
+            pushMemory({
+                timestamp: comment.timestamp || 0,
+                type: '论坛评论',
+                author: comment.author?.name || '未知',
+                content: `${replyPart}"${comment.content}"`
+            });
+        });
+    });
 
     unifiedMemoryStream.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
@@ -23108,20 +23141,39 @@ ${latestInputText || '(用户发送了非文字内容)'}
                     }
                     if (dynamicInstructions) privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
 
+                    const messages = [];
+                    const recentHistory = safeRecentHistory;
+
+                    for (const msg of recentHistory) {
+                        if (!msg || msg.sender === 'system_instruction') continue;
+                        if (['system_notification', 'loading', 'error', 'heart_voice'].includes(msg.type)) continue;
+
+                        const isUserMsg = msg.sender === 'user' || msg.sender === 'myProfile';
+                        const content = formatMessageForUnifiedMemory(msg, contact);
+                        if (!content) continue;
+
+                        messages.push({
+                            role: isUserMsg ? 'user' : 'assistant',
+                            content
+                        });
+                    }
+
                     const _latestParts = buildPromptPartsFromLatestUserMessage(_lastUserMsg, contact);
                     const _hasImage = _latestParts && _latestParts.some(p => p.type === 'image_url');
-                    if (_hasImage) {
-                        const _imgParts = _latestParts.filter(p => p.type === 'image_url');
-                        requestMessages = [
-                            { role: 'system', content: privateSystemContent },
-                            { role: 'user', content: [..._imgParts, { type: 'text', text: privateUserTask }] }
-                        ];
-                    } else {
-                        requestMessages = [
-                            { role: 'system', content: privateSystemContent },
-                            { role: 'user', content: privateUserTask }
-                        ];
+                    const latestUserContent = _hasImage
+                        ? _latestParts
+                        : (latestInputText || '(用户发送了非文字内容)');
+
+                    messages.push({ role: 'user', content: latestUserContent });
+
+                    if (dynamicInstructions) {
+                        messages.push({ role: 'user', content: `[附加临时指令]\n${dynamicInstructions}` });
                     }
+
+                    requestMessages = [
+                        { role: 'system', content: privateSystemContent },
+                        ...messages
+                    ];
 
                     console.log('[私聊群聊记忆读取检查]', {
                         contactName: contact.name,
@@ -23148,9 +23200,9 @@ ${latestInputText || '(用户发送了非文字内容)'}
                         usingFinalSystemPrompt: false,
                         usingBasePrompt: privateSystemContent.includes('{{memory_stream}}') || privateSystemContent.includes('统一时序记忆流') || privateSystemContent.includes('上一轮角色回复'),
                         systemPreview: privateSystemContent.slice(0, 800),
-                        userTaskPreview: privateUserTask.slice(0, 1000),
+                        userTaskPreview: typeof latestUserContent === 'string' ? latestUserContent.slice(0, 1000) : '[图片/多模态输入]',
                         latestUserInput: latestInputText,
-                        recentHistoryCount: safeRecentHistory.length
+                        recentHistoryCount: recentHistory.length
                     });
                 } else {
                 // (群聊/其他：保持原有多轮消息结构，不改动)
