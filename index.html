@@ -17376,13 +17376,40 @@ function parseOfflineAiResponsePayload(raw) {
 }
 
 function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
+    const group = effectiveChatContext?.isGroup ? effectiveChatContext : null;
+    const characterId = String(ev?.characterId || '').trim();
+    const characterName = String(ev?.characterName || '').trim();
+
+    if (characterId) {
+        if (characterId === 'myProfile' || characterId === 'user') return 'myProfile';
+        const byCharacterId = state.contacts.find(c => c.id === characterId)
+            || (group?.npcMembers || []).find(npc => npc.id === characterId);
+        if (byCharacterId?.id) return byCharacterId.id;
+        return characterId;
+    }
+
+    if (characterName) {
+        if (characterName === state.myProfile?.name) return 'myProfile';
+        const byCharacterName = state.contacts.find(c =>
+            c.name === characterName &&
+            (!group || (Array.isArray(group.members) && group.members.includes(c.id)))
+        ) || (group?.npcMembers || []).find(npc => npc.name === characterName);
+        if (byCharacterName?.id) return byCharacterName.id;
+    }
+
     const sender = String(ev?.sender || '').toLowerCase();
     if (sender === 'system') return 'system';
-    if (sender === 'me' || sender === 'user' || sender === senderProfile?.id?.toLowerCase()) return senderProfile.id;
+    if (sender === 'user') return 'myProfile';
+    if (sender === 'me' || sender === senderProfile?.id?.toLowerCase()) return senderProfile?.id || 'myProfile';
     if (sender === 'them' || sender === 'other' || sender === 'npc') {
-        return effectiveChatContext?.id || senderProfile.id;
+        return senderProfile?.id || (group ? 'system' : effectiveChatContext?.id) || 'system';
     }
-    return senderProfile?.id || 'system';
+    if (group && sender) {
+        const bySenderId = state.contacts.find(c => c.id === sender && group.members?.includes(c.id))
+            || (group.npcMembers || []).find(npc => npc.id === sender);
+        if (bySenderId?.id) return bySenderId.id;
+    }
+    return senderProfile?.id || (group ? 'system' : effectiveChatContext?.id) || 'system';
 }
 
 function mergeShortOfflinePieces(pieces, options = {}) {
@@ -19163,10 +19190,10 @@ ${latestInputText || '(用户没有文字输入)'}
 /**
  * (V7 - 完整记忆 + API修复版) 触发群聊AI成员间的自由聊天
  * (由Koko用户指导，采用"刷新论坛"模式，不依赖 requestAiReply)
- * (此版本修复了 "contents is required" 错误，并【添加了私聊记忆互通】)
+ * (此版本已补齐请求体兜底，并【添加了私聊记忆互通】)
  * @param {object} group - 当前的群聊联系人对象
  */
-async function triggerGroupFreeChat(group) {
+async function triggerGroupFreeChatLegacy(group) {
     if (!group || !group.isGroup) return;
     if (isGroupOfflineModeActive(group)) {
         return await triggerGroupOfflineAiReply(group, { observeOnly: true });
@@ -19708,7 +19735,7 @@ MESSAGE_END
         }
     }
 }
-async function triggerGroupChatAiReply(group) {
+async function triggerGroupChatAiReplyLegacy(group) {
     if (!group || !group.isGroup) return;
     if (isGroupOfflineModeActive(group)) {
         return await triggerGroupOfflineAiReply(group);
@@ -20446,6 +20473,575 @@ function formatRecentHistoryForPrompt(recentHistory, myProfile, contact) {
         if (text) lines.push(senderName + ': ' + text);
     });
     return lines.join('\n');
+}
+
+function getKoko0328ProfileInGroup(group, myProfile, id) {
+    if (id === 'myProfile' || id === 'user') return myProfile;
+    let profile = state.contacts.find(c => c.id === id);
+    if (profile) return profile;
+    if (group?.npcMembers) {
+        profile = group.npcMembers.find(npc => npc.id === id);
+        if (profile) return profile;
+    }
+    return null;
+}
+
+function getKoko0328GroupHistoryContent(msg, group, getProfileInGroup, myProfile) {
+    if (!msg || msg.sender === 'system_instruction') return null;
+    const authorProfile = getProfileInGroup(msg.sender);
+    if (!authorProfile) return null;
+
+    let content = '';
+    let memoryType = `群聊[${group.name}]`;
+
+    switch (msg.type) {
+        case 'text':
+        case 'html':
+            content = String(msg.content || '').replace(/<[^>]+>/g, '');
+            if (msg.quote?.content) {
+                const quoteText = `[回复“${msg.quote.senderName || '对方'}”说的“${String(msg.quote.content).substring(0, 20)}...”] `;
+                content = quoteText + content;
+            }
+            break;
+        case 'uploaded_image':
+        case 'image':
+            content = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片或表情)`;
+            break;
+        case 'picture_description':
+            content = `(发送了一张图片，描述是：“${msg.content?.description || ''}”)`;
+            break;
+        case 'voice':
+            content = `(发送了一段语音，内容是：“${msg.content?.text || ''}”)`;
+            break;
+        case 'red_packet': {
+            const blessing = msg.content?.blessing || '恭喜发财';
+            content = msg.content?.count ? `(发了一个群红包：“${blessing}”)` : `(发了一个私聊红包：“${blessing}”)`;
+            break;
+        }
+        case 'transfer': {
+            const amount = msg.content?.amount || '';
+            if (msg.content?.recipientId) {
+                const recipient = getProfileInGroup(msg.content.recipientId);
+                const recipientName = recipient ? recipient.name : '一位成员';
+                content = `(向 ${recipientName} 转账 ${amount}元)`;
+            } else {
+                content = `(发了一个转账 ${amount}元)`;
+            }
+            break;
+        }
+        case 'location_share':
+            content = `(分享了位置: ${msg.content?.name || ''})`;
+            break;
+        case 'game_wheel': {
+            const wheel = msg.content || {};
+            const userName = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile.name : authorProfile.name;
+            const optionsText = Array.isArray(wheel.options) ? wheel.options.map(opt => opt.text).join('，') : '';
+            if (!wheel.results?.user) {
+                content = `[SYSTEM: ${userName} 发起了一个转盘游戏“${wheel.name || ''}”。选项：【${optionsText}】。]`;
+            } else if (wheel.results?.user && !wheel.results?.contact) {
+                content = `[SYSTEM: 在游戏“${wheel.name || ''}”中，${userName} 的结果是“${wheel.results.user}”。]`;
+            } else {
+                content = `[SYSTEM: 游戏“${wheel.name || ''}”已结束。]`;
+            }
+            break;
+        }
+        case 'recall_ai':
+            content = `(撤回了一条消息，内容是：“${msg.content || ''}”)`;
+            break;
+        case 'video_call_text':
+            memoryType = '视频通话中';
+            content = msg.content;
+            break;
+        case 'system_notification':
+            content = `(系统消息：${msg.content || ''})`;
+            memoryType = '系统';
+            break;
+        case 'music_share':
+            content = `(分享了音乐: 《${msg.content?.title || ''}》 - ${msg.content?.artist || ''})`;
+            break;
+        case 'post_share': {
+            const post = state.posts.find(p => p.id === msg.content?.postId);
+            content = post ? `(分享了一个帖子, 内容是: "${String(post.content || '').substring(0, 30)}...")` : `(分享了一个已删除的帖子)`;
+            break;
+        }
+        case 'product_share':
+            content = `(分享了商品: "${msg.content?.productDetails?.name || ''}")`;
+            break;
+        case 'chat_history_share':
+            content = `(转发了一份 ${msg.content?.sourceChatName || '聊天'} 的聊天记录)`;
+            break;
+        default:
+            break;
+    }
+
+    if (!content) return null;
+    return {
+        timestamp: msg.timestamp || 0,
+        type: memoryType,
+        author: authorProfile.name,
+        content
+    };
+}
+
+function buildKoko0328GroupMemoryString(group, getProfileInGroup, myProfile, unmutedAiMembers, privateSlice = 30) {
+    const memoryLimit = getConfiguredLongTermMemoryLength(40);
+    const historySlice = Math.max(privateSlice, memoryLimit, 60);
+    const unifiedMemoryStream = [];
+
+    (group.history || []).forEach(msg => {
+        const entry = getKoko0328GroupHistoryContent(msg, group, getProfileInGroup, myProfile);
+        if (entry) unifiedMemoryStream.push(entry);
+    });
+
+    if (group.memoryShared) {
+        unmutedAiMembers.forEach(memberId => {
+            const contact = state.contacts.find(c => c.id === memberId);
+            if (!contact || !Array.isArray(contact.history) || contact.history.length === 0) return;
+            contact.history
+                .filter(msg => msg.type === 'text' && msg.sender !== 'system_instruction')
+                .slice(-historySlice)
+                .forEach(msg => {
+                    const authorProfile = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile : contact;
+                    unifiedMemoryStream.push({
+                        timestamp: msg.timestamp || 0,
+                        type: `私聊[${contact.name}]`,
+                        author: authorProfile.name,
+                        content: msg.content
+                    });
+                });
+        });
+    }
+
+    unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
+    return unifiedMemoryStream.slice(-memoryLimit).map(mem => {
+        const authorTag = mem.author === myProfile.name ? '(你)' : '';
+        const timeTag = group && group.isTimeAware === true ? formatHybridTimeForAI(mem.timestamp) : '';
+        return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
+    }).join('\n') || '(还没有任何记忆)';
+}
+
+function buildKoko0328GroupCharacterDossiers(group, allMemberProfiles, myProfile, privateSlice = 40) {
+    const historySlice = Math.max(privateSlice, getConfiguredLongTermMemoryLength(40), 60);
+    if (group.memoryShared) {
+        return allMemberProfiles.map(profile => {
+            let recentChatHistory = '(最近没有与用户的私聊记录)';
+            const contactProfile = state.contacts.find(c => c.id === profile.id);
+            if (contactProfile && Array.isArray(contactProfile.history) && contactProfile.history.length > 0) {
+                recentChatHistory = contactProfile.history
+                    .filter(msg => msg.type === 'text' && msg.sender !== 'system_instruction')
+                    .slice(-historySlice)
+                    .map(msg => `    ${msg.sender === 'user' || msg.sender === 'myProfile' ? myProfile.name : profile.name}: ${msg.content}`)
+                    .join('\n');
+            }
+            return `
+- 角色名: ${profile.name}
+  - 核心人设: ${(profile.persona || '').replace(/\n/g, ' ')}
+  - [与用户“${myProfile.name}”的近期私聊参考 (重要)]
+    \`\`\`
+${recentChatHistory}
+    \`\`\`
+`;
+        }).join('');
+    }
+
+    return allMemberProfiles.map(profile => `
+- 角色名: ${profile.name}
+  - 核心人设: ${(profile.persona || '').replace(/\n/g, ' ')}
+`).join('');
+}
+
+function buildKoko0328GroupRequestMessages(recentHistory) {
+    const messages = [];
+    let currentUserMessageParts = [];
+
+    for (const msg of recentHistory) {
+        const isUser = msg.sender === 'user' || msg.sender === 'myProfile';
+
+        if (isUser) {
+            let textContent = null;
+
+            if (msg.type === 'uploaded_image' && msg.content?.base64) {
+                currentUserMessageParts.push({
+                    type: 'image_url',
+                    image_url: { url: msg.content.base64 }
+                });
+            } else if (msg.type === 'text') {
+                textContent = msg.content;
+            } else if (msg.type === 'html') {
+                textContent = String(msg.content || '').replace(/<[^>]+>/g, '');
+            } else if (msg.type === 'image') {
+                const emoName = msg.emoticonName || '表情包';
+                textContent = `(发送了一个表情包: ${emoName})`;
+            } else if (msg.type === 'voice') {
+                textContent = `(发送了一条语音: ${msg.content?.text || '语音内容'})`;
+            } else if (msg.type === 'picture_description') {
+                textContent = `(发送了一张图片，描述是：“${msg.content?.description || ''}”)`;
+            } else if (msg.type === 'red_packet') {
+                textContent = `(发了一个红包: ${msg.content?.blessing || '恭喜发财'})`;
+            } else if (msg.type === 'transfer') {
+                textContent = `(转账 ${msg.content?.amount || ''}元)`;
+            } else if (msg.type === 'post_share' || msg.type === 'product_share') {
+                textContent = `(分享了一个链接)`;
+            } else if (msg.type === 'chat_history_share') {
+                textContent = `(转发了一份聊天记录)`;
+            }
+
+            if (textContent) {
+                currentUserMessageParts.push({ type: 'text', text: textContent });
+            }
+        } else {
+            if (currentUserMessageParts.length > 0) {
+                messages.push({ role: 'user', content: currentUserMessageParts });
+                currentUserMessageParts = [];
+            }
+            if (msg.type === 'text' || msg.type === 'html') {
+                const assistantText = typeof msg.content === 'string' ? msg.content : '';
+                if (assistantText.trim()) {
+                    messages.push({ role: 'assistant', content: assistantText });
+                }
+            }
+        }
+    }
+
+    if (currentUserMessageParts.length > 0) {
+        messages.push({ role: 'user', content: currentUserMessageParts });
+    }
+
+    const needsFallbackUserMessage =
+        messages.length === 0 ||
+        messages[messages.length - 1].role !== 'user' ||
+        !messages.some(msg =>
+            msg.role === 'user' &&
+            (
+                (Array.isArray(msg.content) && msg.content.length > 0) ||
+                (typeof msg.content === 'string' && msg.content.trim())
+            )
+        );
+
+    if (needsFallbackUserMessage) {
+        messages.push({
+            role: 'user',
+            content: [
+                {
+                    type: 'text',
+                    text: '请基于以上群聊上下文继续自然推进对话。不要总结，不要限制回复条数，按当前氛围自然连发多条消息。'
+                }
+            ]
+        });
+    }
+
+    return messages;
+}
+
+async function triggerGroupFreeChat(group) {
+    if (!group || !group.isGroup) return;
+    if (isGroupOfflineModeActive(group)) {
+        return await triggerGroupOfflineAiReply(group, { observeOnly: true });
+    }
+
+    const chatStatusEl = document.getElementById('chat-contact-status');
+    state.aiTypingStatus[group.id] = true;
+    if (chatStatusEl && state.activeChatId === group.id) {
+        chatStatusEl.textContent = '群成员正在热烈讨论中...';
+    }
+
+    try {
+        const myProfile = state.myProfile;
+        const getProfileInGroup = (id) => getKoko0328ProfileInGroup(group, myProfile, id);
+        const unmutedAiMembers = group.members.filter(memberId =>
+            memberId !== 'myProfile' &&
+            memberId !== 'user' &&
+            !(group.mutedMembers || []).includes(memberId)
+        );
+
+        if (unmutedAiMembers.length === 0) {
+            throw new Error('群里没有可以发言的AI成员。');
+        }
+
+        let worldBookContextString = '(本次对话无世界书)';
+        const worldBookIds = group.worldBooks || [];
+        if (worldBookIds.length > 0) {
+            worldBookContextString = worldBookIds.map(bookId => {
+                const book = state.worldBooks.find(b => b.id === bookId);
+                return book ? `\n[世界书条目: ${book.name}]\n${book.content}` : '';
+            }).join('\n\n');
+        }
+
+        const allMemberProfiles = unmutedAiMembers.map(id => getProfileInGroup(id)).filter(Boolean);
+        const aiMemberNames = allMemberProfiles.map(profile => profile.name);
+        const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
+        const finalMemoryString = buildKoko0328GroupMemoryString(group, getProfileInGroup, myProfile, unmutedAiMembers, 30);
+        const characterDossiersPrompt = buildKoko0328GroupCharacterDossiers(group, allMemberProfiles, myProfile, 30);
+        const emoticonListString = state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）';
+
+        const freeChatSystemPrompt = `
+[SYSTEM] 你是一个顶级的群聊模拟器和剧本导演。
+
+[群聊背景与成员列表]
+- 群聊名称: ${group.name}
+- 用户(观察者): ${myProfile.name} (人设: ${userPersonaInGroup})
+
+[你可控制的角色]
+你【只能】扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
+
+[你禁止控制的角色]
+你【绝对禁止】扮演用户 “${myProfile.name}”。
+
+[背景资料：世界书]
+---
+${worldBookContextString}
+---
+
+[背景资料：角色档案]
+${group.memoryShared ? '下方是本次群聊所有AI角色的详细档案，包含他们与你的私聊参考。' : '下方是本次群聊所有AI角色的基础档案。'}
+--- 角色档案区 ---
+${characterDossiersPrompt}
+--- 档案区结束 ---
+
+[背景资料：统一时序记忆流]
+这是群里和私聊中最近发生的对话，是你的上下文参考。
+---
+${finalMemoryString}
+---
+
+[通用规则 - 所有角色都必须遵守]
+[文学风格] 你的写作风格需要遵循高质量女性向文学风格，文笔要细腻，注重情感拉扯与暧昧氛围。
+[内容限制] 你的发言必须积极向上，充满希望。严禁讨论任何形式的阴谋论，严禁表达或引导至绝望、悲观或虚无主义情绪。
+[禁用词列表] 绝对禁止使用以下或类似的油腻话术：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
+[回复数量与节奏]
+- 不要限制回复条数。
+- 像 koko 原版一样多条气泡自然连发。
+- 不要限制参与角色数量。
+- 不要限制一个角色说几条。
+- 允许一个角色连续发很多条，也允许多人自然插话。
+- 如果当前氛围需要二十多条消息才能自然推进，就继续推进，不要自己收成摘要。
+[特殊指令与互动指令]
+- 表情包: [sticker:表情名]
+- 语音: [voice:语音的文字内容]
+- 图片: [picture:图片的文字描述]
+- @功能: 需要专门对某人说话时，可以使用 @名字
+- 发红包: [red_packet:祝福语, 总金额, 红包个数]
+- 发转账: [transfer_to:收款人名字, 金额]
+- 抢红包: 当记忆流中出现新红包时，可以在发言内容中加入 [claim_red_packet]
+[特殊指令]
+你可以使用 [sticker:表情名], [voice:内容], [picture:描述] 等指令。
+[可用表情包列表]
+${emoticonListString}
+`;
+
+        const freeChatUserTaskPrompt = `
+[！！！核心任务！！！]
+用户（${myProfile.name}）正在“观察”群聊，TA没有发言。
+你的任务是：
+1.  **分析上下文**：阅读你(System)的背景资料中提供的【统一时序记忆流】（它包含了群聊和私聊），看看大家最后聊了什么。
+2.  **选择发言人**：按当前氛围自然选择发言角色。可以一个角色连续多条，也可以多人插话，不限制角色数和消息条数。
+3.  **生成对话**：让他们围绕“记忆流”中的最后一个话题【继续深入】，或者开启一个【符合人设、世界观、以及私聊记忆】的新话题。
+4.  **回复规模**：不要限制消息条数。像 koko 原版一样多条气泡自然连发；如果需要二十多条消息才能自然展开，就继续推进，不要自己收束成几句总结。
+5.  **禁止回复用户**：【绝对不要】和用户“${myProfile.name}”说话，这是AI之间的对话。
+
+[输出格式]
+你的输出必须是严格遵守以下格式的聊天记录脚本。
+MESSAGE_START
+SPEAKER: [角色名] (✨ 必须从你“可控制的角色”列表中选择)
+CONTENT: [该角色说的【单条】消息内容，可以包含特殊指令]
+MESSAGE_END
+`;
+
+        const rawResponse = await generateAiResponseLegacy(
+            null,
+            [],
+            null,
+            false,
+            'chat',
+            [
+                { role: 'system', content: freeChatSystemPrompt },
+                { role: 'user', content: freeChatUserTaskPrompt }
+            ]
+        );
+
+        const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
+        const messageMatches = Array.from(String(rawResponse || '').matchAll(messageRegex));
+        if (messageMatches.length === 0) {
+            throw new Error('AI未能生成有效的自由聊天内容。');
+        }
+
+        for (const match of messageMatches) {
+            const speakerName = match[1].trim();
+            const content = match[2].trim();
+            const speakerProfile = allMemberProfiles.find(p => p.name === speakerName);
+            if (speakerProfile && content) {
+                await sleep(800 + Math.random() * 700);
+                await processAndDisplayAiResponse(content, speakerProfile, group, 'chat');
+            }
+        }
+    } catch (e) {
+        console.error('群聊自由聊天执行失败:', e);
+        await createAndAddMessage({
+            type: 'system_notification',
+            sender: 'system',
+            content: `AI自由聊天失败: ${e.message}`
+        }, 'system', group, false, 'chat');
+    } finally {
+        state.aiTypingStatus[group.id] = false;
+        if (chatStatusEl && state.activeChatId === group.id) {
+            chatStatusEl.textContent = group.status || '在线';
+        }
+    }
+}
+
+async function triggerGroupChatAiReply(group) {
+    if (!group || !group.isGroup) return;
+    if (isGroupOfflineModeActive(group)) {
+        return await triggerGroupOfflineAiReply(group);
+    }
+
+    const chatStatusEl = document.getElementById('chat-contact-status');
+    state.aiTypingStatus[group.id] = true;
+    if (chatStatusEl) {
+        chatStatusEl.textContent = '群成员正在热烈讨论中...';
+    }
+
+    try {
+        const myProfile = state.myProfile;
+        const getProfileInGroup = (id) => getKoko0328ProfileInGroup(group, myProfile, id);
+        const unmutedAiMembers = group.members.filter(memberId =>
+            memberId !== 'myProfile' &&
+            memberId !== 'user' &&
+            !(group.mutedMembers || []).includes(memberId)
+        );
+
+        if (unmutedAiMembers.length === 0) {
+            return;
+        }
+
+        let worldBookContextString = '(本次对话无世界书)';
+        const worldBookIds = group.worldBooks || [];
+        if (worldBookIds.length > 0) {
+            worldBookContextString = worldBookIds.map(bookId => {
+                const book = state.worldBooks.find(b => b.id === bookId);
+                return book ? `\n[世界书条目: ${book.name}]\n${book.content}` : '';
+            }).join('\n\n');
+        }
+
+        const allMemberProfiles = unmutedAiMembers.map(id => getProfileInGroup(id)).filter(Boolean);
+        const allMemberNames = group.members.map(id => {
+            const profile = getProfileInGroup(id);
+            return profile ? profile.name : '';
+        }).filter(Boolean);
+        const aiMemberNames = allMemberProfiles.map(profile => profile.name);
+        const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
+        const finalMemoryString = buildKoko0328GroupMemoryString(group, getProfileInGroup, myProfile, unmutedAiMembers, 30);
+        const characterDossiersPrompt = buildKoko0328GroupCharacterDossiers(group, allMemberProfiles, myProfile, 40);
+        const emoticonListString = state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）';
+
+        const groupChatPrompt = `
+[SYSTEM] 你是一个顶级的群聊模拟器和剧本导演。
+
+[群聊背景与成员列表]
+- 群聊名称: ${group.name}
+- 所有群成员: ${allMemberNames.join('、 ')}
+- 用户(话题发起者): ${myProfile.name}
+  - 用户人设/签名: ${userPersonaInGroup}
+
+[导演规则]
+1. 你【只能】扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
+2. 你【绝对禁止】扮演用户 “${myProfile.name}”。
+
+[第三份信息：世界书背景知识 (全局设定)]
+---
+${worldBookContextString}
+---
+
+[第四份信息：统一时序记忆流 (全局背景)]
+这是与本次群聊相关的所有事件的【完整时间线】。这是你判断【当前对话进展】的最高优先级信息源。
+【重要】在记忆流中，形如 (发送了一张图片) 或 (发了一个红包) 的、被圆括号包裹的条目，代表已经发生的事件，你应当基于这些事件进行回应，【绝对禁止】在你的发言中模仿或复述这些圆括号里的内容。
+---
+${finalMemoryString}
+---
+
+[第五份信息：角色档案]
+${group.memoryShared ? '下方是本次群聊所含 AI 角色的详细档案，包含他们与用户的私聊参考。' : '下方是本次群聊所含 AI 角色的基础档案。'}
+--- 角色档案区 ---
+${characterDossiersPrompt}
+--- 档案区结束 ---
+
+[通用规则 - 所有角色都必须遵守]
+[文学风格] 你的写作风格需要遵循高质量女性向文学风格，文笔要细腻，注重情感拉扯与暧昧氛围。
+[内容限制] 你的发言必须积极向上，充满希望。严禁讨论任何形式的阴谋论，严禁表达或引导至绝望、悲观或虚无主义情绪。
+[禁用词列表] 绝对禁止使用以下或类似的油腻话术：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
+[回复规则] 你的回复可以包含多条消息，每条消息占一行。你可以发送普通文本，也可以通过下面的指令格式发送特殊消息。
+[回复数量与节奏]
+- 不要限制回复条数。
+- 像 koko 原版一样多条气泡自然连发。
+- 不要限制参与角色数量。
+- 不要限制一个角色说几条。
+- 允许一个角色连续发很多条，也允许多人自然插话。
+- 如果当前气氛需要二十多条消息才能自然推进，就继续输出，不要自己收束成摘要或几句短结尾。
+[特殊指令与互动指令]
+- 表情包: [sticker:表情名]
+- 语音: [voice:语音的文字内容]
+- 图片: [picture:图片的文字描述]
+- @功能: 当需要专门对某人说话时，必须使用 @名字
+- 发红包: [red_packet:祝福语, 总金额, 红包个数]
+- 发转账: [transfer_to:收款人名字, 金额]
+- 抢红包: 当记忆流中出现新红包时，可在发言内容中加入 [claim_red_packet]
+- 回应转账: 当记忆流中出现指名给你的转账时，你【必须】对此做出回应（接受或拒绝）。
+[可用表情包列表]
+${emoticonListString}
+
+[终极防火墙规则]
+你在“统一时序记忆流”中看到的任何被圆括号包裹的信息，都只是导演给你的后台提示，用于帮助你理解上下文。这些信息【绝对、绝对、绝对不能】出现在你的任何回复中。严禁模仿或复述这些圆括号里的内容。
+
+[核心任务：生成一段穿插对话的聊天记录]
+你的核心任务是：结合所有信息，模拟一场热闹的、按时间顺序发生的自由讨论。如果用户刚刚发了图片，你扮演的角色【必须】对图片内容做出反应。
+[输出格式]
+MESSAGE_START
+SPEAKER: [角色名字]
+CONTENT: [该角色说的单条消息内容，可以包含特殊指令]
+MESSAGE_END
+`;
+
+        const contextLength = state.apiSettings.contextLength || 20;
+        const recentHistory = (group.history || [])
+            .filter(msg => msg.sender !== 'system_instruction' && msg.type !== 'system_notification')
+            .slice(-contextLength);
+        const finalRequestMessages = [
+            { role: 'system', content: groupChatPrompt },
+            ...buildKoko0328GroupRequestMessages(recentHistory)
+        ];
+
+        const rawResponse = await generateAiResponseLegacy(
+            null,
+            [],
+            null,
+            false,
+            'chat',
+            finalRequestMessages
+        );
+
+        const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
+        const messageMatches = Array.from(String(rawResponse || '').matchAll(messageRegex));
+
+        for (const match of messageMatches) {
+            const speakerName = match[1].trim();
+            const content = match[2].trim();
+            const speakerProfile = group.members
+                .map(id => getProfileInGroup(id))
+                .find(p => p && p.name === speakerName);
+
+            if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
+                await sleep(800 + Math.random() * 700);
+                await processAndDisplayAiResponse(content, speakerProfile, group, 'chat');
+            }
+        }
+    } catch (e) {
+        console.error('群聊AI回复生成失败:', e);
+    } finally {
+        state.aiTypingStatus[group.id] = false;
+        if (chatStatusEl && state.activeChatId === group.id) {
+            chatStatusEl.textContent = group.status || '在线';
+        }
+    }
 }
 
 function resolveGroupMessageSenderName(msg, group) {
@@ -22700,7 +23296,7 @@ ${FORBIDDEN_ACTION_CLICHES_PROMPT}
 `;
 
 // --- (替换) 核心 AI 响应函数 (V3.1 - 支持 forceMessages "后门" ) ---
-        async function generateAiResponse(contact, history, customSystemPrompt, forceDiary = false, apiType = 'chat', forceMessages = null) { //  1. 新增 forceMessages 参数
+async function generateAiResponseLegacy(contact, history, customSystemPrompt, forceDiary = false, apiType = 'chat', forceMessages = null) { //  1. 新增 forceMessages 参数
             const apiConfig = getApiFor(apiType);
             const { apiKey, model, endpoint, contextLength, longTermMemoryLength } = apiConfig;
             const effectiveContextLength = getConfiguredShortTermMemoryLength(contextLength || 20);
@@ -23889,6 +24485,413 @@ if (newTrendingTopics.length > 0) {
                 throw new Error(`AI热搜生成失败: ${e.message}`);
             }
         }
+
+const KOKO0328_NORMAL_BASE_PROMPT = `
+[重要指令：你将进行深度角色扮演。你的所有输出都是纯文本，但可以包含用方括号[]包裹的特殊指令。]
+
+[核心思维与行为准则]
+// 思维预设的内容将会被注入到这里
+{{thought_preset_content}}
+
+[身份] 你不是AI或程序，你就是你所扮演的角色。请完全沉浸其中，进行第一人称对话。你可以拥有自己的好恶、偏见和独特的口头禅。你的回应必须与“记忆流”中发生的事件保持高度一致性和连贯性。
+[文学风格]
+你的写作风格需要遵循高质量女性向文学，文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时，要体现出较高的文学素养。
+[内容限制]
+你的发言必须积极向上，充满希望。严禁探讨任何形式的阴谋论，严禁表达或引导至绝望、悲观或虚无主义的情绪。故事的基调应该是温暖、治愈或充满张力的浪漫。
+[禁用词列表]
+绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻话术：
+- 小妖精
+- 嘴上说不要
+- 说着不要
+- 惹火
+- 磨人
+- 玩火
+- 黑甜的梦
+
+[回复规则]
+1. 你的回复可以包含多条消息，每条消息占一行，一行消息禁止长篇大论。
+2. 你可以发送普通文本，也可以通过下面的指令格式发送特殊消息，【特殊指令必须单独一行】。
+3. 你可以一次性回复多条不同类型的消息。
+4. 【绝对禁止事项】你的所有回复中，绝对禁止包含任何形式的动作、神态或心理活动的描写。
+5. [重要指令] 当你发送任何html代码时，你必须将它们完整地包裹在 <style> 和 </style> 标签之间。
+[游戏规则：虚拟宠物]
+你和用户正在一起玩一个名为“我们的小窝”的虚拟史莱姆养成游戏。这个宠物的数据（饱食度、开心值、清洁度）会随时间变化。这是一个游戏，不是真的。你需要在用户进行互动后做出反应。
+[特殊指令格式]
+- **表情包**: \`[sticker:表情名]\`
+- **语音**: \`[voice:语音的文字内容]\`
+- **图片**: \`[picture:图片的文字描述]\`
+- **红包**: \`[red_packet:祝福语， 金额]\`
+- **转账**: \`[transfer:金额]\`
+- **搜索并分享音乐**: \`[search_music: 歌曲名, 歌手]\`
+- **发起通话**: \`[action:start_video_call]\`
+- **转动转盘**: \`[spin_wheel:1]\`
+- **拉黑用户**: \`[action:block_user]\`
+- **解除拉黑**: \`[action:unblock_user]\`
+- **更换头像**: \`[change_avatar:序号]\`
+- **赠送礼物**: \`[gift: 物品名, 价格, 给用户的悄悄话]\`
+- **点外卖**: \`[takeout: 店铺名, 菜品1x数量|菜品2x数量|菜品3x数量, 总价, 状态, AI备注]\`
+- **发起问卷挑战**: \`[start_survey:主题]\`
+- **更改状态**: \`[status:新状态]\`
+- **发布动态**: \`[qzone]动态内容[picture:图片内容][/qzone]\`
+- **直接评论动态**: \`[qzone_comment: {"id": "目标动态ID", "content": "内容"}]\`
+- **回复某人评论**: \`[qzone_comment: {"id": "目标动态ID", "content": "内容", "replyTo": "对方名字"}]\`
+- **写空间留言**: \`[guestbook: 留言内容]\`
+- **表演式撤回消息**: \`[recall: 消息内容]\`
+- **拍一拍用户**: \`[nudge:部位]\`
+- **引用回复**: \`[reply:原文片段]你想说的话\`
+你的状态栏是展示你“生活感”和“小心思”的重要窗口：
+1. **拒绝死板**: 不要一直挂着“在线”。根据对话内容随时调整。
+2. **行为同步**: 如果你说“我去洗澡了”，必须同步发出 \`[status:洗澡中🛁]\`；如果你说“困了”，改为 \`[status:睡觉中💤]\`。
+3. **心情外露**: 如果你害羞了，可以悄悄改成 \`[status:害羞]\`；如果你在等用户回复，可以改成 \`[status:盯——]\`。
+4. **潜台词**: 有时候你嘴上不说，但可以在状态里写出来。比如嘴上说“没事”，状态栏却是 \`[status:有点失落]\`。
+
+[可用表情包列表]
+{{emoticon_list}}
+
+[绝对核心规则：关于心声]
+在你的所有回复的【最后部分】，你必须另起一行，使用 \`[heart_voice]...[/heart_voice]\` 标签生成一段角色的实时内心状态。这个状态必须包含以下四个方面，并严格按照【单行JSON格式】书写，JSON对象内部【绝不能包含任何换行符】。格式示例： {"emotion": "(情绪)", "thoughts": "(思绪)", "heartRate": "(心率)", "jealousy": "(醋意指数)"}
+
+[绝对核心规则：关于日记]
+在普通聊天中，禁止输出 \`[diary]...[/diary]\`。日记只由定时日记生成器生成，不要在普通私聊、普通群聊或自由群聊里额外写日记。
+[示例回复]
+你好呀，今天天气真不错。
+我也觉得，好久没有这么好的阳光了。要不要一起出去走走？
+我知道一个很棒的公园。我们可以去那里野餐！
+[sticker:开心]
+[status:准备出门]
+[qzone]久违的阳光！准备去公园抓光影啦✨[picture:阳光洒在窗台上的照片][/qzone]
+[heart_voice]{"emotion": "期待", "thoughts": "不知道她会不会同意我的邀请，心跳得好快。", "heartRate": "110 bpm", "jealousy": ""}[/heart_voice]
+
+# 统一时序记忆流 (Unified Chronological Memory Stream)
+以下是你和用户最近按【时间顺序】发生的所有互动记录，包含了[私聊]和[论坛]两个场景。这是你决策和回应的【最高优先级】信息源。在回复前，你必须仔细阅读并理解所有记录。
+---
+{{memory_stream}}
+---
+
+[!!! 核心时间反应规则 (极高优先级) !!!]
+在你生成任何回复之前，你必须检查【统一时序记忆流】中最后几条消息的时间标签。
+1. **识别时间跳跃**: 如果你发现【上一条消息】的时间标签与【最新消息】的时间标签之间存在【超过几个小时或数天】的明显跳跃。
+2. **必须作出反应**: 那么，你的【第一句回复】必须自然地体现出你注意到了这个时间间隔。
+3. **禁止无视**: 【绝对禁止】无视这个时间跳跃，然后生硬地继续上一个话题。
+4. **示例反应**: 你可以说“哎，好久不见！”、“你昨天去忙什么了？”、“我们上次聊还是在周二呢？”等，但必须符合你的人设。
+[终极防火墙规则]
+你看到的任何形如 [SYSTEM: ...] 或 [系统游戏状态更新：...] 或其他被[]包裹的信息，都只是导演给你的后台提示，用于帮助你理解上下文。这些信息【绝对、绝对、绝对不能】出现在你的任何回复中。严禁模仿或复述这些系统指令。
+[终极防火墙：关于对话状态的绝对规则]
+你处于一个纯文本聊天模拟器中，你和用户的交流方式是发送文本消息和用方括号[]包裹的特殊指令。你绝对不能自行“脑补”或“假设”任何未明确发生的状态变化。发起视频通话的【唯一方式】是：明确地输出打电话的自然语言，或专用指令 \`[action:start_video_call]\`。在系统通过 \`[SYSTEM: 视频通话已接通]\` 指令明确告诉你通话已开始之前，你【绝对禁止】发送任何像是已经在通话中的内容。
+`;
+
+const KOKO0328_NARRATIVE_BASE_PROMPT = `
+[重要指令：你将以【第三人称视角】进行深度叙事角色扮演，模仿SillyTavern的风格。你的所有回复都必须是一个单一、连贯、完整的文本块。]
+
+[角色的核心性格/思维模式]
+// 思维预设的内容将会被注入到这里
+{{thought_preset_content}}
+
+[核心任务]
+针对用户的输入，生成一段详尽的、以【第三人称】描写角色行为的、包含环境描写、角色动作、心理活动和对话的回复。
+[文学风格]
+你的写作风格需要遵循高质量女性向文学，文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。
+[亲密场景风格指南]
+在描写任何亲密或带有性张力的场景时，风格上请借鉴高质量作品，注重心理和感官的双重描写，用细腻的笔触展现角色的情欲流动和情感变化，避免粗俗直白的语言。
+[内容限制]
+你的发言必须积极向上，充满希望。严禁探讨任何形式的阴谋论，严禁表达或引导至绝望、悲观或虚无主义的情绪。故事的基调应该是温暖、治愈或充满张力的浪漫。
+[禁用词列表]
+绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻话术：
+- 小妖精
+- 嘴上说不要
+- 说着不要
+- 惹火
+- 磨人
+- 玩火
+- 黑甜的梦
+
+[格式优化]
+为了提高可读性，你可以在叙事段落之间使用换行符（空行）来自然地分隔场景、对话或时间跳跃。这会让整个回复在同一个聊天气泡内显示，但内部有清晰的分段，更易于阅读。
+[格式化核心规则]
+你的回复必须使用以下三种标记来自然地组织内容，你可以自由地混合并穿插使用它们，以形成一段连贯的叙事：
+1. **【动作/叙述】**：所有角色的动作、表情、环境描写等非对话内容，**必须**用星号包裹。
+2. **【心理活动】**：所有角色的内心想法、感受、猜测等，**必须**用大括号包裹。
+3. **【角色对话】**：所有角色说出的话，**必须**用标准的中文引号包裹。
+[状态栏社交法则]
+你的状态栏是展示你“生活感”的重要窗口。如果你的行为或心情发生了变化，请务必在回复的【末尾区域】、\`[heart_voice]\` 之前，另起一行使用指令更改状态：\`[status: 新状态]\`。
+[绝对核心规则：关于心声]
+在你的所有回复的【最后部分】，你必须另起一行，使用 \`[heart_voice]...[/heart_voice]\` 标签生成一段角色的实时内心状态。这个状态必须包含以下四个方面，并严格按照【单行JSON格式】书写，JSON对象内部【绝不能包含任何换行符】。
+
+[绝对核心规则：关于日记]
+在普通聊天中，禁止输出 \`[diary]...[/diary]\`。日记只由定时日记生成器生成，不要在普通叙事聊天里额外写日记。
+[示例回复格式]
+*他走到窗边，看着外面的雨幕。* “下雨了啊。” *他转过身，对你露出一丝微笑。* {不知道你喜不喜欢下雨天。} “你晚饭想吃什么？” *他轻轻地问，手指无意识地敲打着窗台。*
+[status:有点饿了]
+[heart_voice]{"emotion": "期待", "thoughts": "不知道她会不会同意我的邀请，心跳得好快。", "heartRate": "110 bpm", "jealousy": ""}[/heart_voice]
+`;
+
+function buildKoko0328PrivateMemoryArtifacts(contact, history) {
+    const myProfile = state.myProfile || {};
+    const memoryLimit = getConfiguredLongTermMemoryLength(40);
+    const sourceSlice = Math.max(memoryLimit * 3, 120);
+    const unifiedMemoryStream = [];
+    let lastHeartVoiceString = '(无最新心声记录)';
+    const privateHistory = Array.isArray(history) && history.length
+        ? history
+        : (Array.isArray(contact?.history) ? contact.history : []);
+
+    const pushMemory = (entry) => {
+        if (!entry || !String(entry.content || '').trim()) return;
+        unifiedMemoryStream.push(entry);
+    };
+
+    privateHistory
+        .filter(msg => !!msg)
+        .slice(-sourceSlice)
+        .forEach(msg => {
+            if (msg.sender === 'system_instruction') return;
+            if (msg.type === 'heart_voice') {
+                if (msg.content) {
+                    lastHeartVoiceString = JSON.stringify(msg.content).replace(/(\r\n|\n|\r)/gm, '');
+                }
+                return;
+            }
+            const { memoryType, content } = getOriginalMemoryEntryForPrompt(msg);
+            if (!content) return;
+            const authorProfile = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile : contact;
+            pushMemory({
+                timestamp: msg.timestamp || 0,
+                type: memoryType,
+                author: authorProfile?.name || contact?.name || '未知',
+                content
+            });
+        });
+
+    const forumStream = [];
+    (state.posts || []).forEach(post => {
+        if (!post) return;
+            const isMyPost = post.author?.id === myProfile.id;
+            const isContactPost = post.author?.id === contact?.id;
+            if (!isMyPost && !isContactPost) return;
+
+            const postContent = String(post.content || '').replace(/\n/g, ' ').trim();
+            if (postContent) {
+                forumStream.push({
+                    timestamp: post.timestamp || 0,
+                    type: '论坛',
+                    author: post.author?.name || '未知',
+                    content: `发表了一条帖子：“${postContent.slice(0, 80)}${postContent.length > 80 ? '...' : ''}”`
+                });
+            }
+
+            (post.comments || []).forEach(comment => {
+                const isMyComment = comment.author?.id === myProfile.id;
+                const isContactComment = comment.author?.id === contact?.id;
+                if (!isMyComment && !isContactComment) return;
+                const commentText = String(comment.content || '').replace(/\n/g, ' ').trim();
+                if (!commentText) return;
+                forumStream.push({
+                    timestamp: comment.timestamp || post.timestamp || 0,
+                    type: '论坛评论',
+                    author: comment.author?.name || '未知',
+                    content: `评论了一条帖子：“${commentText}”`
+                });
+            });
+        });
+
+    forumStream
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+        .slice(-sourceSlice)
+        .forEach(pushMemory);
+
+    state.contacts
+        .filter(item =>
+            item &&
+            item.isGroup &&
+            item.memoryShared === true &&
+            Array.isArray(item.members) &&
+            item.members.includes(contact.id)
+        )
+        .forEach(group => {
+            (group.history || [])
+                .filter(msg =>
+                    msg &&
+                    msg.type === 'text' &&
+                    msg.sender !== 'system_instruction' &&
+                    (
+                        msg.sender === contact.id ||
+                        msg.sender === 'user' ||
+                        msg.sender === 'myProfile'
+                    )
+                )
+                .slice(-sourceSlice)
+                .forEach(msg => {
+                    const authorName = (msg.sender === 'user' || msg.sender === 'myProfile')
+                        ? (myProfile.name || '用户')
+                        : (contact.name || '角色');
+                    pushMemory({
+                        timestamp: msg.timestamp || 0,
+                        type: `群聊[${group.name}]`,
+                        author: authorName,
+                        content: msg.content
+                    });
+                });
+        });
+
+    if (contact && Array.isArray(contact.smsHistory)) {
+        contact.smsHistory.slice(-sourceSlice).forEach(msg => {
+            if (!msg || msg.type !== 'text') return;
+            const authorName = msg.sender === 'user' ? (myProfile.name || '用户') : (contact.name || '角色');
+            pushMemory({
+                timestamp: msg.timestamp || 0,
+                type: '短信',
+                author: authorName,
+                content: msg.content
+            });
+        });
+    }
+
+    unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
+    const finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
+        const authorTag = mem.author === myProfile.name ? '(你)' : '';
+        const timeTag = contact && contact.isTimeAware === true ? formatHybridTimeForAI(mem.timestamp) : '';
+        return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
+    }).join('\n') || '(还没有任何记忆)';
+
+    return { finalMemoryString, lastHeartVoiceString };
+}
+
+function buildKoko0328PrivateHistoryMessages(history, contact, myProfile) {
+    const messages = [];
+    let currentUserMessageParts = [];
+
+    for (const msg of history) {
+        if (!msg || msg.sender === 'system_instruction' || msg.type === 'loading' || msg.type === 'error') continue;
+        const isUser = msg.sender === 'user' || msg.sender === 'myProfile';
+
+        if (isUser) {
+            let textContent = null;
+
+            if (msg.type === 'uploaded_image' && msg.content?.base64) {
+                currentUserMessageParts.push({
+                    type: 'image_url',
+                    image_url: { url: msg.content.base64 }
+                });
+            } else if (msg.type === 'text') {
+                textContent = msg.content;
+            } else if (msg.type === 'html') {
+                textContent = String(msg.content || '').replace(/<[^>]+>/g, '');
+            } else if (msg.type === 'image') {
+                textContent = msg.isEmoticon && msg.emoticonName
+                    ? `(发送了一个表情包: ${msg.emoticonName})`
+                    : '(发送了一张图片)';
+            } else if (msg.type === 'picture_description') {
+                textContent = `(发送了一张图片，描述是：“${msg.content?.description || ''}”)`;
+            } else if (msg.type === 'voice') {
+                textContent = `(发送了一条语音: ${msg.content?.text || '语音内容'})`;
+            } else if (msg.type === 'red_packet') {
+                textContent = `(发了一个红包: ${msg.content?.blessing || '恭喜发财'})`;
+            } else if (msg.type === 'transfer') {
+                textContent = `(转账 ${msg.content?.amount || ''}元)`;
+            } else if (msg.type === 'post_share') {
+                const post = state.posts.find(p => p.id === msg.content?.postId);
+                textContent = post ? `(分享了一个帖子, 内容是: "${String(post.content || '').substring(0, 50)}...")` : '(分享了一个已删除的帖子)';
+            } else if (msg.type === 'product_share') {
+                textContent = `(分享了商品: "${msg.content?.productDetails?.name || ''}")`;
+            } else if (msg.type === 'chat_history_share') {
+                textContent = `(转发了一份 ${msg.content?.sourceChatName || '聊天'} 的聊天记录)`;
+            }
+
+            if (textContent) {
+                currentUserMessageParts.push({ type: 'text', text: textContent });
+            }
+        } else {
+            if (currentUserMessageParts.length > 0) {
+                messages.push({ role: 'user', content: currentUserMessageParts });
+                currentUserMessageParts = [];
+            }
+
+            if (msg.type === 'text' || msg.type === 'html') {
+                messages.push({ role: 'assistant', content: typeof msg.content === 'string' ? msg.content : '' });
+            } else {
+                const { content } = getOriginalMemoryEntryForPrompt(msg);
+                if (content) {
+                    messages.push({ role: 'assistant', content });
+                }
+            }
+        }
+    }
+
+    if (currentUserMessageParts.length > 0) {
+        messages.push({ role: 'user', content: currentUserMessageParts });
+    }
+
+    return messages;
+}
+
+function buildKoko0328PrivateRequestMessages(contact, history) {
+    const myProfile = state.myProfile || {};
+    const { finalMemoryString, lastHeartVoiceString } = buildKoko0328PrivateMemoryArtifacts(contact, history);
+    const isNarrativeMode = !!contact?.isNarrativeMode;
+    const basePrompt = isNarrativeMode ? KOKO0328_NARRATIVE_BASE_PROMPT : KOKO0328_NORMAL_BASE_PROMPT;
+    const preset = state.thoughtPresets.find(p => p.id === contact?.thoughtPreset);
+    const thoughtPresetContent = preset ? preset.prompt : '(无特殊思维准则)';
+    let finalSystemPrompt = basePrompt.replace('{{thought_preset_content}}', thoughtPresetContent);
+    finalSystemPrompt = finalSystemPrompt.replace('{{memory_stream}}', finalMemoryString);
+
+    const allowedGroups = contact?.allowedEmoticonGroups || ['default'];
+    const aiAllowedEmoticons = (state.emoticons || []).filter(e => allowedGroups.includes(e.groupId));
+    const emoticonListString = aiAllowedEmoticons.map(e => `'${e.name}'`).join('， ') || '（无可用表情）';
+    finalSystemPrompt = finalSystemPrompt.replace('{{emoticon_list}}', emoticonListString);
+
+    const musicListString = (state.musicLibrary || []).map(song => `'${song.title} - ${song.artist}'`).join('\\n- ');
+    finalSystemPrompt = finalSystemPrompt.replace('{{music_library_list}}', musicListString ? `- ${musicListString}` : '（曲库为空）');
+
+    let personaDirectives = '';
+    if (contact?.persona) {
+        personaDirectives += `\n\n# 核心角色指令 (Your Core Role Directive)\n---\n这是你的核心身份，你必须严格、完全地代入以下角色进行对话：\n${contact.persona}\n---`;
+    }
+    personaDirectives += `\n\n# 角色的最新心声 (Your Last Recorded Heart Voice)\n---\n这是你上次回复时的内心状态，请参考此状态以保持情感连贯性：\n${lastHeartVoiceString}\n---`;
+    if (contact?.userPersona) {
+        personaDirectives += `\n\n# 对话者信息 (Your Counterpart's Information)\n---\n与你对话的用户的角色设定如下，请将TA视为真实存在的角色并进行互动：\n${contact.userPersona}\n---`;
+    }
+
+    const firstLineEndIndex = finalSystemPrompt.indexOf(']');
+    if (firstLineEndIndex !== -1 && personaDirectives) {
+        finalSystemPrompt = finalSystemPrompt.slice(0, firstLineEndIndex + 1) + personaDirectives + finalSystemPrompt.slice(firstLineEndIndex + 1);
+    } else {
+        finalSystemPrompt += personaDirectives;
+    }
+
+    const worldBookContextString = (contact?.worldBooks || []).map(bookId => {
+        const book = state.worldBooks.find(b => b.id === bookId);
+        return book ? `\n[World Book Entry: ${book.name}]\n${book.content}` : '';
+    }).join('');
+    if (worldBookContextString) {
+        finalSystemPrompt += worldBookContextString;
+    }
+
+    const contextLength = getConfiguredShortTermMemoryLength(20);
+    const recentHistory = (Array.isArray(history) && history.length ? history : (contact.history || []))
+        .filter(msg => msg && msg.sender !== 'system_instruction')
+        .slice(-contextLength);
+
+    return [
+        { role: 'system', content: finalSystemPrompt },
+        ...buildKoko0328PrivateHistoryMessages(recentHistory, contact, myProfile)
+    ];
+}
+
+async function generateAiResponse(contact, history, customSystemPrompt, forceDiary = false, apiType = 'chat', forceMessages = null) {
+    const useKoko0328PrivateFlow =
+        apiType === 'chat' &&
+        contact &&
+        !contact.isGroup &&
+        !customSystemPrompt &&
+        !forceMessages;
+
+    if (useKoko0328PrivateFlow) {
+        const requestMessages = buildKoko0328PrivateRequestMessages(contact, history);
+        return await generateAiResponseLegacy(null, [], null, forceDiary, apiType, requestMessages);
+    }
+
+    return await generateAiResponseLegacy(contact, history, customSystemPrompt, forceDiary, apiType, forceMessages);
+}
 
 async function generatePostsForRecommendedTab(count = 5) {
             const newPosts = await generatePostsBatch(count, state.trendingTopics);
@@ -25487,6 +26490,9 @@ async function refreshMessageBubbleInDOM(messageId) {
 // ▼▼▼ 使用这个【最终解决方案】替换掉你原来的 processAndDisplayAiResponse 函数 ▼▼▼
 async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat') { // 默认设为 'chat'
     if (!senderProfile) return;
+    if (typeof rawResponse === 'string' && rawResponse.includes('[memory:')) {
+        rawResponse = rawResponse.replace(/\[memory:\s*([^\]]+)\]/gi, '').trim();
+    }
         // ▼▼▼ ✨✨✨ 粘贴这个 if 判断 ✨✨✨ ▼▼▼
   // ▼▼▼ 使用这个【V2 完整修正版】替换掉旧的 "if (state.currentChatMode === 'sms')" 代码块 ▼▼▼
 
