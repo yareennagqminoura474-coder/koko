@@ -23562,182 +23562,207 @@ ${qzoneContextText}
                     });
                 } catch (_e) { /* 静默忽略，不影响主流程 */ }
 
-                // (普通私聊/群聊：统一走 Koko 原版多轮消息结构)
-                const messages = [];
-                const recentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, effectiveContextLength);
-
-                let currentUserMessageParts = [];
-                for (const msg of recentHistory) {
-                    const role = (msg.sender === 'user' || msg.sender === 'myProfile') ? 'user' : 'assistant';
-                    if (role === 'user') {
-                        let textContent = null;
-                        
-                        if (msg.isRecalled === true) {
-                            textContent = `(我撤回了一条消息，但撤回的原文是：“${msg.content}”)`;
-                            if (msg.type === 'voice') {
-                                textContent = `(我撤回了一条语音，但内容是：“${msg.content.text}”)`;
-                            } else if (msg.type === 'picture_description') {
-                                textContent = `(我撤回了一张图片，描述是：“${msg.content.description}”)`;
-                            } else if (msg.type === 'image' || msg.type === 'uploaded_image') {
-                                textContent = `(我撤回了一张图片)`;
-                            }
-                        } else { 
-                            switch (msg.type) {
-                                case 'uploaded_image':
-                                    currentUserMessageParts.push({ type: 'image_url', image_url: { url: msg.content.base64 } });
-                                    break;
-                                case 'text':
-                                case 'video_call_text':
-                                    textContent = msg.content;
-                                    if (msg.quote) {
-                                        const quoteText = `[用户回复“${msg.quote.senderName}”说的“${msg.quote.content.substring(0, 50)}...”] `;
-                                        textContent = quoteText + textContent;
-                                    }
-                                    break; 
-                                case 'html':
-                                    const tempDiv = document.createElement('div');
-                                    tempDiv.innerHTML = msg.content;
-                                    textContent = tempDiv.textContent || tempDiv.innerText || "";
-                                    break;
-                                case 'game_wheel':
-                                    const wheel = msg.content;
-                                    const userName = (msg.sender === 'user') ? state.myProfile.name : contact.name;
-                                    const contactName = (msg.sender === 'user') ? contact.name : state.myProfile.name;
-                                    const optionsText = wheel.options.map(opt => opt.text).join('，');
-                                    if (!wheel.results.user) { textContent = `[系统游戏状态更新：游戏“${wheel.name}”已创建。选项：【${optionsText}】。游戏尚未开始，等待玩家操作。]`; } 
-                                    else if (wheel.results.user && !wheel.results.contact) { textContent = `[系统游戏状态更新：在游戏“${wheel.name}”中，${userName} 的操作结果为“${wheel.results.user}”。指令：${contactName} 必须执行 spin_wheel 操作。]`; } 
-                                    else if (wheel.results.user && wheel.results.contact) { textContent = `[系统游戏状态更新：游戏“${wheel.name}”已结束。最终结果：${userName} -> “${wheel.results.user}”，${contactName} -> “${wheel.results.contact}”。]`; }
-                                    break;
-                                case 'image':
-                                    textContent = msg.isEmoticon && msg.emoticonName ? `[用户发送了表情包: ${msg.emoticonName}]` : '[用户发送了一张图片]';
-                                    break; 
-                                case 'picture_description':
-                                    textContent = `[picture:${msg.content.description}]`;
-                                    break;
-                                case 'voice':
-                                    textContent = `[voice:${msg.content.text}]`;
-                                    break;
-                                case 'red_packet':
-                                    textContent = `[red_packet:${msg.content.blessing}, ${msg.content.amount}]`;
-                                    break;
-                                case 'transfer':
-                                    textContent = `[transfer:${msg.content.amount}]`;
-                                    break;
-                                case 'music_share':
-                                    textContent = `(分享了一首音乐: 《${msg.content.title}》 - ${msg.content.artist})`;
-                                    break;
-                                case 'location_share':
-                                    textContent = `(发送了一个位置，地点是：“${msg.content.name}”)`;
-                                    break;
-                                case 'post_share':
-                                    const post = state.posts.find(p => p.id === msg.content.postId);
-                                    textContent = post ? `(分享了一个帖子, 内容是: "${post.content.substring(0, 50)}...")` : `(分享了一个已删除的帖子)`;
-                                    break;
-                                case 'product_share':
-                                    const shareData = msg.content; 
-                                    const product = shareData.productDetails;
-                                    const intentText = shareData.intent === 'gift' ? '这是送给你的礼物' : '想请你帮忙付一下款';
-                                    let details = `(分享了一个商品给你。意图是：“${intentText}”。\n[商品名]: ${product.name}\n[价格]: ${product.price}\n[描述]: ${product.description}`;
-                                    if (shareData.accompanyingMessage) {
-                                        details += `\n[附言]: "${shareData.accompanyingMessage}"`;
-                                    }
-                                    details += ')';
-                                    textContent = details;
-                                    break;
-                                                                                                   // ▼▼▼ 在这里粘贴全新的 case ▼▼▼
-   // ▼▼▼ 核心修复：让 AI 能读懂转发的聊天记录 ▼▼▼
-    case 'chat_history_share': {
-        const data = msg.content;
-        
-        // 辅助函数：把具体消息转成文字
-        const getPreviewText = (m) => {
-            switch(m.type) {
-                case 'text': return m.content;
-                case 'voice': return `[语音: ${m.content.text}]`;
-                case 'image': return `[图片]`;
-                case 'red_packet': return `[红包: ${m.content.blessing}]`;
-                case 'transfer': return `[转账: ${m.content.amount}]`;
-                default: return `[${m.type}]`;
-            }
-        };
-
-        // 拼接成 AI 易读的剧本格式
-        let historyText = `\n[系统通知：用户转发了一份名为《${data.sourceChatName}》的记录给你，内容如下]\n================\n`;
-        
-        data.messages.forEach(m => {
-            const senderName = data.participants[m.sender]?.name || '未知';
-            const contentPreview = getPreviewText(m);
-            historyText += `${senderName}: ${contentPreview}\n`;
-        });
-        
-        historyText += `================\n[系统指令：这是你（偷偷）查看用户手机看到的记录【并非用户发给你的】，请阅读以上记录，并根据你的人设发表看法/吐槽/吃瓜。]\n`;
-        textContent = historyText;
-        break;
-    }
-    // ▲▲▲ 修复结束 ▲▲▲
-                            }
-                        }
-                        if (textContent) {
-                            currentUserMessageParts.push({ type: 'text', text: textContent });
-                        }
-                    } else {
-                // This is the 'assistant' block. THIS IS OUR TARGET.
-                if (currentUserMessageParts.length > 0) {
-                    messages.push({ role: 'user', content: currentUserMessageParts });
-                    currentUserMessageParts = [];
-                }
-                if (msg.type === 'text' || msg.type === 'html') {
-                    
-                    // ▼▼▼ ✨✨✨ 叙事模式记忆隔离（更优解） ✨✨✨ ▼▼▼
-                    
-                    let contentForShortTerm = msg.content;
-                    
-                    // 1. 检查我们当前是否处于【普通模式】
-                    if (contact && contact.isNarrativeMode === false) {
-                        
-                        // 2. 如果是，就用正则表达式“擦除”所有叙事标记
-                        //    只保留最纯粹的对话内容
-                        contentForShortTerm = contentForShortTerm
-                            .replace(/\{(.*?)\}/g, '')  // 移除 {心理}
-                            .replace(/\*(.*?)\*/g, '')  // 移除 *动作*
-                            .replace(/“/g, '')         // 移除中文引号（只留内容）
-                            .replace(/”/g, '')
-                            .replace(/\n/g, ' ')       // 把换行符变空格
-                            .trim();                   // 清理首尾空格
-                    }
-                    
-                    // 3. 只有在清理后内容不为空时，才把它加入短期记忆
-                    if (contentForShortTerm) {
-                        messages.push({ role: 'assistant', content: contentForShortTerm });
-                    }
-                    
-                    // ▲▲▲ ✨✨✨ 修复结束 ✨✨✨ ▲▲▲
-                }
-            }
-                }
-                if (currentUserMessageParts.length > 0) {
-                    messages.push({ role: 'user', content: currentUserMessageParts });
-                }
-
-                // 关键修复：latest user input 被 recentHistory 排除了，必须作为最后一条 user message 重新加入
-                try {
-                    const latestParts = buildPromptPartsFromLatestUserMessage(_lastUserMsg, contact);
-                    if (latestParts && latestParts.length) {
-                        messages.push({ role: 'user', content: latestParts });
-                    } else if (_latestInputText && String(_latestInputText).trim()) {
-                        messages.push({ role: 'user', content: [{ type: 'text', text: String(_latestInputText).trim() }] });
-                    }
-                    console.log('[AI Prompt] 已追加当前用户最新输入', {
-                        latestUserMessageId: _latestUserMsgId,
-                        hasLatestParts: !!(latestParts && latestParts.length),
-                        isNarrativeMode: !!isNarrativeMode
+                if (contact && !contact.isGroup && isNarrativeMode) {
+                    const privateSystemContent = buildCleanPrivateSystemContent({
+                        contact,
+                        myProfile,
+                        thoughtPresetContent,
+                        worldBookContextString,
+                        snoopedDataContextString,
+                        relationshipContextString,
+                        emoticonListString,
+                        musicListString,
+                        isNarrativeMode
                     });
-                } catch (_e) {
-                    console.warn('[AI Prompt] 追加当前用户最新输入失败:', _e);
-                }
 
-                // (你原来的 requestMessages 赋值)
-                requestMessages = [{ role: 'system', content: systemContent }, ...messages];
+                    let privateUserTask = '';
+                    const _privateMems = formatPrivateMemoryForPrompt(contact, { maxItems: 5 });
+                    if (_privateMems && _privateMems !== '（暂无长期记忆）') {
+                        privateUserTask += `【长期记忆摘要，仅供关系背景，不是本轮话题】\n${_privateMems}\n\n`;
+                    }
+
+                    const privateRecentContextDigest = buildPrivateRecentContextDigest(contact, _latestUserMsgId, 30);
+                    if (privateRecentContextDigest) {
+                        privateUserTask += `【私聊最近连续上下文｜最高优先级】\n${privateRecentContextDigest}\n\n`;
+                    }
+
+                    privateUserTask += `【当前用户最新输入】\n${_latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{“events”:[{“type”:”action”,”content”:”...”},{“type”:”speech”,”characterId”:”${contact.id || ''}”,”characterName”:”${contact.name || '角色'}”,”content”:”...”}],”heart_voice”:{“emotion”:”...”,”thoughts”:”...”,”heartRate”:”...”,”jealousy”:”无”},”diary”:”...”}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把”嗯、哦、啧”之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
+
+                    if (dynamicInstructions) {
+                        privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
+                    }
+
+                    requestMessages = [
+                        { role: 'system', content: privateSystemContent },
+                        { role: 'user', content: privateUserTask }
+                    ];
+                } else {
+                    const messages = [];
+                    const recentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, effectiveContextLength);
+
+                    let currentUserMessageParts = [];
+                    for (const msg of recentHistory) {
+                        const role = (msg.sender === 'user' || msg.sender === 'myProfile') ? 'user' : 'assistant';
+                        if (role === 'user') {
+                            let textContent = null;
+
+                            if (msg.isRecalled === true) {
+                                textContent = `(我撤回了一条消息，但撤回的原文是：“${msg.content}”)`;
+                                if (msg.type === 'voice') {
+                                    textContent = `(我撤回了一条语音，但内容是：“${msg.content.text}”)`;
+                                } else if (msg.type === 'picture_description') {
+                                    textContent = `(我撤回了一张图片，描述是：“${msg.content.description}”)`;
+                                } else if (msg.type === 'image' || msg.type === 'uploaded_image') {
+                                    textContent = `(我撤回了一张图片)`;
+                                }
+                            } else {
+                                switch (msg.type) {
+                                    case 'uploaded_image':
+                                        currentUserMessageParts.push({ type: 'image_url', image_url: { url: msg.content.base64 } });
+                                        break;
+                                    case 'text':
+                                    case 'video_call_text':
+                                        textContent = msg.content;
+                                        if (msg.quote) {
+                                            const quoteText = `[用户回复“${msg.quote.senderName}”说的“${msg.quote.content.substring(0, 50)}...”] `;
+                                            textContent = quoteText + textContent;
+                                        }
+                                        break;
+                                    case 'html': {
+                                        const tempDiv = document.createElement('div');
+                                        tempDiv.innerHTML = msg.content;
+                                        textContent = tempDiv.textContent || tempDiv.innerText || "";
+                                        break;
+                                    }
+                                    case 'game_wheel': {
+                                        const wheel = msg.content;
+                                        const userName = (msg.sender === 'user') ? state.myProfile.name : contact.name;
+                                        const contactName = (msg.sender === 'user') ? contact.name : state.myProfile.name;
+                                        const optionsText = wheel.options.map(opt => opt.text).join('，');
+                                        if (!wheel.results.user) {
+                                            textContent = `[系统游戏状态更新：游戏“${wheel.name}”已创建。选项：【${optionsText}】。游戏尚未开始，等待玩家操作。]`;
+                                        } else if (wheel.results.user && !wheel.results.contact) {
+                                            textContent = `[系统游戏状态更新：在游戏“${wheel.name}”中，${userName} 的操作结果为“${wheel.results.user}”。指令：${contactName} 必须执行 spin_wheel 操作。]`;
+                                        } else if (wheel.results.user && wheel.results.contact) {
+                                            textContent = `[系统游戏状态更新：游戏“${wheel.name}”已结束。最终结果：${userName} -> “${wheel.results.user}”，${contactName} -> “${wheel.results.contact}”。]`;
+                                        }
+                                        break;
+                                    }
+                                    case 'image':
+                                        textContent = msg.isEmoticon && msg.emoticonName ? `[用户发送了表情包: ${msg.emoticonName}]` : '[用户发送了一张图片]';
+                                        break;
+                                    case 'picture_description':
+                                        textContent = `[picture:${msg.content.description}]`;
+                                        break;
+                                    case 'voice':
+                                        textContent = `[voice:${msg.content.text}]`;
+                                        break;
+                                    case 'red_packet':
+                                        textContent = `[red_packet:${msg.content.blessing}, ${msg.content.amount}]`;
+                                        break;
+                                    case 'transfer':
+                                        textContent = `[transfer:${msg.content.amount}]`;
+                                        break;
+                                    case 'music_share':
+                                        textContent = `(分享了一首音乐: 《${msg.content.title}》 - ${msg.content.artist})`;
+                                        break;
+                                    case 'location_share':
+                                        textContent = `(发送了一个位置，地点是：“${msg.content.name}”)`;
+                                        break;
+                                    case 'post_share': {
+                                        const post = state.posts.find(p => p.id === msg.content.postId);
+                                        textContent = post ? `(分享了一个帖子, 内容是: "${post.content.substring(0, 50)}...")` : `(分享了一个已删除的帖子)`;
+                                        break;
+                                    }
+                                    case 'product_share': {
+                                        const shareData = msg.content;
+                                        const product = shareData.productDetails;
+                                        const intentText = shareData.intent === 'gift' ? '这是送给你的礼物' : '想请你帮忙付一下款';
+                                        let details = `(分享了一个商品给你。意图是：“${intentText}”。\n[商品名]: ${product.name}\n[价格]: ${product.price}\n[描述]: ${product.description}`;
+                                        if (shareData.accompanyingMessage) {
+                                            details += `\n[附言]: "${shareData.accompanyingMessage}"`;
+                                        }
+                                        details += ')';
+                                        textContent = details;
+                                        break;
+                                    }
+                                    case 'chat_history_share': {
+                                        const data = msg.content;
+                                        const getPreviewText = (m) => {
+                                            switch (m.type) {
+                                                case 'text': return m.content;
+                                                case 'voice': return `[语音: ${m.content.text}]`;
+                                                case 'image': return `[图片]`;
+                                                case 'red_packet': return `[红包: ${m.content.blessing}]`;
+                                                case 'transfer': return `[转账: ${m.content.amount}]`;
+                                                default: return `[${m.type}]`;
+                                            }
+                                        };
+
+                                        let historyText = `\n[系统通知：用户转发了一份名为《${data.sourceChatName}》的记录给你，内容如下]\n================\n`;
+                                        data.messages.forEach(m => {
+                                            const senderName = data.participants[m.sender]?.name || '未知';
+                                            const contentPreview = getPreviewText(m);
+                                            historyText += `${senderName}: ${contentPreview}\n`;
+                                        });
+                                        historyText += `================\n[系统指令：这是你（偷偷）查看用户手机看到的记录【并非用户发给你的】，请阅读以上记录，并根据你的人设发表看法/吐槽/吃瓜。]\n`;
+                                        textContent = historyText;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (textContent) {
+                                currentUserMessageParts.push({ type: 'text', text: textContent });
+                            }
+                        } else {
+                            if (currentUserMessageParts.length > 0) {
+                                messages.push({ role: 'user', content: currentUserMessageParts });
+                                currentUserMessageParts = [];
+                            }
+                            if (msg.type === 'text' || msg.type === 'html') {
+                                let contentForShortTerm = msg.content;
+
+                                if (contact && contact.isNarrativeMode === false) {
+                                    contentForShortTerm = contentForShortTerm
+                                        .replace(/\{(.*?)\}/g, '')
+                                        .replace(/\*(.*?)\*/g, '')
+                                        .replace(/“/g, '')
+                                        .replace(/”/g, '')
+                                        .replace(/\n/g, ' ')
+                                        .trim();
+                                }
+
+                                if (contentForShortTerm) {
+                                    messages.push({ role: 'assistant', content: contentForShortTerm });
+                                }
+                            }
+                        }
+                    }
+
+                    if (currentUserMessageParts.length > 0) {
+                        messages.push({ role: 'user', content: currentUserMessageParts });
+                    }
+
+                    try {
+                        const latestParts = buildPromptPartsFromLatestUserMessage(_lastUserMsg, contact);
+                        if (latestParts && latestParts.length) {
+                            messages.push({ role: 'user', content: latestParts });
+                        } else if (_latestInputText && String(_latestInputText).trim()) {
+                            messages.push({ role: 'user', content: [{ type: 'text', text: String(_latestInputText).trim() }] });
+                        }
+                        console.log('[AI Prompt] 已追加当前用户最新输入', {
+                            latestUserMessageId: _latestUserMsgId,
+                            hasLatestParts: !!(latestParts && latestParts.length),
+                            isNarrativeMode: !!isNarrativeMode
+                        });
+                    } catch (_e) {
+                        console.warn('[AI Prompt] 追加当前用户最新输入失败:', _e);
+                    }
+
+                    requestMessages = [{ role: 'system', content: systemContent }, ...messages];
+                }
+            }
 
             requestMessages = normalizeSystemMessagesWithForbiddenRoleWords(requestMessages);
             // ▲▲▲ 'else' 逻辑结束 ▲▲▲
