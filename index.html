@@ -19424,51 +19424,13 @@ MESSAGE_END
         let messageMatches = Array.from(rawResponse.matchAll(messageRegex));
         let { speechCount, actionCount } = getGroupMessageTypeStats(messageMatches);
 
-        if (messageMatches.length > 0 && speechCount === 0) {
-            console.warn('[群聊自由聊天脚本比例异常：全是动作，准备重试]', {
-                groupName: group.name,
-                actionCount,
-                rawPreview: rawResponse.slice(0, 1000)
-            });
-
-            const retryMessages = [
-                ...requestMessages,
-                {
-                    role: 'user',
-                    content: '你上一次输出没有有效角色台词，格式或内容不适合群聊。请重新输出 MESSAGE 脚本：必须让角色自然说话，不能全是动作，不能控制用户，不要写解释，不要限制条数，按当前剧情自然推进。'
-                }
-            ];
-
-            rawResponse = await generateAiResponse(
-                null,
-                [],
-                null,
-                false,
-                'chat',
-                retryMessages
-            );
-
-            messageMatches = Array.from(rawResponse.matchAll(messageRegex));
-            ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
-        }
-
-        // 临时关闭自动续写，避免续写请求失败导致自由聊天整体失败
-        console.log('[群聊自由聊天最终回复规模｜未启用续写]', {
+        console.log('[群聊自由聊天最终回复规模｜单次API]', {
             groupName: group.name,
             stats: getGroupReplyThinnessStats(messageMatches)
         });
 
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的自由聊天内容。");
-        }
-
-        const shouldForceSpeechFallback = messageMatches.length > 0 && speechCount === 0;
-        if (shouldForceSpeechFallback) {
-            console.warn('[群聊自由聊天重试后仍无台词，启用兜底]', {
-                groupName: group.name,
-                actionCount,
-                rawPreview: rawResponse.slice(0, 1000)
-            });
         }
 
         let lastRenderedType = '';
@@ -19557,20 +19519,6 @@ MESSAGE_END
                     lastRenderedType = 'speech';
                 }
             }
-        }
-
-        if (shouldForceSpeechFallback && renderedSpeechCount === 0) {
-            const fallbackSpeaker = allMemberProfiles.find(p => p && !(group.mutedMembers || []).includes(p.id)) || allMemberProfiles[0];
-            await createAndAddMessage(
-                {
-                    type: 'text',
-                    content: '我先说一句，别光看动作了，这事我们得当面讲清楚。'
-                },
-                fallbackSpeaker?.id || 'system',
-                group,
-                true,
-                'chat'
-            );
         }
 
         await autoSaveGroupRecentMemoryForMembers(group, 12);
@@ -19850,51 +19798,13 @@ MESSAGE_END
 
         let { speechCount, actionCount } = getGroupMessageTypeStats(messageMatches);
 
-        if (messageMatches.length > 0 && speechCount === 0) {
-            console.warn('[群聊脚本比例异常：全是动作，准备重试]', {
-                groupName: group.name,
-                actionCount,
-                rawPreview: rawResponse.slice(0, 1000)
-            });
-
-            const retryMessages = [
-                ...finalRequestMessages,
-                {
-                    role: 'user',
-                    content: '你上一次输出没有有效角色台词，格式或内容不适合群聊。请重新输出 MESSAGE 脚本：必须让角色自然说话，不能全是动作，不能控制用户，不要写解释，不要限制条数，按当前剧情自然推进。'
-                }
-            ];
-
-            rawResponse = await generateAiResponse(
-                null,
-                [],
-                null,
-                false,
-                'chat',
-                retryMessages
-            );
-
-            messageMatches = Array.from(rawResponse.matchAll(messageRegex));
-            ({ speechCount, actionCount } = getGroupMessageTypeStats(messageMatches));
-        }
-
-        // 临时关闭自动续写，避免续写请求失败导致整轮 API 调用失败
-        console.log('[群聊最终回复规模｜未启用续写]', {
+        console.log('[群聊最终回复规模｜单次API]', {
             groupName: group.name,
             stats: getGroupReplyThinnessStats(messageMatches)
         });
 
         if (messageMatches.length === 0) {
             throw new Error("AI未能生成有效的群聊脚本。");
-        }
-
-        const shouldForceSpeechFallback = messageMatches.length > 0 && speechCount === 0;
-        if (shouldForceSpeechFallback) {
-            console.warn('[群聊脚本重试后仍无台词，启用兜底]', {
-                groupName: group.name,
-                actionCount,
-                rawPreview: rawResponse.slice(0, 1000)
-            });
         }
 
         let lastRenderedType = '';
@@ -19985,20 +19895,6 @@ MESSAGE_END
                     lastRenderedType = 'speech';
                 }
             }
-        }
-
-        if (shouldForceSpeechFallback && renderedSpeechCount === 0) {
-            const fallbackSpeaker = allMemberProfiles.find(p => p && !(group.mutedMembers || []).includes(p.id)) || allMemberProfiles[0];
-            await createAndAddMessage(
-                {
-                    type: 'text',
-                    content: '我先说一句，别光看动作了，这事我们得当面讲清楚。'
-                },
-                fallbackSpeaker?.id || 'system',
-                group,
-                true,
-                'chat'
-            );
         }
 
         await autoSaveGroupRecentMemoryForMembers(group, 12);
@@ -20457,6 +20353,145 @@ function buildUnifiedGroupMemoryString(group, getProfileInGroup, myProfile, link
     return unifiedMemoryStream.slice(-memoryLimit).map(mem => {
         const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
         const timeTag = group && group.isTimeAware === true ? formatHybridTimeForAI(mem.timestamp) : '';
+        return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
+    }).join('\n') || "(还没有任何记忆)";
+}
+
+function buildUnifiedPrivateMemoryString(contact, myProfile, options = {}) {
+    if (!contact || contact.isGroup) return "(还没有任何记忆)";
+
+    const memoryLimit = getConfiguredLongTermMemoryLength(options.longTermMemoryLength || 40);
+    const includeExpandedGroupContext = !!options.includeExpandedGroupContext;
+    const unifiedMemoryStream = [];
+    const blockedTypes = ['system_notification', 'loading', 'error', 'heart_voice'];
+
+    const pushMemory = (item) => {
+        if (!item || !item.content) return;
+        unifiedMemoryStream.push(item);
+    };
+
+    const privateHistory = Array.isArray(contact.history) ? contact.history : [];
+    privateHistory.forEach(msg => {
+        if (!msg || msg.sender === 'system_instruction') return;
+        if (blockedTypes.includes(msg.type)) return;
+
+        const content = formatMessageForUnifiedMemory(msg, contact);
+        if (!content) return;
+
+        const authorName = (msg.sender === 'user' || msg.sender === 'myProfile')
+            ? (myProfile?.name || '我')
+            : (contact.name || '角色');
+
+        pushMemory({
+            timestamp: msg.timestamp || 0,
+            type: `私聊[${contact.name}]`,
+            author: authorName,
+            content
+        });
+    });
+
+    if (Array.isArray(contact.groupRelatedMemories)) {
+        contact.groupRelatedMemories.slice(-Math.min(memoryLimit, 20)).forEach(item => {
+            const content = String(item?.content || '').trim();
+            if (!content) return;
+
+            pushMemory({
+                timestamp: item.timestamp || 0,
+                type: `群聊记忆[${item.groupName || '群聊'}]`,
+                author: '系统事件',
+                content
+            });
+        });
+    }
+
+    const groups = (state.contacts || []).filter(c => c && c.isGroup && c.memoryShared !== false);
+    const groupHistoryLimit = includeExpandedGroupContext ? memoryLimit : Math.min(memoryLimit, 12);
+
+    groups.forEach(group => {
+        const isMember = Array.isArray(group.members) && group.members.includes(contact.id);
+        const isNpcMember = Array.isArray(group.npcMembers) && group.npcMembers.some(npc => npc && npc.id === contact.id);
+        if (!isMember && !isNpcMember) return;
+
+        if (Array.isArray(group.crossSceneMemories)) {
+            group.crossSceneMemories
+                .filter(item => {
+                    if (!item) return false;
+                    if (Array.isArray(item.relatedContactIds) && item.relatedContactIds.length > 0) {
+                        return item.relatedContactIds.includes(contact.id);
+                    }
+                    return contact.name && String(item.content || '').includes(contact.name);
+                })
+                .slice(-Math.min(groupHistoryLimit, 10))
+                .forEach(item => {
+                    const content = String(item.content || '').trim();
+                    if (!content) return;
+
+                    pushMemory({
+                        timestamp: item.timestamp || 0,
+                        type: `群聊记忆[${group.name || '群聊'}]`,
+                        author: '系统事件',
+                        content
+                    });
+                });
+        }
+
+        const relevantMessages = (Array.isArray(group.history) ? group.history : [])
+            .filter(msg => {
+                if (!msg || msg.sender === 'system_instruction') return false;
+                if (blockedTypes.includes(msg.type)) return false;
+
+                if (msg.sender === 'user' || msg.sender === 'myProfile') return true;
+                if (msg.sender === contact.id || msg.characterId === contact.id) return true;
+                if (contact.name && msg.characterName === contact.name) return true;
+
+                const content = String(formatMessageForUnifiedMemory(msg, contact) || '').trim();
+                return !!(contact.name && content.includes(contact.name));
+            })
+            .slice(-groupHistoryLimit);
+
+        relevantMessages.forEach(msg => {
+            const content = formatMessageForUnifiedMemory(msg, contact);
+            if (!content) return;
+
+            const authorName = (msg.sender === 'user' || msg.sender === 'myProfile')
+                ? (myProfile?.name || '我')
+                : (msg.characterName || getDisplayNameById(msg.characterId || msg.sender));
+
+            pushMemory({
+                timestamp: msg.timestamp || 0,
+                type: `群聊[${group.name || '群聊'}]`,
+                author: authorName,
+                content
+            });
+        });
+    });
+
+    if (Array.isArray(contact.smsHistory)) {
+        contact.smsHistory.slice(-Math.min(memoryLimit, 20)).forEach(msg => {
+            if (!msg || msg.sender === 'system_instruction') return;
+            if (msg.type !== 'text') return;
+
+            const content = String(msg.content || '').trim();
+            if (!content) return;
+
+            const authorName = msg.sender === 'user'
+                ? (myProfile?.name || '我')
+                : (contact.name || '角色');
+
+            pushMemory({
+                timestamp: msg.timestamp || 0,
+                type: '短信',
+                author: authorName,
+                content
+            });
+        });
+    }
+
+    unifiedMemoryStream.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+    return unifiedMemoryStream.slice(-memoryLimit).map(mem => {
+        const authorTag = (mem.author === myProfile?.name) ? "(你)" : "";
+        const timeTag = contact && contact.isTimeAware === true ? formatHybridTimeForAI(mem.timestamp) : '';
         return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
     }).join('\n') || "(还没有任何记忆)";
 }
@@ -21547,190 +21582,6 @@ function getGroupReplyThinnessStats(messageMatches) {
         actionCount,
         totalTextLen
     };
-}
-
-function isGroupReplyTooThin(messageMatches, mode = 'user') {
-    const stats = getGroupReplyThinnessStats(messageMatches);
-
-    if (stats.messageCount <= 6) return true;
-    if (stats.totalTextLen < 260) return true;
-    if (stats.speechCount <= 4) return true;
-
-    if (mode === 'group' && stats.messageCount <= 10 && stats.speakerCount <= 1) return true;
-
-    return false;
-}
-
-async function continueGroupReplyIfThin({
-    rawResponse,
-    messageMatches,
-    requestMessages,
-    group,
-    mode = 'group',
-    maxContinueRounds = 2
-}) {
-    let combinedRaw = String(rawResponse || '');
-    let combinedMatches = Array.isArray(messageMatches) ? [...messageMatches] : [];
-
-    for (let i = 0; i < maxContinueRounds; i++) {
-        if (!isGroupReplyTooThin(combinedMatches, mode)) break;
-
-        console.warn('[群聊回复太薄，自动续写]', {
-            groupName: group?.name,
-            round: i + 1,
-            stats: getGroupReplyThinnessStats(combinedMatches)
-        });
-
-        const continuePrompt = `
-你刚才的群聊回复太短、太像总结，没有展开出 koko 原版那种真实群聊的来回感。
-请在不重复前文的基础上，继续刚才这一轮群聊。
-
-要求：
-1. 继续输出 MESSAGE 脚本。
-2. 不要重新开始，不要总结，不要解释。
-3. 直接接着上一条 MESSAGE 往后推进。
-4. 让角色之间继续接话、插话、补充、打断、试探、反驳或递台阶。
-5. 可以连续输出很多个 MESSAGE 块。
-6. 不要限制回复条数。
-7. 不要控制用户。
-8. 不要输出 markdown，不要输出 JSON。
-
-继续使用格式：
-MESSAGE_START
-SPEAKER: [角色名]
-CONTENT: [该角色说的单条消息内容，可以包含特殊指令]
-MESSAGE_END
-`;
-
-        const continuationMessages = [
-            ...requestMessages,
-            {
-                role: 'assistant',
-                content: combinedRaw
-            },
-            {
-                role: 'user',
-                content: continuePrompt
-            }
-        ];
-
-        let moreRaw = '';
-        try {
-            moreRaw = await generateAiResponse(
-                null,
-                [],
-                null,
-                false,
-                'chat',
-                continuationMessages
-            );
-        } catch (err) {
-            console.warn('[群聊自动续写失败，保留原回复]', err);
-            break;
-        }
-
-        if (!moreRaw || String(moreRaw).includes('API调用失败') || String(moreRaw).includes('错误：')) {
-            console.warn('[群聊自动续写返回异常，保留原回复]', {
-                preview: String(moreRaw || '').slice(0, 500)
-            });
-            break;
-        }
-
-        const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*(?:TYPE:\s*(speech|action)\s*)?CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
-        const moreMatches = Array.from(String(moreRaw || '').matchAll(messageRegex));
-
-        if (!moreMatches.length) break;
-
-        combinedRaw += '\n' + moreRaw;
-        combinedMatches.push(...moreMatches);
-    }
-
-    return {
-        rawResponse: combinedRaw,
-        messageMatches: combinedMatches
-    };
-}
-
-function isPrivateReplyTooThin(rawText) {
-    const s = String(rawText || '')
-        .replace(/\[[^\]]+\]/g, '')
-        .replace(/<[^>]+>/g, '')
-        .replace(/\s+/g, '');
-
-    if (!s) return true;
-
-    const lineCount = String(rawText || '')
-        .split(/\n+/)
-        .map(x => x.trim())
-        .filter(Boolean)
-        .length;
-
-    if (s.length < 120) return true;
-    if (lineCount <= 2 && s.length < 220) return true;
-
-    return false;
-}
-
-async function continuePrivateReplyIfThin({
-    rawResponse,
-    requestMessages,
-    contact,
-    maxContinueRounds = 1
-}) {
-    let combinedRaw = String(rawResponse || '');
-
-    for (let i = 0; i < maxContinueRounds; i++) {
-        if (!isPrivateReplyTooThin(combinedRaw)) break;
-
-        console.warn('[私聊回复太薄，自动续写]', {
-            contactName: contact?.name,
-            round: i + 1,
-            preview: combinedRaw.slice(0, 300)
-        });
-
-        const continuePrompt = `
-你刚才的私聊回复太短、太像一句总结，没有达到真实联系人连续发消息的感觉。
-请在不重复前文的基础上，继续以当前角色身份补充几条自然私聊消息。
-
-要求：
-1. 不要解释，不要总结。
-2. 直接接着刚才的语气继续说。
-3. 可以追问、补充、嘴硬、岔开、试探、表达情绪。
-4. 不要限制回复条数。
-5. 不要像 AI 助手。
-`;
-
-        let moreRaw = '';
-        try {
-            moreRaw = await generateAiResponse(
-                null,
-                [],
-                null,
-                false,
-                'chat',
-                [
-                    ...requestMessages,
-                    { role: 'assistant', content: combinedRaw },
-                    { role: 'user', content: continuePrompt }
-                ]
-            );
-        } catch (err) {
-            console.warn('[私聊自动续写失败，保留原回复]', err);
-            return combinedRaw;
-        }
-
-        if (!moreRaw || String(moreRaw).includes('API调用失败') || String(moreRaw).includes('错误：')) {
-            console.warn('[私聊自动续写返回异常，保留原回复]', {
-                preview: String(moreRaw || '').slice(0, 500)
-            });
-            return combinedRaw;
-        }
-
-        if (!String(moreRaw).trim()) break;
-        combinedRaw += '\n' + String(moreRaw).trim();
-    }
-
-    return combinedRaw;
 }
 
 async function saveGroupCrossSceneMemory(group, content, relatedContactIds = []) {
@@ -23118,7 +22969,16 @@ ${qzoneContextText}
                         });
                     } else {
                         const userMaskPersona = contact.userPersona || myProfile.signature || '(无)';
-                        const longTermMemorySummary = formatPrivateMemoryForPrompt(contact, { maxItems: 8 });
+                        const longTermMemorySummary = '';
+                        finalMemoryString = buildUnifiedPrivateMemoryString(contact, myProfile, {
+                            longTermMemoryLength: longTermMemoryLength || state.userSettings?.longTermMemoryLength || 40,
+                            includeExpandedGroupContext: shouldUseGroupContextInPrivateChat(
+                                _latestInputText || '',
+                                contact,
+                                recentGroupChatDigest,
+                                relatedGroupMemoryDigest
+                            )
+                        });
                         privateSystemContent = `
 [SYSTEM] 你是一个顶级的角色扮演 AI。你的任务是完全代入角色，与用户进行自然、真实、有连续性的私聊。
 
@@ -23189,6 +23049,59 @@ ${emoticonListString}
 [曲库]
 ${musicListString}
 `.trim();
+
+                        privateSystemContent = `
+[SYSTEM] 你是一个顶级的角色扮演 AI。你的任务是完全代入角色，与用户进行自然、真实、有连续性的私聊。
+
+[当前角色档案]
+- 角色名：${contact.name}
+- 核心人设：
+${contact.persona || '(无)'}
+
+[用户信息]
+- 用户昵称：${myProfile.name}
+- 用户人设：
+${userMaskPersona}
+
+[世界书]
+---
+${worldBookContextString || '(无)'}
+---
+
+[统一时序记忆流]
+下面是你和用户最近发生过的对话、互动和重要上下文。你要自然接住这些内容，而不是像第一次聊天。
+---
+${finalMemoryString || '(暂无记忆)'}
+---
+
+[最近心声]
+${lastHeartVoiceString || '(无最新心声记录)'}
+
+[特殊指令]
+你可以使用：
+[sticker:表情名]
+[voice:语音内容]
+[picture:图片描述]
+[red_packet:祝福语, 金额, 个数]
+[transfer:金额]
+[music:歌曲名]
+
+[回复风格]
+1. 你必须严格扮演当前角色。
+2. 回复要像真实联系人，不要像 AI 助手、客服、总结机器。
+3. 可以一次回复多条消息，不要限制条数。
+4. 不要机械复述记忆流，不要解释设定。
+5. 可以主动推进话题、关系、情绪或剧情。
+6. 可以短句、补充、停顿、追问、岔开、嘴硬、试探。
+7. 不要替用户发言，不要控制用户。
+8. 不要使用“小管家”“小管家婆”“小助手”“AI助手”“机器人”等词。
+
+[可用表情]
+${emoticonListString}
+
+[曲库]
+${musicListString}
+`.trim();
                     }
 
                     // === 构建 userTask ===
@@ -23223,12 +23136,10 @@ ${recentGroupChatDigest || relatedGroupMemoryDigest || '暂无相关群聊近况
 
                     let privateUserTask = '';
 
-                    // 群聊上下文：仅触发时追加到 userTask，不放进 system
-                    if (groupMemorySection) {
-                        privateUserTask += `${groupMemorySection}\n\n`;
-                    }
-
                     if (isNarrativeMode) {
+                        if (groupMemorySection) {
+                            privateUserTask += `${groupMemorySection}\n\n`;
+                        }
                         // 线下/叙事 JSON 模式：保持既有 userTask 强约束
                         const _privateMems = formatPrivateMemoryForPrompt(contact, { maxItems: 5 });
                         if (_privateMems && _privateMems !== '（暂无长期记忆）') {
@@ -23239,29 +23150,11 @@ ${recentGroupChatDigest || relatedGroupMemoryDigest || '暂无相关群聊近况
                         }
                         privateUserTask += `【当前用户最新输入】\n${latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{“events”:[{“type”:”action”,”content”:”...”},{“type”:”speech”,”characterId”:”${contact.id || ''}”,”characterName”:”${contact.name || '角色'}”,”content”:”...”}],”heart_voice”:{“emotion”:”...”,”thoughts”:”...”,”heartRate”:”...”,”jealousy”:”无”},”diary”:”...”}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把”嗯、哦、啧”之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
                     } else {
-                        if (relatedGroupMemoryDigest && relatedGroupMemoryDigest !== '(暂无相关群聊记忆)') {
-                            privateUserTask += `【相关群聊背景｜低优先级，仅供理解关系和近期事件】\n${relatedGroupMemoryDigest}\n\n`;
-                            privateUserTask += `【相关群聊背景使用规则】\n`;
-                            privateUserTask += `1. 这里是你和该角色共同参与过的群聊近况，用来帮助理解人物关系和近期事件。\n`;
-                            privateUserTask += `2. 如果当前用户最新输入明显是新话题，不要主动把回复绕回群聊。\n`;
-                            privateUserTask += `3. 如果当前用户最新输入里出现“刚才/刚刚/那件事/他/她/他们/你怎么看/怎么办/为什么”等承接表达，可以结合这里理解。\n`;
-                            privateUserTask += `4. 不要机械复述整段群聊记录，要自然接住。\n`;
-                            privateUserTask += `5. 群聊背景不是私聊里刚刚发生的事，不要说得像私聊现场。\n\n`;
-                        }
-                        privateUserTask += `
+                        privateUserTask = `
 [当前用户最新输入]
 ${latestInputText || '(用户发送了非文字内容)'}
 
-[任务]
-请以 ${contact.name} 的身份，自然回应用户当前输入。
-你需要结合角色人设、统一时序记忆流、世界书、最近心声和必要的群聊背景来接话。
-如果用户是在承接刚才群聊或刚才事件，就自然结合相关背景；如果用户明显开新话题，就不要强行绕回群聊。
-回复要像真实私聊，不要像总结，不要像客服，不要像 AI 助手。
-不要限制回复条数。
-不要把回复压成一句。
-可以像真实联系人一样连续发很多条消息：先反应、再补充、再追问、再转移话题、再表达情绪。
-如果角色当下情绪或关系需要多条气泡，就自然输出多条。
-重点是活人感、关系感和推进感。
+请以 ${contact.name} 的身份自然回复用户。
 `.trim();
                     }
                     if (dynamicInstructions) privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
@@ -23537,25 +23430,6 @@ ${latestInputText || '(用户发送了非文字内容)'}
                     data = await response.json();
                 }
                 let responseContent = sanitizeForbiddenRoleWords(data.choices[0].message.content.trim());
-
-                // 临时关闭私聊自动续写，避免续写失败导致原本成功的回复被判失败
-                // const shouldAutoContinuePrivateReply = !!(
-                //     contact &&
-                //     !contact.isGroup &&
-                //     !customSystemPrompt &&
-                //     !forceMessages &&
-                //     apiType === 'chat' &&
-                //     !isNarrativeMode
-                // );
-                //
-                // if (shouldAutoContinuePrivateReply) {
-                //     responseContent = await continuePrivateReplyIfThin({
-                //         rawResponse: responseContent,
-                //         requestMessages,
-                //         contact,
-                //         maxContinueRounds: 1
-                //     });
-                // }
 
                 return responseContent;
             } catch (error) {
