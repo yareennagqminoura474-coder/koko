@@ -17483,19 +17483,23 @@ function splitOfflineSpeechForRender(text) {
 }
 
 function splitOfflineActionForRender(text) {
-    const rawPieces = String(text || '')
+    let s = cleanOfflineActionText(text);
+    s = String(s || '')
         .replace(/\r/g, '\n')
-        .split(/(?:\n+|(?<=[。！？!?；;])\s*)/)
-        .map(s => stripOuterActionBrackets(s))
-        .map(s => s.trim())
-        .filter(Boolean)
-        .filter(s => !isOrphanBracket(s) && !isJsonGarbageFragment(s));
+        .replace(/\n+/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 
-    return mergeShortOfflinePieces(rawPieces, {
-        minLen: 18,
-        maxLen: 55,
-        maxSentences: 2
-    });
+    if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return [];
+    if (/^(?:的表情|的样子|的语气|的动作)[。！!？?，,、；;：:]*$/.test(s)) return [];
+    if (/^[。！!？?，,、；;：:\s]+$/.test(s)) return [];
+
+    const compact = s.replace(/[\s"'“”‘’`~!！?？,，。；;：:、（）()【】\[\]{}<>《》]/g, '');
+    if (compact.length < 4 && !/[看望笑哭走跑站坐拿放推拉抱拍摸抬低转靠停皱叹点摇伸握眨扫倚俯抿敲拢垂进退落开关扶贴捏沉默扬勾挑侧偏眯按拽咬蹙抚拥碰亲掀抖移迈立伏躲藏蹲扑挪蹭]/.test(s)) {
+        return [];
+    }
+
+    return [s];
 }
 
 function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
@@ -17520,27 +17524,39 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
     if (!rawContent) return expanded;
 
     const rawLen = rawContent.length;
+    const normalizeActionCardContent = (text) => {
+        let s = cleanOfflineActionText(text);
+        s = String(s || '')
+            .replace(/\r/g, '\n')
+            .replace(/\n+/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+
+        if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return '';
+        if (/^(?:的表情|的样子|的语气|的动作)[。！!？?，,、；;：:]*$/.test(s)) return '';
+        if (/^[。！!？?，,、；;：:\s]+$/.test(s)) return '';
+
+        const compact = s.replace(/[\s"'“”‘’`~!！?？,，。；;：:、（）()【】\[\]{}<>《》]/g, '');
+        if (compact.length < 4 && !/[看望笑哭走跑站坐拿放推拉抱拍摸抬低转靠停皱叹点摇伸握眨扫倚俯抿敲拢垂进退落开关扶贴捏沉默扬勾挑侧偏眯按拽咬蹙抚拥碰亲掀抖移迈立伏躲藏蹲扑挪蹭]/.test(s)) {
+            return '';
+        }
+
+        return s;
+    };
 
     let messageType = normalizeOfflineEventType(rawType, rawContent);
 
-    // 如果 type 是 speech，但内容明显是动作，则改成 action
-    if (messageType !== 'offlineAction' && looksLikeOfflineAction(rawContent)) {
-        messageType = 'offlineAction';
-    }
-
     if (messageType === 'offlineAction') {
-        const pieces = rawLen <= 55
-            ? [stripOuterActionBrackets(rawContent)].filter(Boolean)
-            : splitOfflineActionForRender(rawContent);
-        pieces.forEach(piece => {
+        const content = normalizeActionCardContent(rawContent);
+        if (content) {
             expanded.push({
                 type: 'offlineAction',
                 sender: 'system',
                 characterId: ev.characterId || senderProfile?.id,
                 characterName: ev.characterName || senderProfile?.name,
-                content: piece
+                content
             });
-        });
+        }
     } else {
         const pieces = rawLen <= 42
             ? [cleanAiSpeechText(cleanOfflineEventContent(rawContent))].filter(Boolean)
@@ -17575,20 +17591,16 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     if (!source) return result;
 
     function pushAction(text) {
-        const cleaned = stripOuterActionBrackets(text);
-        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned)) return;
+        const cleaned = splitOfflineActionForRender(text)[0] || '';
+        if (!cleaned) return;
 
-        splitActionSentences(cleaned).forEach(piece => {
-            piece = stripOuterActionBrackets(piece);
-            if (!piece || isOrphanBracket(piece) || isJsonGarbageFragment(piece)) return;
-            result.push({
-                type: 'offlineAction',
-                sender: 'system',
-                characterId: senderProfile.id,
-                characterName: senderProfile.name,
-                content: piece,
-                timestamp: Date.now()
-            });
+        result.push({
+            type: 'offlineAction',
+            sender: 'system',
+            characterId: senderProfile.id,
+            characterName: senderProfile.name,
+            content: cleaned,
+            timestamp: Date.now()
         });
     }
 
@@ -17616,8 +17628,7 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
             if (node.nodeType === Node.TEXT_NODE) {
                 const t = String(node.textContent || '').trim();
                 if (!t) return;
-                if (looksLikeOfflineAction(t)) pushAction(t);
-                else pushSpeech(t);
+                pushSpeech(t);
                 return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -17642,15 +17653,14 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
 
     while ((match = quoteRegex.exec(source)) !== null) {
         const before = source.slice(lastIndex, match.index);
-        pushAction(before);
+        pushSpeech(before);
         pushSpeech(match[1]);
         lastIndex = quoteRegex.lastIndex;
     }
 
     const tail = source.slice(lastIndex).trim();
     if (tail) {
-        if (looksLikeOfflineAction(tail)) pushAction(tail);
-        else pushSpeech(tail);
+        pushSpeech(tail);
     }
     if (result.length > 0) return result;
 
@@ -17680,7 +17690,7 @@ async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatC
     for (const ev of expandedEvents) {
         const messageType = normalizeOfflineEventType(ev.type, ev.content);
         const content = messageType === 'offlineAction'
-            ? stripOuterActionBrackets(ev.content)
+            ? cleanOfflineActionText(ev.content)
             : cleanAiSpeechText(cleanOfflineEventContent(ev.content));
 
         if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
