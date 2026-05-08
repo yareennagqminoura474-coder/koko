@@ -14839,13 +14839,8 @@ type只能是"action"或"character"，action的speaker必须是空字符串，�
                 return true;
             }
 
-            if (!isContextBoundAction(s, contextText)) {
-                console.warn('[跳过未绑定上下文的动作]', {
-                    actionText: s,
-                    contextPreview: String(contextText || '').slice(0, 300)
-                });
-                return true;
-            }
+            // 放宽上下文绑定过滤，避免正常动作卡片因为没命中关键词被静默误杀。
+            // 仍然保留模板动作过滤和后续重复动作过滤。
 
             return false;
         }
@@ -16888,7 +16883,10 @@ case 'music_share':
                                     onerror="this.onerror=null;this.src='${fallbackAvatar}';"
                                 >
                             </div>
-                            <span class="offline-action-content">${safeDiv.innerHTML}</span>
+                            <div style="flex:1">
+                                <div style="font-size:11px;color:#999;margin-bottom:2px">${actorName}</div>
+                                <span class="offline-action-content">${safeDiv.innerHTML}</span>
+                            </div>
                         `;
                     } else {
                         actionWrapper.innerHTML = `
@@ -19477,8 +19475,7 @@ MESSAGE_END
                     if (
                         actionText &&
                         !isRepeatedRecentAction(group, actionText) &&
-                        !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
-                        lastRenderedType !== 'action'
+                        !shouldSkipOfflineActionByQuality(actionText, actionContextText)
                     ) {
                         await sleep(800 + Math.random() * 700);
                         await createAndAddMessage(
@@ -19853,8 +19850,7 @@ MESSAGE_END
                     if (
                         actionText &&
                         !isRepeatedRecentAction(group, actionText) &&
-                        !shouldSkipOfflineActionByQuality(actionText, actionContextText) &&
-                        lastRenderedType !== 'action'
+                        !shouldSkipOfflineActionByQuality(actionText, actionContextText)
                     ) {
                         await sleep(800 + Math.random() * 700);
                         await createAndAddMessage(
