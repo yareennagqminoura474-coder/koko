@@ -17236,7 +17236,7 @@ function looksLikeOfflineAction(text) {
     return /^(他|她|沈逸|林澈|少年|男人|老师|对方).*(走进|走到|走过去|靠近|抬眼|垂眸|低头|抬手|伸手|转身|坐下|站起|停下|沉默|看向|扫过|盯着|轻笑|皱眉|挑眉|勾唇|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起)/.test(s);
 }
 
-function normalizeOfflineEventType(rawType) {
+function normalizeOfflineEventType(rawType, rawContent = '') {
     const t = String(rawType || '').toLowerCase().trim();
 
     if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech' ||
@@ -17245,11 +17245,16 @@ function normalizeOfflineEventType(rawType) {
     }
 
     if (t === 'action' || t === 'offlineaction' || t === 'narrative-action' ||
-        t === 'narration' || t === 'scene') {
+        t === 'narration' || t === 'scene' || t === 'description' ||
+        t === 'psychology' || t === 'narrative-psychology' ||
+        t === 'thought' || t === 'status') {
         return 'offlineAction';
     }
 
-    // 未知类型默认台词，不默认动作
+    if (looksLikeOfflineAction(rawContent)) {
+        return 'offlineAction';
+    }
+
     return 'offlineSpeech';
 }
 
@@ -17483,23 +17488,38 @@ function splitOfflineSpeechForRender(text) {
 }
 
 function splitOfflineActionForRender(text) {
-    let s = cleanOfflineActionText(text);
-    s = String(s || '')
-        .replace(/\r/g, '\n')
-        .replace(/\n+/g, ' ')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
+    const normalizePiece = (input) => {
+        let s = cleanOfflineActionText(input);
+        s = String(s || '')
+            .replace(/\r/g, '\n')
+            .replace(/\n+/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
 
-    if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return [];
-    if (/^(?:的表情|的样子|的语气|的动作)[。！!？?，,、；;：:]*$/.test(s)) return [];
-    if (/^[。！!？?，,、；;：:\s]+$/.test(s)) return [];
+        if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return '';
+        if (/^(?:的表情|的样子|的语气|的动作|门|的)[。！!？?，,、；;：:]*$/.test(s)) return '';
+        if (/^[。！!？?，,、；;：:\s]+$/.test(s)) return '';
 
-    const compact = s.replace(/[\s"'“”‘’`~!！?？,，。；;：:、（）()【】\[\]{}<>《》]/g, '');
-    if (compact.length < 4 && !/[看望笑哭走跑站坐拿放推拉抱拍摸抬低转靠停皱叹点摇伸握眨扫倚俯抿敲拢垂进退落开关扶贴捏沉默扬勾挑侧偏眯按拽咬蹙抚拥碰亲掀抖移迈立伏躲藏蹲扑挪蹭]/.test(s)) {
-        return [];
-    }
+        const compact = s.replace(/[\s"'“”‘’`~!！?？,，。；;：:、（）()【】\[\]{}<>《》]/g, '');
+        if (compact.length < 4 && !/[看望笑哭走跑站坐拿放推拉抱拍摸抬低转靠停皱叹点摇伸握眨扫倚俯抿敲拢垂进退落开关扶贴捏沉默扬勾挑侧偏眯按拽咬蹙抚拥碰亲掀抖移迈立伏躲藏蹲扑挪蹭想念觉得心里脑海呼吸目光神色表情脸色光影阳光空气窗外门口办公室教案腕表百叶窗]/.test(s)) {
+            return '';
+        }
 
-    return [s];
+        return s;
+    };
+
+    const source = String(text || '').replace(/\r/g, '\n').trim();
+    if (!source) return [];
+
+    const paragraphPieces = source
+        .split(/\n{2,}/)
+        .map(part => normalizePiece(part))
+        .filter(Boolean);
+
+    if (paragraphPieces.length > 0) return paragraphPieces;
+
+    const single = normalizePiece(source);
+    return single ? [single] : [];
 }
 
 function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
@@ -17524,31 +17544,11 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
     if (!rawContent) return expanded;
 
     const rawLen = rawContent.length;
-    const normalizeActionCardContent = (text) => {
-        let s = cleanOfflineActionText(text);
-        s = String(s || '')
-            .replace(/\r/g, '\n')
-            .replace(/\n+/g, ' ')
-            .replace(/\s{2,}/g, ' ')
-            .trim();
-
-        if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return '';
-        if (/^(?:的表情|的样子|的语气|的动作)[。！!？?，,、；;：:]*$/.test(s)) return '';
-        if (/^[。！!？?，,、；;：:\s]+$/.test(s)) return '';
-
-        const compact = s.replace(/[\s"'“”‘’`~!！?？,，。；;：:、（）()【】\[\]{}<>《》]/g, '');
-        if (compact.length < 4 && !/[看望笑哭走跑站坐拿放推拉抱拍摸抬低转靠停皱叹点摇伸握眨扫倚俯抿敲拢垂进退落开关扶贴捏沉默扬勾挑侧偏眯按拽咬蹙抚拥碰亲掀抖移迈立伏躲藏蹲扑挪蹭]/.test(s)) {
-            return '';
-        }
-
-        return s;
-    };
-
     let messageType = normalizeOfflineEventType(rawType, rawContent);
 
     if (messageType === 'offlineAction') {
-        const content = normalizeActionCardContent(rawContent);
-        if (content) {
+        const pieces = splitOfflineActionForRender(rawContent);
+        pieces.forEach(content => {
             expanded.push({
                 type: 'offlineAction',
                 sender: 'system',
@@ -17556,7 +17556,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
                 characterName: ev.characterName || senderProfile?.name,
                 content
             });
-        }
+        });
     } else {
         const pieces = rawLen <= 42
             ? [cleanAiSpeechText(cleanOfflineEventContent(rawContent))].filter(Boolean)
@@ -17591,16 +17591,16 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     if (!source) return result;
 
     function pushAction(text) {
-        const cleaned = splitOfflineActionForRender(text)[0] || '';
-        if (!cleaned) return;
-
-        result.push({
-            type: 'offlineAction',
-            sender: 'system',
-            characterId: senderProfile.id,
-            characterName: senderProfile.name,
-            content: cleaned,
-            timestamp: Date.now()
+        const pieces = splitOfflineActionForRender(text);
+        pieces.forEach(cleaned => {
+            result.push({
+                type: 'offlineAction',
+                sender: 'system',
+                characterId: senderProfile.id,
+                characterName: senderProfile.name,
+                content: cleaned,
+                timestamp: Date.now()
+            });
         });
     }
 
@@ -17628,7 +17628,7 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
             if (node.nodeType === Node.TEXT_NODE) {
                 const t = String(node.textContent || '').trim();
                 if (!t) return;
-                pushSpeech(t);
+                pushAction(t);
                 return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -17653,19 +17653,19 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
 
     while ((match = quoteRegex.exec(source)) !== null) {
         const before = source.slice(lastIndex, match.index);
-        pushSpeech(before);
+        pushAction(before);
         pushSpeech(match[1]);
         lastIndex = quoteRegex.lastIndex;
     }
 
     const tail = source.slice(lastIndex).trim();
     if (tail) {
-        pushSpeech(tail);
+        pushAction(tail);
     }
     if (result.length > 0) return result;
 
-    // 最后兜底默认 speech，不默认 action
-    pushSpeech(source);
+    // 最后兜底默认 action，只有明确台词才算 speech
+    pushAction(source);
     return result;
 }
 
