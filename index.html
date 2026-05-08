@@ -17232,7 +17232,11 @@ function looksLikeOfflineAction(text) {
     if (/[?？!！:：]/.test(s)) return false;
     if (/(你|我|咱|我们|你们|林澈|沈逸).*(吗|呢|吧|啊|哦|嘛|喂|回话|别|要|给我|知道|听得见|怎么|是不是|还|可不|行不行)/.test(s)) return false;
 
-    // 只有明确第三人称 + 明确动词动作才判为动作
+    // 拟声词 / 声音描述单独一句 → 动作
+    if (/^[咔哒嘎吱嗯啧哗叮咚砰噼啪吱呀扑通]+[。！…]*$/.test(s)) return true;
+    if (/[声音响起传来发出]/.test(s) && s.length < 20) return true;
+
+    // 原有第三人称动作判断
     return /^(他|她|沈逸|林澈|少年|男人|老师|对方).*(走进|走到|走过去|靠近|抬眼|垂眸|低头|抬手|伸手|转身|坐下|站起|停下|沉默|看向|扫过|盯着|轻笑|皱眉|挑眉|勾唇|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起)/.test(s);
 }
 
@@ -17488,39 +17492,198 @@ function splitOfflineSpeechForRender(text) {
     });
 }
 
-function splitOfflineActionForRender(text) {
-    const normalizePiece = (input) => {
-        let s = cleanOfflineActionText(input);
-        s = String(s || '')
-            .replace(/\r/g, '\n')
-            .replace(/\n+/g, ' ')
-            .replace(/\s{2,}/g, ' ')
+function normalizeMibuOfflineActionContent(input) {
+    let s = cleanOfflineActionText(input);
+    s = String(s || '')
+        .replace(/\r/g, '\n')
+        .replace(/\u00a0/g, ' ')
+        .replace(/\s*\n\s*/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+
+    if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return '';
+    if (/^(?:的表情|的样子|的语气|的动作|门|的)[。！!？?，,、；;：:…\s]*$/.test(s)) return '';
+    if (/^[。！!？?，,、；;：:…\s]+$/.test(s)) return '';
+
+    const compact = s.replace(/[\s"'“”‘’`~!！?？,，。；;：:、（）()【】\[\]{}<>《》…]/g, '');
+    if (!compact) return '';
+    if (compact.length < 2 && !/[看望笑哭走跑站坐拿放推拉抱拍摸抬低转靠停皱叹点摇伸握眨扫倚俯抿敲拢垂进退落开关扶贴捏沉默扬勾挑侧偏眯按拽咬蹙抚拥碰亲掀抖移迈立伏躲藏蹲扑挪蹭想念觉得心里脑海呼吸目光神色表情脸色光影阳光空气窗外门口办公室教案腕表百叶窗声音脚步蝉鸣沙沙铃声门锁桌面衣领少年老师主任]/.test(s)) {
+        return '';
+    }
+
+    return s;
+}
+
+function isWeakMibuOfflineActionFragment(input) {
+    const s = normalizeMibuOfflineActionContent(input);
+    if (!s) return true;
+
+    if (/^(?:一声轻响|一声闷响|一阵沉默|一声门响|门响了一声|咔哒|嘎吱|啧|嗯|哗|叮咚|砰|噼啪|吱呀|扑通|沙沙声?|脚步声|呼吸声|蝉鸣)[。！!？?，,、；;：:…\s]*$/.test(s)) {
+        return true;
+    }
+
+    const compact = s.replace(/[\s"'“”‘’`~!！?？,，。；;：:、（）()【】\[\]{}<>《》…]/g, '');
+    return compact.length <= 3 && !/[看望笑哭走跑站坐拿放推拉抱拍摸抬低转靠停皱叹点摇伸握眨扫倚俯抿敲拢垂进退落开关扶贴捏沉默扬勾挑侧偏眯按拽咬蹙抚拥碰亲掀抖移迈立伏躲藏蹲扑挪蹭想念觉得心里脑海呼吸目光神色表情脸色光影阳光空气窗外门口办公室教案腕表百叶窗声音脚步蝉鸣沙沙铃声门锁桌面衣领少年老师主任]/.test(s);
+}
+
+function joinMibuOfflineActionContent(left, right) {
+    const a = normalizeMibuOfflineActionContent(left);
+    const b = normalizeMibuOfflineActionContent(right);
+    if (!a) return b;
+    if (!b) return a;
+
+    const glue = /[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]/.test(b) ? ' ' : '';
+    return `${a}${glue}${b}`.trim();
+}
+
+function splitMibuStyleOfflineBlocks(text) {
+    const source = String(text || '').replace(/\r/g, '');
+    if (!source.trim()) return [];
+
+    const blocks = [];
+    const pushActionBlock = (chunk) => {
+        const normalized = String(chunk || '')
+            .replace(/\u00a0/g, ' ')
             .trim();
+        if (!normalized) return;
 
-        if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return '';
-        if (/^(?:的表情|的样子|的语气|的动作|门|的)[。！!？?，,、；;：:]*$/.test(s)) return '';
-        if (/^[。！!？?，,、；;：:\s]+$/.test(s)) return '';
-
-        const compact = s.replace(/[\s"'“”‘’`~!！?？,，。；;：:、（）()【】\[\]{}<>《》]/g, '');
-        if (compact.length < 4 && !/[看望笑哭走跑站坐拿放推拉抱拍摸抬低转靠停皱叹点摇伸握眨扫倚俯抿敲拢垂进退落开关扶贴捏沉默扬勾挑侧偏眯按拽咬蹙抚拥碰亲掀抖移迈立伏躲藏蹲扑挪蹭想念觉得心里脑海呼吸目光神色表情脸色光影阳光空气窗外门口办公室教案腕表百叶窗]/.test(s)) {
-            return '';
-        }
-
-        return s;
+        normalized
+            .split(/\n{2,}/)
+            .map(part => part.replace(/[ \t]*\n[ \t]*/g, ' ').trim())
+            .filter(Boolean)
+            .forEach(part => {
+                if (!part || isOrphanBracket(part) || isJsonGarbageFragment(part)) return;
+                blocks.push({ type: 'offlineAction', content: part });
+            });
+    };
+    const pushSpeechBlock = (chunk) => {
+        const cleaned = cleanAiSpeechText(cleanOfflineEventContent(chunk));
+        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned)) return;
+        blocks.push({ type: 'offlineSpeech', content: cleaned });
     };
 
-    const source = String(text || '').replace(/\r/g, '\n').trim();
+    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|“[^”]+”|"[^"\n]+"|\n\s*\n+)/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = tokenRegex.exec(source)) !== null) {
+        const token = match[0];
+        const before = source.slice(lastIndex, match.index);
+        pushActionBlock(before);
+
+        if (!/\n\s*\n+/.test(token)) {
+            if ((token.startsWith('“') && token.endsWith('”')) || (token.startsWith('"') && token.endsWith('"'))) {
+                pushSpeechBlock(token.slice(1, -1));
+            } else if (token.startsWith('**') && token.endsWith('**')) {
+                pushActionBlock(token.slice(2, -2));
+            } else {
+                pushActionBlock(token.slice(1, -1));
+            }
+        }
+
+        lastIndex = tokenRegex.lastIndex;
+    }
+
+    pushActionBlock(source.slice(lastIndex));
+    return blocks;
+}
+
+function splitOfflineActionForRender(text) {
+    const source = String(text || '').replace(/\r/g, '').trim();
     if (!source) return [];
 
-    const paragraphPieces = source
-        .split(/\n{2,}/)
-        .map(part => normalizePiece(part))
-        .filter(Boolean);
+    const actionBlocks = splitMibuStyleOfflineBlocks(source)
+        .filter(block => block.type === 'offlineAction')
+        .map(block => block.content);
 
-    if (paragraphPieces.length > 0) return paragraphPieces;
+    const normalizedPieces = [];
+    const collectPiece = (input) => {
+        const cleaned = normalizeMibuOfflineActionContent(input);
+        if (cleaned) normalizedPieces.push(cleaned);
+    };
+    const flushLongActionBlock = (input) => {
+        const raw = String(input || '').replace(/\r/g, '').trim();
+        if (!raw) return;
 
-    const single = normalizePiece(source);
-    return single ? [single] : [];
+        const segments = raw
+            .split(/\n{2,}/)
+            .map(part => part.replace(/[ \t]*\n[ \t]*/g, ' ').trim())
+            .filter(Boolean);
+        const workingSegments = segments.length > 0 ? segments : [raw];
+
+        workingSegments.forEach(segment => {
+            if (segment.length <= 100) {
+                collectPiece(segment);
+                return;
+            }
+
+            const sentences = splitActionSentences(segment);
+            if (sentences.length <= 1) {
+                collectPiece(segment);
+                return;
+            }
+
+            let buffer = '';
+            let sentenceCount = 0;
+
+            sentences.forEach(sentence => {
+                const cleanedSentence = normalizeMibuOfflineActionContent(sentence);
+                if (!cleanedSentence) return;
+
+                const nextBuffer = buffer
+                    ? joinMibuOfflineActionContent(buffer, cleanedSentence)
+                    : cleanedSentence;
+                const shouldFlush = buffer && (nextBuffer.length > 80 || sentenceCount >= 3);
+
+                if (shouldFlush) {
+                    collectPiece(buffer);
+                    buffer = cleanedSentence;
+                    sentenceCount = 1;
+                    return;
+                }
+
+                buffer = nextBuffer;
+                sentenceCount += 1;
+
+                if (buffer.length >= 60 && sentenceCount >= 2) {
+                    collectPiece(buffer);
+                    buffer = '';
+                    sentenceCount = 0;
+                }
+            });
+
+            if (buffer) collectPiece(buffer);
+        });
+    };
+
+    if (actionBlocks.length > 0) {
+        actionBlocks.forEach(flushLongActionBlock);
+    } else {
+        flushLongActionBlock(source);
+    }
+
+    if (normalizedPieces.length === 0) return [];
+
+    const merged = [];
+    normalizedPieces.forEach(piece => {
+        const prev = merged[merged.length - 1];
+        if (!prev) {
+            merged.push(piece);
+            return;
+        }
+
+        const prevLen = prev.replace(/\s/g, '').length;
+        const pieceLen = piece.replace(/\s/g, '').length;
+        if (pieceLen < 25 || prevLen < 25 || isWeakMibuOfflineActionFragment(piece)) {
+            const joined = normalizeMibuOfflineActionContent(joinMibuOfflineActionContent(prev, piece));
+            if (joined) merged[merged.length - 1] = joined;
+            return;
+        }
+
+        merged.push(piece);
+    });
+
+    return merged.filter(Boolean);
 }
 
 function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
@@ -17548,14 +17711,40 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
     let messageType = normalizeOfflineEventType(rawType, rawContent);
 
     if (messageType === 'offlineAction') {
-        const pieces = splitOfflineActionForRender(rawContent);
-        pieces.forEach(content => {
-            expanded.push({
-                type: 'offlineAction',
-                sender: 'system',
-                characterId: ev.characterId || senderProfile?.id,
-                characterName: ev.characterName || senderProfile?.name,
-                content
+        const structuredBlocks = /[“"\*{（(\n]/.test(rawContent)
+            ? splitMibuStyleOfflineBlocks(rawContent)
+            : [{ type: 'offlineAction', content: rawContent }];
+
+        structuredBlocks.forEach(block => {
+            if (!block || !block.content) return;
+
+            if (block.type === 'offlineSpeech') {
+                const speechPieces = block.content.length <= 42
+                    ? [cleanAiSpeechText(cleanOfflineEventContent(block.content))].filter(Boolean)
+                    : splitOfflineSpeechForRender(block.content);
+
+                speechPieces.forEach(piece => {
+                    piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
+                    if (!piece) return;
+                    expanded.push({
+                        type: 'offlineSpeech',
+                        sender: ev.sender || ev.characterId || senderProfile?.id,
+                        characterId: ev.characterId || senderProfile?.id,
+                        characterName: ev.characterName || senderProfile?.name,
+                        content: piece
+                    });
+                });
+                return;
+            }
+
+            splitOfflineActionForRender(block.content).forEach(content => {
+                expanded.push({
+                    type: 'offlineAction',
+                    sender: 'system',
+                    characterId: ev.characterId || senderProfile?.id,
+                    characterName: ev.characterName || senderProfile?.name,
+                    content
+                });
             });
         });
     } else {
@@ -17579,7 +17768,11 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
 }
 
 function splitActionSentences(text) {
-    return String(text || '').split(/(?<=[。！？!?；;])\s*/).map(s => s.trim()).filter(Boolean);
+    const matches = String(text || '')
+        .replace(/\r/g, '')
+        .trim()
+        .match(/[^。！？!?；;…\n]+[。！？!?；;…]*|[^\n]+/g);
+    return (matches || []).map(s => s.trim()).filter(Boolean);
 }
 
 function splitLongSpeech(text) {
@@ -17622,6 +17815,20 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
         });
     }
 
+    function pushMixedBlocks(text) {
+        const blocks = splitMibuStyleOfflineBlocks(text);
+        if (blocks.length === 0) return;
+
+        blocks.forEach(block => {
+            if (!block || !block.content) return;
+            if (block.type === 'offlineSpeech') {
+                pushSpeech(block.content);
+            } else {
+                pushAction(block.content);
+            }
+        });
+    }
+
     if (/<[a-z][\s\S]*>/i.test(source)) {
         const doc = new DOMParser().parseFromString(source, 'text/html');
         function walk(node) {
@@ -17629,7 +17836,7 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
             if (node.nodeType === Node.TEXT_NODE) {
                 const t = String(node.textContent || '').trim();
                 if (!t) return;
-                pushAction(t);
+                pushMixedBlocks(t);
                 return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -17648,21 +17855,7 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
         if (result.length > 0) return result;
     }
 
-    const quoteRegex = /[“"]([^”"]+)[”"]/g;
-    let lastIndex = 0;
-    let match;
-
-    while ((match = quoteRegex.exec(source)) !== null) {
-        const before = source.slice(lastIndex, match.index);
-        pushAction(before);
-        pushSpeech(match[1]);
-        lastIndex = quoteRegex.lastIndex;
-    }
-
-    const tail = source.slice(lastIndex).trim();
-    if (tail) {
-        pushAction(tail);
-    }
+    pushMixedBlocks(source);
     if (result.length > 0) return result;
 
     // 最后兜底默认 action，只有明确台词才算 speech
@@ -23025,8 +23218,8 @@ ${isNarrativeMode ? `
 3. events 必须是非空数组，至少 2 条，必须包含至少 1 条 speech。
 4. events 每一项必须有 type 和 content。
 5. type 只能是 "action" 或 "speech"。
-6. action 只写动作、神态、环境、场景推进，不要加星号，不要加括号。
-7. speech 只写角色真正说出口的话，不含引号，不含动作。
+6. action 只写动作、神态、环境、场景推进、声音描述和拟声词，不要加星号，不要加括号。
+7. speech 只写角色真正开口说出来的有意义的话，不含引号，不含动作。声音或拟声词（如"咔哒"、"嘎吱"、"啧"单独成句时）必须归入 action，不能归入 speech。
 8. speech 必须直接回应【当前用户最新输入】。
 9. action 可以承接地点、姿势、气氛，但不能继续上一轮具体问题。
 10. 不要输出空 events。
@@ -23295,8 +23488,8 @@ ${FORBIDDEN_ACTION_CLICHES_PROMPT}
 2. 必须使用英文双引号 ". 禁止使用中文弯引号 “ ”。
 3. 最外层固定格式：{"events":[...],"heart_voice":{...}}。
 4. events 里每项 type 只能是 "action" 或 "speech"。
-5. action 只写动作、神态、环境、场景推进。不要加星号，不要加括号，直接写自然叙述文字。
-6. speech 只写角色真正说出口的话，不含引号、不含说话动作。characterId 和 characterName 填写说话角色的 ID 和名字。
+5. action 只写动作、神态、环境、场景推进、声音描述和拟声词。不要加星号，不要加括号，直接写自然叙述文字。
+6. speech 只写角色真正开口说出来的有意义的话，不含引号、不含说话动作。声音或拟声词（如"咔哒"、"嘎吱"、"啧"单独成句时）必须归入 action，不能归入 speech。characterId 和 characterName 填写说话角色的 ID 和名字。
 7. 一段回复可以包含多个 events，动作和台词自由交替，顺序即为叙事顺序。
 8. heart_voice 必须是对象，包含四个字段：emotion（当前情绪）、thoughts（角色没说出口的真实想法）、heartRate（心率描述）、jealousy（醋意/占有欲，无则填 "无"）。
 9. 不要再输出 [heart_voice] 或 [diary] 标签，所有内容必须在 JSON 字段里。
