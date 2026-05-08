@@ -14627,23 +14627,7 @@ type只能是"action"或"character"，action的speaker必须是空字符串，�
         }
 
         function normalizeSystemMessagesWithForbiddenRoleWords(messages) {
-            const list = Array.isArray(messages) ? messages.map(msg => msg ? { ...msg } : msg) : [];
-            let hasSystemMessage = false;
-
-            const normalized = list.map(msg => {
-                if (!msg || msg.role !== 'system' || typeof msg.content !== 'string') return msg;
-                hasSystemMessage = true;
-                return {
-                    ...msg,
-                    content: appendForbiddenRoleWordsRule(msg.content)
-                };
-            });
-
-            if (!hasSystemMessage) {
-                normalized.unshift({ role: 'system', content: FORBIDDEN_ROLE_WORDS_PROMPT });
-            }
-
-            return normalized;
+            return Array.isArray(messages) ? messages.map(msg => msg ? { ...msg } : msg) : [];
         }
 
         function sanitizeForbiddenRoleWords(text) {
@@ -18973,12 +18957,11 @@ async function triggerPrivateFreeChat(contact) {
         // 1e. 【核心V9：构建真正完整的统一时序记忆流】
         const memoryLimit = getConfiguredLongTermMemoryLength(40);
         let unifiedMemoryStream = [];
-        const now = Date.now();
-        const memoryWindow = 24 * 60 * 60 * 1000; // 1天
+        const sourceSlice = Math.max(memoryLimit * 3, 120);
         
         // 步骤1: 收集【私聊】历史 (这是我上次忘复制全的)
         if (contact && contact.history) {
-            const recentChatHistory = contact.history.filter(msg => (now - msg.timestamp < memoryWindow));
+            const recentChatHistory = contact.history.slice(-sourceSlice);
             recentChatHistory.forEach(msg => {
                 if (msg.sender === 'system_instruction') return;
                 const authorProfile = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile : contact;
@@ -19062,7 +19045,9 @@ async function triggerPrivateFreeChat(contact) {
         }
         
         // 步骤2: 收集【论坛】历史 (这是我 V8 忘加的)
-        const recentPosts = state.posts.filter(p => now - p.timestamp < memoryWindow);
+        const recentPosts = [...(state.posts || [])]
+            .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+            .slice(-Math.max(sourceSlice * 2, 240));
         recentPosts.forEach(post => {
             const isMyPost = post.author.id === myProfile.id;
             const isContactPost = contact && (post.author.id === contact.id);
@@ -19095,7 +19080,7 @@ async function triggerPrivateFreeChat(contact) {
             );
 
             for (const group of sharedMemoryGroups) {
-                (group.history || []).slice(-20).forEach(msg => {
+                (group.history || []).slice(-Math.max(sourceSlice, 40)).forEach(msg => {
                     if (!msg || msg.sender === 'system_instruction') return;
                     if (msg.type !== 'text') return;
 
@@ -19118,7 +19103,7 @@ async function triggerPrivateFreeChat(contact) {
 
         // 步骤4: 收集【短信】历史 (这是我 V8 忘加的)
         if (contact && contact.smsHistory) {
-            const recentSmsHistory = contact.smsHistory.slice(-30);
+            const recentSmsHistory = contact.smsHistory.slice(-sourceSlice);
             recentSmsHistory.forEach(msg => {
                 if (msg.type === 'text') {
                     const authorName = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile.name : contact.name;
@@ -23410,7 +23395,7 @@ function buildPromptPartsFromLatestUserMessage(msg, contact) {
 }
 // --- 辅助函数结束 ---
 
-const NORMAL_BASE_PROMPT = `
+const LEGACY_EXPERIMENTAL_NORMAL_BASE_PROMPT = `
 [重要指令：你将进行深度角色扮演。你的所有输出都是纯文本，但可以包含用方括号[]包裹的特殊指令。]
 
 [核心思维与行为准则]
@@ -23528,7 +23513,7 @@ ${FORBIDDEN_ACTION_CLICHES_PROMPT}
 在程序通过\`[SYSTEM: 视频通话已接通]\`指令明确告诉你通话已开始之前，你【绝对禁止】发送任何像是已经在通话中的内容，例如“喂？”、“听得见吗？”、“Hello?”等。这是最高优先级的规则，必须严格遵守。
 `;
 
-const NARRATIVE_BASE_PROMPT = `
+const LEGACY_EXPERIMENTAL_NARRATIVE_BASE_PROMPT = `
 [重要指令：你将以【第三人称视角】进行深度叙事角色扮演，模仿SillyTavern的风格。你的所有回复都必须是一个单一、连贯、完整的文本块。]
 
 [角色的核心性格/思维模式]
@@ -23633,11 +23618,11 @@ async function generateAiResponseLegacy(contact, history, customSystemPrompt, fo
                 let unifiedMemoryStream = [];
                 let lastHeartVoiceString = '(无最新心声记录)';
                 const myProfile = state.myProfile;
-                const now = Date.now();
-                const memoryWindow = 24 * 60 * 60 * 1000; 
+                const memoryLimit = getConfiguredLongTermMemoryLength(longTermMemoryLength || 30);
+                const sourceSlice = Math.max(memoryLimit * 3, 120);
 
                 if (contact && contact.history) {
-                    const recentChatHistory = contact.history.filter(msg => (now - msg.timestamp < memoryWindow));
+                    const recentChatHistory = contact.history.slice(-sourceSlice);
                     recentChatHistory.forEach(msg => {
                         let content = '';
                         let memoryType = '私聊';
@@ -23884,7 +23869,9 @@ case 'cp_share':
                 }
 
                 // (你原来的 recentPosts 逻辑)
-                const recentPosts = state.posts.filter(p => now - p.timestamp < memoryWindow);
+                const recentPosts = [...(state.posts || [])]
+                    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+                    .slice(-Math.max(sourceSlice * 2, 240));
                 recentPosts.forEach(post => {
                     const isMyPost = post.author.id === myProfile.id;
                     const isContactPost = contact && (post.author.id === contact.id);
@@ -23917,7 +23904,7 @@ case 'cp_share':
                     );
 
                     for (const group of sharedMemoryGroups) {
-                        (group.history || []).slice(-20).forEach(msg => {
+                        (group.history || []).slice(-Math.max(sourceSlice, 40)).forEach(msg => {
                             if (!msg || msg.sender === 'system_instruction') return;
                             if (msg.type !== 'text') return;
 
@@ -23940,7 +23927,7 @@ case 'cp_share':
                 
                 // (你原来的短信记忆逻辑)
                 if (contact && contact.smsHistory) {
-                    const recentSmsHistory = contact.smsHistory.slice(-30);
+                    const recentSmsHistory = contact.smsHistory.slice(-sourceSlice);
                     recentSmsHistory.forEach(msg => {
                         if (msg.type === 'text') {
                             const authorName = msg.sender === 'user' ? myProfile.name : contact.name;
@@ -23956,7 +23943,6 @@ case 'cp_share':
 
                 unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
                 
-                const memoryLimit = getConfiguredLongTermMemoryLength(longTermMemoryLength || 30);
                 let finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
                     const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
                     const showTimeTags = contact && contact.isTimeAware === true;
@@ -23999,8 +23985,7 @@ case 'cp_share':
 
                 let personaDirectives = "";
                 if (contact?.persona) { personaDirectives += `\n\n# 核心角色指令 (Your Core Role Directive)\n---\n这是你的核心身份，你必须严格、完全地代入以下角色进行对话：\n${contact.persona}\n---`; }
-                // 私聊不注入上一轮心声，防止 AI 把旧心声当成本轮要延续的内容
-                if (!contact || contact.isGroup) {
+                if (lastHeartVoiceString && lastHeartVoiceString !== '(无最新心声记录)') {
                     personaDirectives += `\n\n# 角色的最新心声 (Your Last Recorded Heart Voice)\n---\n这是你上次回复时的内心状态，请参考此状态以保持情感连贯性：\n${lastHeartVoiceString}\n---`;
                 }
                 if (contact?.userPersona) { personaDirectives += `\n\n# 对话者信息 (Your Counterpart's Information)\n---\n与你对话的用户的角色设定如下，请将TA视为真实存在的角色并进行互动：\n${contact.userPersona}\n---`; }
@@ -24428,7 +24413,7 @@ ${qzoneContextText}
                 
                 // 动态指令：私聊放进 userTask，群聊/其他放进 systemContent
                 const dynamicInstructions = history.filter(msg => msg.sender === 'system_instruction').map(msg => msg.content).join('\n');
-                if (dynamicInstructions && !(contact && !contact.isGroup)) { systemContent += `\n\n[附加临时指令]\n${dynamicInstructions}`; }
+                if (dynamicInstructions) { systemContent += `\n\n[附加临时指令]\n${dynamicInstructions}`; }
 
                 // 当前轮次边界规则：阻止 AI 继续回应上一轮
                 let _latestUserMsgId = null;
@@ -24452,41 +24437,7 @@ ${qzoneContextText}
                     });
                 } catch (_e) { /* 静默忽略，不影响主流程 */ }
 
-                if (contact && !contact.isGroup && isNarrativeMode) {
-                    const privateSystemContent = buildCleanPrivateSystemContent({
-                        contact,
-                        myProfile,
-                        thoughtPresetContent,
-                        worldBookContextString,
-                        snoopedDataContextString,
-                        relationshipContextString,
-                        emoticonListString,
-                        musicListString,
-                        isNarrativeMode
-                    });
-
-                    let privateUserTask = '';
-                    const _privateMems = formatPrivateMemoryForPrompt(contact, { maxItems: 5 });
-                    if (_privateMems && _privateMems !== '（暂无长期记忆）') {
-                        privateUserTask += `【长期记忆摘要，仅供关系背景，不是本轮话题】\n${_privateMems}\n\n`;
-                    }
-
-                    const privateRecentContextDigest = buildPrivateRecentContextDigest(contact, _latestUserMsgId, 30);
-                    if (privateRecentContextDigest) {
-                        privateUserTask += `【私聊最近连续上下文｜最高优先级】\n${privateRecentContextDigest}\n\n`;
-                    }
-
-                    privateUserTask += `【当前用户最新输入】\n${_latestInputText || '(用户发送了非文字内容)'}\n\n【线下本轮输出要求】\n只返回严格 JSON 对象：\n{“events”:[{“type”:”action”,”content”:”...”},{“type”:”speech”,”characterId”:”${contact.id || ''}”,”characterName”:”${contact.name || '角色'}”,”content”:”...”}],”heart_voice”:{“emotion”:”...”,”thoughts”:”...”,”heartRate”:”...”,”jealousy”:”无”},”diary”:”...”}\n\nevents 不能为空。\nspeech 必须回应当前用户最新输入。\n不要返回 JSON 数组。\n不要返回普通文本。\n不要返回 markdown。\n\n【events 合理分条】\nevents 不要把所有动作和台词塞进一个超长 content。\n也不要把一句话就分成一条。\n每个 content 不要太短。\n一轮回复建议生成 7 到 12 个 events。\n其中至少 4 条 speech，至少 2 条 action。\n不要把多句台词塞进一个 speech。\n不要把多个复杂动作塞进一个 action。\n不要每条都只有几个字。\nspeech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。\naction 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。\n不要把”嗯、哦、啧”之外的正常回复拆成几个字一条。\n多条件是在这个长度范围内合理分组，不是无脑短拆。`;
-
-                    if (dynamicInstructions) {
-                        privateUserTask += `\n\n[附加临时指令]\n${dynamicInstructions}`;
-                    }
-
-                    requestMessages = [
-                        { role: 'system', content: privateSystemContent },
-                        { role: 'user', content: privateUserTask }
-                    ];
-                } else {
+                {
                     const messages = [];
                     const recentHistory = buildPromptHistoryExcludingLatest(history, _latestUserMsgId, effectiveContextLength);
 
@@ -24930,6 +24881,9 @@ const KOKO0328_NARRATIVE_BASE_PROMPT = `
 [heart_voice]{"emotion": "期待", "thoughts": "不知道她会不会同意我的邀请，心跳得好快。", "heartRate": "110 bpm", "jealousy": ""}[/heart_voice]
 `;
 
+const NORMAL_BASE_PROMPT = KOKO0328_NORMAL_BASE_PROMPT;
+const NARRATIVE_BASE_PROMPT = KOKO0328_NARRATIVE_BASE_PROMPT;
+
 function buildKoko0328PrivateMemoryArtifacts(contact, history) {
     const myProfile = state.myProfile || {};
     const memoryLimit = getConfiguredLongTermMemoryLength(40);
@@ -25183,18 +25137,6 @@ function buildKoko0328PrivateRequestMessages(contact, history) {
 }
 
 async function generateAiResponse(contact, history, customSystemPrompt, forceDiary = false, apiType = 'chat', forceMessages = null) {
-    const useKoko0328PrivateFlow =
-        apiType === 'chat' &&
-        contact &&
-        !contact.isGroup &&
-        !customSystemPrompt &&
-        !forceMessages;
-
-    if (useKoko0328PrivateFlow) {
-        const requestMessages = buildKoko0328PrivateRequestMessages(contact, history);
-        return await generateAiResponseLegacy(null, [], null, forceDiary, apiType, requestMessages);
-    }
-
     return await generateAiResponseLegacy(contact, history, customSystemPrompt, forceDiary, apiType, forceMessages);
 }
 
