@@ -17291,13 +17291,14 @@ function parseOfflineAiResponseToEvents(raw) {
         let type = String(ev.type || ev.kind || ev.eventType || '').toLowerCase().trim();
         if (!type) {
             if (ev.speech || ev.dialogue || ev.line || ev.words) type = 'speech';
-            else if (ev.action || ev.narration || ev.description) type = 'action';
+            else if (ev.action || ev.narration || ev.description || ev.psychology || ev.thought || ev.status || ev.scene) type = 'action';
         }
-        const rawContent = ev.content || ev.text || ev.message || ev.speech || ev.dialogue || ev.line || ev.words || ev.action || ev.narration || ev.description || '';
+        const rawContent = ev.content || ev.text || ev.message || ev.speech || ev.dialogue || ev.line || ev.words || ev.action || ev.narration || ev.description || ev.status || ev.thought || ev.psychology || ev.scene || '';
         const content = cleanOfflineEventContent(rawContent);
         if (!content || isJsonGarbageFragment(content) || isOrphanBracket(content)) return null;
+        const normalizedType = normalizeOfflineEventType(type, content);
         return {
-            type: (type === 'action' || type === 'narration' || type === 'scene') ? 'action' : 'speech',
+            type: normalizedType === 'offlineAction' ? 'action' : 'speech',
             characterId: ev.characterId || ev.character_id || ev.speakerId || '',
             characterName: ev.characterName || ev.speaker || ev.name || '',
             content
