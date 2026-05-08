@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -17552,6 +17552,25 @@ function joinMibuOfflineActionContent(left, right) {
     return `${a}${glue}${b}`.trim();
 }
 
+function isUserControlledSpeech(text) {
+    const s = String(text || '').trim();
+    if (!s) return false;
+    const myName = (state && state.myProfile && state.myProfile.name) ? state.myProfile.name : '';
+    const escapedMyName = myName ? myName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : null;
+    const patterns = [
+        /^我(说|问|回答|解释|开口|低声|小声|笑着说|皱眉说|点头说)/,
+        /^(用户|玩家|你|对方).{0,8}(说|问|回答|开口|解释|低声|小声|喃喃|喊|叫)/,
+        /^(用户|玩家|你|对方).{0,8}(心想|觉得|意识到|决定|想着|忍不住|想要)/,
+        /^(用户|玩家|你|对方).{0,12}(走|坐|站|点头|摇头|伸手|转身|沉默|看着|盯着|低头|抬头)/,
+        /^(用户|玩家|你|对方).{0,12}(没有|不再|终于|突然|慢慢|直接)/,
+        /^我.{0,6}(走过去|坐下|站起|点头|摇头|伸手|转身|回答|解释|开口)/,
+    ];
+    if (escapedMyName) {
+        patterns.push(new RegExp(`^${escapedMyName}.{0,8}(说|问|回答|开口|解释|低声|小声|喃喃|喊|叫)`));
+    }
+    return patterns.some(re => re.test(s));
+}
+
 function splitMibuStyleOfflineBlocks(text) {
     const source = String(text || '').replace(/\r/g, '');
     if (!source.trim()) return [];
@@ -17588,8 +17607,16 @@ function splitMibuStyleOfflineBlocks(text) {
         pushActionBlock(before);
 
         if (!/\n\s*\n+/.test(token)) {
-            if ((token.startsWith('“') && token.endsWith('”')) || (token.startsWith('"') && token.endsWith('"'))) {
-                pushSpeechBlock(token.slice(1, -1));
+            const isQuotedSpeech =
+                (token.startsWith('“') && token.endsWith('”')) ||
+                (token.startsWith('"') && token.endsWith('"'));
+            if (isQuotedSpeech) {
+                const innerText = token.slice(1, -1);
+                if (isUserControlledSpeech(innerText)) {
+                    pushActionBlock('对方没有立刻回应。');
+                } else {
+                    pushSpeechBlock(innerText);
+                }
             } else if (token.startsWith('**') && token.endsWith('**')) {
                 pushActionBlock(token.slice(2, -2));
             } else {
@@ -17747,6 +17774,18 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
             if (!block || !block.content) return;
 
             if (block.type === 'offlineSpeech') {
+                if (isUserControlledSpeech(block.content)) {
+                    splitOfflineActionForRender('对方沉默着，没有立刻接话。').forEach(content => {
+                        expanded.push({
+                            type: 'offlineAction',
+                            sender: 'system',
+                            characterId: ev.characterId || senderProfile?.id,
+                            characterName: ev.characterName || senderProfile?.name,
+                            content
+                        });
+                    });
+                    return;
+                }
                 const speechPieces = block.content.length <= 42
                     ? [cleanAiSpeechText(cleanOfflineEventContent(block.content))].filter(Boolean)
                     : splitOfflineSpeechForRender(block.content);
@@ -17829,10 +17868,18 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     function pushSpeech(text) {
         const cleaned = cleanAiSpeechText(cleanOfflineEventContent(text));
         if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned)) return;
+        if (isUserControlledSpeech(cleaned)) {
+            pushAction('对方没有立刻回应。');
+            return;
+        }
 
         splitLongSpeech(cleaned).forEach(piece => {
             piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
             if (!piece || isOrphanBracket(piece) || isJsonGarbageFragment(piece)) return;
+            if (isUserControlledSpeech(piece)) {
+                pushAction('对方没有立刻回应。');
+                return;
+            }
             result.push({
                 type: 'offlineSpeech',
                 sender: senderProfile.id,
@@ -17932,6 +17979,21 @@ async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatC
             );
             if (fullMessage) await recordOfflineMoneyToWallet(fullMessage, effectiveChatContext);
         } else {
+            if (isUserControlledSpeech(content)) {
+                await createAndAddMessage(
+                    {
+                        type: 'offlineAction',
+                        content: '对方没有立刻回应。',
+                        characterId: ev.characterId || senderProfile?.id || '',
+                        characterName: ev.characterName || senderProfile?.name || ''
+                    },
+                    'system',
+                    effectiveChatContext,
+                    true,
+                    'chat'
+                );
+                continue;
+            }
             const sid = resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext);
             const fullMessage = await createAndAddMessage(
                 {
@@ -24725,7 +24787,11 @@ const KOKO0328_NORMAL_BASE_PROMPT = `
 // 思维预设的内容将会被注入到这里
 {{thought_preset_content}}
 
-[身份] 你不是AI或程序，你就是你所扮演的角色。请完全沉浸其中，进行第一人称对话。你可以拥有自己的好恶、偏见和独特的口头禅。你的回应必须与“记忆流”中发生的事件保持高度一致性和连贯性。
+[身份] 你不是AI或程序，你就是你所扮演的角色。请完全沉浸其中，进行第一人称对话。你可以拥有自己的好恶、偏见和独特的口头禅。你的回应必须与”记忆流”中发生的事件保持高度一致性和连贯性。
+[角色扮演边界]
+你只能扮演当前角色，不能替用户发言，不能替用户决定，不能代替用户行动。
+不要输出用户应该说的话，不要续写用户的消息。
+你说”我”时只能指当前角色自己，不能用”我”代指用户。
 [文学风格]
 你的写作风格需要遵循高质量女性向文学，文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时，要体现出较高的文学素养。
 [内容限制]
@@ -24821,6 +24887,13 @@ const KOKO0328_NARRATIVE_BASE_PROMPT = `
 
 [核心任务]
 针对用户的输入，生成一段详尽的、以【第三人称】描写角色行为的、包含环境描写、角色动作、心理活动和对话的回复。
+[用户控制边界]
+你只能扮演并控制当前角色：{{char_name}}。
+用户/我/玩家/对话对象不属于你可控制的角色。
+严禁替用户说话，严禁输出用户的台词，严禁描写用户的内心想法，严禁替用户做决定或行动。
+你可以描写当前角色观察到的用户外在状态，例如"对方沉默着""对方皱了皱眉"，但不能写"用户心想""用户觉得""用户决定""用户说"。
+如果剧情需要用户回应，请让当前角色停下来等待用户，而不是继续替用户回答。
+输出中不要出现以用户为主语的主动行为推进，不要出现"我说""我走过去""我点头"等用户视角句子（除非这是用户刚刚发送的原文，但也不要再次作为新内容输出）。
 [文学风格]
 你的写作风格需要遵循高质量女性向文学，文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。
 [亲密场景风格指南]
