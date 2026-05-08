@@ -17240,6 +17240,33 @@ function looksLikeOfflineAction(text) {
     return /^(他|她|沈逸|林澈|少年|男人|老师|对方).*(走进|走到|走过去|靠近|抬眼|垂眸|低头|抬手|伸手|转身|坐下|站起|停下|沉默|看向|扫过|盯着|轻笑|皱眉|挑眉|勾唇|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起)/.test(s);
 }
 
+function looksLikeOfflineSpeechContent(text) {
+    const raw = String(text || '').trim();
+    const s = cleanAiSpeechText(cleanOfflineEventContent(raw));
+    if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return false;
+    if (isUserControlledSpeech(s)) return false;
+    if (looksLikeOfflineAction(s)) return false;
+
+    if ((raw.startsWith('“') && raw.endsWith('”')) || (raw.startsWith('"') && raw.endsWith('"'))) {
+        return true;
+    }
+
+    if (/[\?？!！:：]/.test(s)) return true;
+
+    const trimmedEnding = s.replace(/[。！？!?…~～]+$/g, '').trim();
+    if (/(吗|呢|吧|呀|啊|哦|啦|喽|哼)$/.test(trimmedEnding)) return true;
+
+    if (/^(欸|诶|哎|喂|嗯|哦|啊|哈|啧|行|好|可以|不用|别|先|等等|等一下|听着|进来|坐|站住|拿来|给我|没事|闭嘴|继续|走吧|回去|留下|慢点|别怕|疼|烫)/.test(s)) {
+        return true;
+    }
+
+    if (/(你|我|咱|我们|你们)/.test(s) && s.length <= 48) return true;
+
+    if (!/[，。！？!?；;：:\n]/.test(s) && s.length <= 14) return true;
+
+    return false;
+}
+
 function normalizeOfflineEventType(rawType, rawContent = '') {
     const t = String(rawType || '').toLowerCase().trim();
 
@@ -17259,7 +17286,11 @@ function normalizeOfflineEventType(rawType, rawContent = '') {
         return 'offlineAction';
     }
 
-    return 'offlineSpeech';
+    if (looksLikeOfflineSpeechContent(rawContent)) {
+        return 'offlineSpeech';
+    }
+
+    return 'offlineAction';
 }
 
 function parseOfflineAiResponseToEvents(raw) {
@@ -17362,13 +17393,14 @@ function parseOfflineAiResponsePayload(raw) {
         let type = String(ev.type || ev.kind || ev.eventType || '').toLowerCase().trim();
         if (!type) {
             if (ev.speech || ev.dialogue || ev.line || ev.words) type = 'speech';
-            else if (ev.action || ev.narration || ev.description) type = 'action';
+            else if (ev.action || ev.narration || ev.description || ev.psychology || ev.thought || ev.status || ev.scene) type = 'action';
         }
-        const rawContent = ev.content || ev.text || ev.message || ev.speech || ev.dialogue || ev.line || ev.words || ev.action || ev.narration || ev.description || '';
+        const rawContent = ev.content || ev.text || ev.message || ev.speech || ev.dialogue || ev.line || ev.words || ev.action || ev.narration || ev.description || ev.psychology || ev.thought || ev.status || ev.scene || '';
         const content = cleanOfflineEventContent(rawContent);
         if (!content || isJsonGarbageFragment(content) || isOrphanBracket(content)) return null;
+        const normalizedType = normalizeOfflineEventType(type, content);
         return {
-            type: (type === 'action' || type === 'narration' || type === 'scene') ? 'action' : 'speech',
+            type: normalizedType === 'offlineAction' ? 'action' : 'speech',
             characterId: ev.characterId || ev.character_id || ev.speakerId || '',
             characterName: ev.characterName || ev.speaker || ev.name || '',
             content
@@ -17912,6 +17944,18 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
         }
         Array.from(doc.body.childNodes).forEach(walk);
         if (result.length > 0) return result;
+    }
+
+    const hasStructuredNarrativeMarkers = /<[a-z][\s\S]*>|[\*{（(“"\n]/i.test(source);
+    if (!hasStructuredNarrativeMarkers) {
+        if (looksLikeOfflineSpeechContent(source)) {
+            pushSpeech(source);
+            return result;
+        }
+        if (looksLikeOfflineAction(source)) {
+            pushAction(source);
+            return result;
+        }
     }
 
     pushMixedBlocks(source);
@@ -19368,12 +19412,6 @@ ${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 {
   "events": [
     {
-      "type": "action",
-      "characterId": "角色ID",
-      "characterName": "角色名",
-      "content": "完整动作描写"
-    },
-    {
       "type": "speech",
       "characterId": "角色ID",
       "characterName": "角色名",
@@ -19386,13 +19424,18 @@ ${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 
 [线下事件要求]
 1. events 不能为空。
-2. action 和 speech 都可以出现。
-3. speech 必须回应当前用户最新输入或延续当前线下场景。
-4. action 要写完整，不要出现“(听到”“（抬手”这种残缺动作。
-5. 每个 event 都要带 characterId 和 characterName。
-6. 不要把所有动作和台词塞进一个超长 content。
-7. 不要每条都只有几个字。
-8. 不要返回 JSON 数组，只返回 JSON 对象。
+2. 每一条 event 都必须明确带有 type、content、characterId、characterName。纯环境或无明确主语的 action 也要补上最贴近当前场景的角色归属，方便按时间顺序渲染。
+3. type 只能是 "speech" 或 "action"。
+4. speech 表示角色真正说出口的话；action 表示除说出口的话以外的全部内容，包括动作、神态、心理、环境、旁白、声音描述、状态变化、场景推进。
+5. 如果角色此刻应该说话，就必须输出 speech；普通聊天、追问、闲聊时，优先让角色正常接话。
+6. 如果此刻没有明显动作或场景变化，可以只输出 speech。
+7. 如果剧情需要动作、心理、环境或场景推进，可以输出 action，数量按剧情自然决定，不做硬性上限。
+8. 不要为了凑格式强行加“他看着你”“他沉默了一下”“他皱了皱眉”这类空泛 action。
+9. 不要连续堆很多条 action 却没有任何 speech，除非当前剧情确实是纯场景描写或过场。
+10. speech 必须回应当前用户最新输入或自然延续当前线下场景；action 也要服务剧情推进，不要空转。
+11. action 要写完整，不要出现“(听到”“（抬手”这种残缺动作。
+12. 不要把所有动作和台词塞进一个超长 content，也不要把一句完整意思拆成几个碎片 event。
+13. 不要返回 JSON 数组，只返回 JSON 对象。
 `;
 
         const userPrompt = options.observeOnly ? `
@@ -23269,6 +23312,42 @@ ${isNarrativeMode ? `
 {
   "events": [
     {
+      "type": "speech",
+      "characterId": "${contact.id || ''}",
+      "characterName": "${contact.name || '角色'}",
+      "content": "角色真正说出口的话"
+    }
+  ],
+  "heart_voice": {
+    "emotion": "当前情绪",
+    "thoughts": "角色没说出口的真实想法",
+    "heartRate": "心率描述",
+    "jealousy": "无"
+  }
+}
+
+普通对话优先参考这个示例：
+{
+  "events": [
+    {
+      "type": "speech",
+      "characterId": "${contact.id || ''}",
+      "characterName": "${contact.name || '角色'}",
+      "content": "角色真正说出口的话"
+    }
+  ],
+  "heart_voice": {
+    "emotion": "当前情绪",
+    "thoughts": "角色没说出口的真实想法",
+    "heartRate": "心率描述",
+    "jealousy": "无"
+  }
+}
+
+如需动作时再参考这个示例：
+{
+  "events": [
+    {
       "type": "action",
       "content": "动作、神态、环境、场景推进"
     },
@@ -23290,25 +23369,25 @@ ${isNarrativeMode ? `
 严格规则：
 1. 最外层必须是对象，不要返回数组。
 2. 必须包含 events、heart_voice 两个字段。
-3. events 必须是非空数组，至少 2 条，必须包含至少 1 条 speech。
+3. events 必须是非空数组。
 4. events 每一项必须有 type 和 content。
 5. type 只能是 "action" 或 "speech"。
-6. action 只写动作、神态、环境、场景推进、声音描述和拟声词，不要加星号，不要加括号。
-7. speech 只写角色真正开口说出来的有意义的话，不含引号，不含动作。声音或拟声词（如"咔哒"、"嘎吱"、"啧"单独成句时）必须归入 action，不能归入 speech。
-8. speech 必须直接回应【当前用户最新输入】。
-9. action 可以承接地点、姿势、气氛，但不能继续上一轮具体问题。
-10. 不要输出空 events。
-11. 不要输出空 content。
-12. 不要输出 JSON 外的任何文字。
+6. speech 必须填写 characterId="${contact.id || ''}"、characterName="${contact.name || '角色'}"；speech 只写角色真正开口说出来的话，不含引号，不含动作。
+7. action 表示除说出口的话以外的全部内容，包括动作、神态、心理、环境、旁白、声音、状态变化、场景推进；不要加星号，不要加括号，直接写自然叙述文字。
+8. 如果角色此刻应该说话，就必须输出 speech；普通聊天、追问、闲聊时，优先直接接话。
+9. 如果此刻没有明显动作或场景变化，可以只输出 speech。
+10. 如果剧情需要动作、心理、环境或场景推进，可以输出 action，数量按剧情自然决定，不做硬性上限。
+11. 不要为了凑格式强行加“他看着你”“他沉默了一下”“他皱了皱眉”这类空泛 action。
+12. 不要连续很多条 action 却没有任何 speech，除非当前剧情确实是纯场景描写或过场。
+13. 普通聊天轮次不要全是 action，角色要正常接话。
+14. speech 必须直接回应【当前用户最新输入】；action 也要服务当前剧情推进，不要空转。
+15. 不要输出空 events，不要输出空 content，不要输出 JSON 外的任何文字。
 
 【线下分条建议】
-1. events 不要把所有动作和台词塞进一个超长 content。
-2. 也不要把一句话就分成一条。
-3. 每个 content 不要太短。
-4. speech 每条建议 12 到 42 字，可以包含 1 到 2 句自然台词。
-5. action 每条建议 18 到 55 字，可以包含 1 到 2 个连续动作。
-6. 不要把"嗯、哦、啧"之外的正常回复拆成几个字一条。
-7. 自然分组，在这个长度范围内，不是无脑短拆，也不是全塞一个。
+1. 让 events 按剧情自然分组，不要无脑短拆，也不要全塞进一个超长 content。
+2. 说出口的话单独放进 speech。
+3. 动作、神态、心理、环境、旁白、声音、状态变化、场景推进都放进 action。
+4. 普通对话可以只有 speech；需要场景推进时再加 action。
 ` : `
 【普通私聊输出规则】
 输出多条自然聊天气泡。
@@ -23563,15 +23642,24 @@ ${FORBIDDEN_ACTION_CLICHES_PROMPT}
 2. 必须使用英文双引号 ". 禁止使用中文弯引号 “ ”。
 3. 最外层固定格式：{"events":[...],"heart_voice":{...}}。
 4. events 里每项 type 只能是 "action" 或 "speech"。
-5. action 只写动作、神态、环境、场景推进、声音描述和拟声词。不要加星号，不要加括号，直接写自然叙述文字。
-6. speech 只写角色真正开口说出来的有意义的话，不含引号、不含说话动作。声音或拟声词（如"咔哒"、"嘎吱"、"啧"单独成句时）必须归入 action，不能归入 speech。characterId 和 characterName 填写说话角色的 ID 和名字。
-7. 一段回复可以包含多个 events，动作和台词自由交替，顺序即为叙事顺序。
-8. heart_voice 必须是对象，包含四个字段：emotion（当前情绪）、thoughts（角色没说出口的真实想法）、heartRate（心率描述）、jealousy（醋意/占有欲，无则填 "无"）。
-9. 不要再输出 [heart_voice] 或 [diary] 标签，所有内容必须在 JSON 字段里。
-10. 整个回复就是且仅是一个合法 JSON 对象，可直接被 JSON.parse() 解析。
+5. events 必须是非空数组；每个 event 都必须有 type 和 content。
+6. speech 只写角色真正开口说出来的话，不含引号、不含说话动作。characterId 和 characterName 填写说话角色的 ID 和名字。
+7. action 表示除说出口的话以外的全部内容，包括动作、神态、心理、环境、旁白、声音、状态变化、场景推进。不要加星号，不要加括号，直接写自然叙述文字。
+8. 如果角色此刻应该说话，就必须输出 speech；普通聊天、追问、闲聊时，优先直接接话。
+9. 如果此刻没有明显动作或场景变化，可以只输出 speech。
+10. 如果剧情需要动作、心理、环境或场景推进，可以输出 action，数量按剧情自然决定，不做硬性上限。
+11. 不要为了凑格式强行加“他看着你”“他沉默了一下”“他皱了皱眉”这类空泛 action。
+12. 不要连续很多条 action 却没有任何 speech，除非当前剧情确实是纯场景描写或过场。
+13. 普通聊天轮次不要全是 action，角色要正常接话。
+14. heart_voice 必须是对象，包含四个字段：emotion（当前情绪）、thoughts（角色没说出口的真实想法）、heartRate（心率描述）、jealousy（醋意/占有欲，无则填 "无"）。
+15. 不要再输出 [heart_voice] 或 [diary] 标签，所有内容必须在 JSON 字段里。
+16. 整个回复就是且仅是一个合法 JSON 对象，可直接被 JSON.parse() 解析。
 
-【示例（仅供格式参考，内容自行创作）】
-{"events":[{"type":"action","content":"沈逸翻开那叠崭新的作业本，指尖捏着书页轻轻一抖。"},{"type":"speech","characterId":"shenyi","characterName":"沈逸","content":"顺。"}],"heart_voice":{"emotion":"无奈又带点好笑","thoughts":"这孩子明明听得见，却还要装睡，真是让人又气又想管。","heartRate":"略微加快","jealousy":"无"}}
+【示例一：普通对话优先这样写（仅供格式参考，内容自行创作）】
+{"events":[{"type":"speech","characterId":"当前角色id","characterName":"当前角色名","content":"角色真正说出口的话"}],"heart_voice":{"emotion":"当前情绪","thoughts":"角色没说出口的真实想法","heartRate":"心率描述","jealousy":"无"}}
+
+【示例二：如需动作时再这样写（仅供格式参考，内容自行创作）】
+{"events":[{"type":"action","content":"动作、神态、环境、场景推进"},{"type":"speech","characterId":"当前角色id","characterName":"当前角色名","content":"角色真正说出口的话"}],"heart_voice":{"emotion":"当前情绪","thoughts":"角色没说出口的真实想法","heartRate":"心率描述","jealousy":"无"}}
 `;
 
 // --- (替换) 核心 AI 响应函数 (V3.1 - 支持 forceMessages "后门" ) ---
@@ -24868,6 +24956,11 @@ const KOKO0328_NARRATIVE_BASE_PROMPT = `
 1. **【动作/叙述】**：所有角色的动作、表情、环境描写等非对话内容，**必须**用星号包裹。
 2. **【心理活动】**：所有角色的内心想法、感受、猜测等，**必须**用大括号包裹。
 3. **【角色对话】**：所有角色说出的话，**必须**用标准的中文引号包裹。
+[线下结构提醒]
+1. 普通对话、追问、闲聊时，优先让当前角色直接开口接话；如果此刻没有明显动作、心理或场景变化，可以只写对话。
+2. 动作、神态、心理、环境、旁白、声音、状态变化、场景推进只在剧情确实需要时再写，不要为了凑格式硬加“看着你”“沉默了一下”“皱了皱眉”这类空泛描写。
+3. 说出口的话放在引号里；引号外的内容全部视为非说话叙事。
+4. 不要连续堆很多段只有动作或心理却没有任何角色开口，除非当前确实是纯场景描写或过场。
 [状态栏社交法则]
 你的状态栏是展示你“生活感”的重要窗口。如果你的行为或心情发生了变化，请务必在回复的【末尾区域】、\`[heart_voice]\` 之前，另起一行使用指令更改状态：\`[status: 新状态]\`。
 [绝对核心规则：关于心声]
