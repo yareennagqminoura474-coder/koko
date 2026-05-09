@@ -20300,7 +20300,7 @@ ${qzoneContextText}
 
                 let currentUserMessageParts = [];
                 for (const msg of recentHistory) {
-                    const role = (msg.sender === 'user') ? 'user' : 'assistant';
+                    const role = (msg.sender === 'user' || msg.sender === 'myProfile') ? 'user' : 'assistant';
                     if (role === 'user') {
                         let textContent = null;
                         
