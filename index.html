@@ -22510,6 +22510,127 @@ function joinMibuOfflineActionContent(left, right) {
     return `${a}${glue}${b}`.trim();
 }
 
+function measureActionCardSize(text) {
+    return Array.from(String(text || '').replace(/\n/g, '')).reduce((sum, ch) => {
+        return sum + (/[\u0000-\u00ff]/.test(ch) ? 1 : 2);
+    }, 0);
+}
+
+function shouldBreakActionCard(buffer, nextSentence, sentenceCount) {
+    const current = String(buffer || '').trim();
+    const next = normalizeMibuOfflineActionContent(nextSentence);
+    if (!current || !next) return false;
+
+    const joined = `${current}${next}`;
+    const transitionRegex = /^(?:这时|此刻|随后|然后|紧接着|下一秒|片刻后|过了一会|过了片刻|半晌|良久|与此同时|同一时间|窗外|门外|走廊|楼道|空气里|办公室里|桌上|桌面的|远处|不远处)/;
+
+    if (measureActionCardSize(joined) > 180) return true;
+    if (sentenceCount >= 3) return true;
+    if (sentenceCount >= 2 && measureActionCardSize(current) >= 120 && transitionRegex.test(next)) return true;
+    return false;
+}
+
+function splitMergedActionIntoCards(text) {
+    const rawSource = String(text || '')
+        .replace(/\r/g, '')
+        .replace(/\u00a0/g, ' ')
+        .trim();
+    const source = normalizeMibuOfflineActionContent(rawSource);
+    if (!source || isSilentOfflinePlaceholder(source)) return [];
+    const sourceSentences = source
+        .split(/(?<=[。！？!?])\s*/)
+        .map(s => normalizeMibuOfflineActionContent(s))
+        .filter(Boolean);
+    if (measureActionCardSize(source) <= 120 && sourceSentences.length <= 4) return [source];
+
+    const paragraphs = rawSource
+        .split(/\n{2,}/)
+        .map(part => normalizeMibuOfflineActionContent(part))
+        .filter(Boolean);
+
+    const baseParts = paragraphs.length > 1 ? paragraphs : [source];
+    const result = [];
+
+    baseParts.forEach(part => {
+        if (!part) return;
+        const partSentences = part
+            .split(/(?<=[。！？!?])\s*/)
+            .map(s => normalizeMibuOfflineActionContent(s))
+            .filter(Boolean);
+
+        if (measureActionCardSize(part) <= 180 && partSentences.length <= 4) {
+            result.push(part);
+            return;
+        }
+
+        let sentences = partSentences;
+
+        if (sentences.length <= 1 && measureActionCardSize(part) > 220) {
+            sentences = part
+                .split(/(?<=[，、；;：:])\s*/)
+                .map(s => normalizeMibuOfflineActionContent(s))
+                .filter(Boolean);
+        }
+
+        if (sentences.length <= 1) {
+            result.push(part);
+            return;
+        }
+
+        let buffer = '';
+        let sentenceCount = 0;
+
+        sentences.forEach(sentence => {
+            if (!sentence) return;
+
+            if (buffer && isWeakMibuOfflineActionFragment(sentence)) {
+                const weakJoined = `${buffer}${sentence}`;
+                if (measureActionCardSize(weakJoined) <= 200) {
+                    buffer = weakJoined;
+                    return;
+                }
+            }
+
+            if (shouldBreakActionCard(buffer, sentence, sentenceCount)) {
+                result.push(buffer);
+                buffer = sentence;
+                sentenceCount = 1;
+                return;
+            }
+
+            buffer = buffer ? `${buffer}${sentence}` : sentence;
+            sentenceCount += 1;
+        });
+
+        if (buffer) result.push(buffer);
+    });
+
+    const merged = [];
+    result.forEach(piece => {
+        const cleaned = normalizeMibuOfflineActionContent(piece);
+        if (!cleaned) return;
+
+        if (
+            merged.length &&
+            (measureActionCardSize(cleaned) < 18 || measureActionCardSize(merged[merged.length - 1]) < 60 || isWeakMibuOfflineActionFragment(cleaned))
+        ) {
+            const last = merged.pop();
+            const joined = `${last}\n${cleaned}`.trim();
+            if (measureActionCardSize(joined) <= 220) {
+                merged.push(joined);
+            } else {
+                merged.push(last);
+                merged.push(cleaned);
+            }
+            return;
+        }
+
+        merged.push(cleaned);
+    });
+
+    return merged.filter(piece => piece && measureActionCardSize(piece) >= 12);
+}
+
 function compactMibuOfflineBlocks(blocks) {
     const result = [];
     let actionBuffer = [];
@@ -22521,7 +22642,11 @@ function compactMibuOfflineBlocks(blocks) {
             .join('\n');
         actionBuffer = [];
         if (!merged || isSilentOfflinePlaceholder(merged)) return;
-        result.push({ type: 'offlineAction', content: merged });
+        const pieces = splitOfflineActionForRender(merged);
+        pieces.forEach(piece => {
+            if (!piece || isSilentOfflinePlaceholder(piece)) return;
+            result.push({ type: 'offlineAction', content: piece });
+        });
     }
 
     (blocks || []).forEach(block => {
@@ -22556,10 +22681,14 @@ function compactAdjacentOfflineActions(events) {
 
         actionBuffer = [];
         if (!merged || isSilentOfflinePlaceholder(merged)) return;
-        result.push({
-            ...base,
-            type: 'offlineAction',
-            content: merged
+        const pieces = splitOfflineActionForRender(merged);
+        pieces.forEach(piece => {
+            if (!piece || isSilentOfflinePlaceholder(piece)) return;
+            result.push({
+                ...base,
+                type: 'offlineAction',
+                content: piece
+            });
         });
     }
 
@@ -22670,49 +22799,7 @@ function splitActionSentences(text) {
 }
 
 function splitOfflineActionForRender(text) {
-    const source = normalizeMibuOfflineActionContent(text);
-    if (!source || isSilentOfflinePlaceholder(source)) return [];
-
-    const paragraphs = source
-        .split(/\n{2,}/)
-        .map(part => normalizeMibuOfflineActionContent(part))
-        .filter(Boolean);
-
-    let rawPieces = paragraphs.length ? paragraphs : [source];
-    if (rawPieces.length <= 1 && source.length > 320 && /\n/.test(source)) {
-        rawPieces = source
-            .split(/\n+/)
-            .map(part => normalizeMibuOfflineActionContent(part))
-            .filter(Boolean);
-    }
-
-    const result = [];
-    let buffer = '';
-
-    rawPieces.forEach(piece => {
-        if (!piece || isWeakMibuOfflineActionFragment(piece)) {
-            if (piece) {
-                buffer = buffer ? `${buffer}\n${piece}` : piece;
-            }
-            return;
-        }
-
-        if (!buffer) {
-            buffer = piece;
-            return;
-        }
-
-        const joined = `${buffer}\n${piece}`.trim();
-        if (joined.length <= 320) {
-            buffer = joined;
-        } else {
-            result.push(buffer);
-            buffer = piece;
-        }
-    });
-
-    if (buffer) result.push(buffer);
-    return result.filter(Boolean);
+    return splitMergedActionIntoCards(text);
 }
 
 function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
