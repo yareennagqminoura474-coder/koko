@@ -19446,10 +19446,20 @@ ${FORBIDDEN_ROLE_WORDS_PROMPT || ''}
 
 请延续当前群聊线下模式，生成 JSON events。
 ` : `
-[当前用户最新输入]
-${latestInputText || '(用户没有文字输入)'}
+【当前线下用户最新输入】
+下面才是本轮用户最新输入。
+你本轮唯一需要直接回应的是这里的内容。
+上面的聊天记录、记忆流、上一轮角色回复只能作为背景，不是本轮要继续回答的问题。
+${doesCurrentInputReferToPrevious(latestInputText)
+    ? '用户本轮明确提到了上一轮，可以自然承接。'
+    : '用户本轮没有明确提到上一轮，禁止继续回复上一轮、补答上一轮、解释上一轮。'}
 
-请继续群聊线下模式，生成 JSON events。
+${buildCurrentTurnBoundaryRules('offline', doesCurrentInputReferToPrevious(latestInputText))}
+
+【线下用户最新输入开始】
+${latestInputText || '(用户没有文字输入)'}
+【线下用户最新输入结束】
+请只回应以上最新输入，继续群聊线下模式并生成 JSON events。
 `;
 
         const rawResponse = await generateAiResponse(
@@ -20436,8 +20446,19 @@ ${state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）'}
 [！！！核心任务！！！]
 用户（${myProfile.name}）刚刚在群聊里发言。
 
-[当前用户最新输入]
+【当前群聊最新输入】
+下面才是本轮用户最新输入。
+你本轮唯一需要直接回应的是这里的内容。
+上面的聊天记录、记忆流、上一轮角色回复只能作为背景，不是本轮要继续回答的问题。
+${doesCurrentInputReferToPrevious(latestGroupInputText)
+    ? '用户本轮明确提到了上一轮，可以自然承接。'
+    : '用户本轮没有明确提到上一轮，禁止继续回复上一轮、补答上一轮、解释上一轮。'}
+
+${buildCurrentTurnBoundaryRules('group', doesCurrentInputReferToPrevious(latestGroupInputText))}
+
+【群聊最新输入开始】
 ${latestGroupInputText || '(用户发送了非文字内容)'}
+【群聊最新输入结束】
 
 [任务]
 你的任务是作为群聊模拟器和剧本导演，阅读 System 中提供的【统一时序记忆流】、【角色档案】和【世界书】，让群成员像真实群聊一样自然回应并继续推进当前对话。
@@ -20753,8 +20774,8 @@ function doesCurrentInputReferToPrevious(text) {
 function removePreviousTurnCallbackIfNotAllowed(text, latestUserInput) {
     if (doesCurrentInputReferToPrevious(latestUserInput)) return text;
     let s = String(text || '');
-    s = s.replace(/^(你刚刚|你刚才|刚才那句|上一句|你前面说|从你刚刚|刚刚那种|刚才那个|刚刚那个|还在想刚才|你刚说)[^。！？!?]*[。！？!?]/, '');
-    s = s.replace(/(你刚刚|你刚才|刚才那句|上一句|你前面说|刚才那个|刚刚那个)[^。！？!?]*[。！？!?]/g, '');
+    s = s.replace(/^(你刚刚|你刚才|刚才那句|上一句|你前面说|从你刚刚|刚刚那种|刚才那个|刚刚那个|还在想刚才|刚才那件事|关于刚才|我刚才不是|你前面那个|接着刚刚|你刚说)[^。！？!?]*[。！？!?]/, '');
+    s = s.replace(/(你刚刚|你刚才|刚才那句|上一句|你前面说|刚才那个|刚刚那个|还在想刚才|刚才那件事|关于刚才|我刚才不是|你前面那个|接着刚刚)[^。！？!?]*[。！？!?]/g, '');
     return s.trim();
 }
 
@@ -20974,7 +20995,7 @@ ${recentChatHistory}
 `).join('');
 }
 
-function buildKoko0328GroupRequestMessages(recentHistory) {
+function buildKoko0328GroupRequestMessages(recentHistory, group, latestUserMsg) {
     const messages = [];
     let currentUserMessageParts = [];
 
@@ -21029,6 +21050,11 @@ function buildKoko0328GroupRequestMessages(recentHistory) {
 
     if (currentUserMessageParts.length > 0) {
         messages.push({ role: 'user', content: currentUserMessageParts });
+    }
+
+    if (latestUserMsg) {
+        messages.push(buildKoko0328GroupCurrentTurnMessage(group, latestUserMsg));
+        return messages;
     }
 
     const needsFallbackUserMessage =
@@ -21326,12 +21352,17 @@ MESSAGE_END
 `;
 
         const contextLength = state.apiSettings.contextLength || 20;
-        const recentHistory = (group.history || [])
-            .filter(msg => msg.sender !== 'system_instruction' && msg.type !== 'system_notification')
-            .slice(-contextLength);
+        const latestGroupUserMsg = (group.history || [])
+            .filter(msg =>
+                msg &&
+                (msg.sender === 'user' || msg.sender === 'myProfile') &&
+                !['system_notification', 'loading', 'error', 'heart_voice'].includes(msg.type)
+            )
+            .slice(-1)[0] || null;
+        const recentHistory = buildPromptHistoryExcludingLatest(group.history || [], latestGroupUserMsg?.id, contextLength);
         const finalRequestMessages = [
             { role: 'system', content: groupChatPrompt },
-            ...buildKoko0328GroupRequestMessages(recentHistory)
+            ...buildKoko0328GroupRequestMessages(recentHistory, group, latestGroupUserMsg)
         ];
 
         const rawResponse = await generateAiResponseLegacy(
@@ -23401,12 +23432,70 @@ ${isNarrativeMode ? `
 `;
 }
 
+function buildCurrentTurnUserMessage(latestParts, latestInputText, contact, isNarrativeMode) {
+    const allowPrev = doesCurrentInputReferToPrevious(latestInputText);
+    const mode = isNarrativeMode ? 'offline' : (contact && contact.isGroup ? 'group' : 'private');
+    const boundaryRules = buildCurrentTurnBoundaryRules(mode, allowPrev);
+    const title =
+        mode === 'offline'
+            ? '【当前线下用户最新输入】'
+            : (mode === 'group' ? '【当前群聊最新输入】' : '【当前轮次任务】');
+    const startMarker =
+        mode === 'offline'
+            ? '【线下用户最新输入开始】'
+            : (mode === 'group' ? '【群聊最新输入开始】' : '【用户最新输入开始】');
+    const endMarker =
+        mode === 'offline'
+            ? '【线下用户最新输入结束】'
+            : (mode === 'group' ? '【群聊最新输入结束】' : '【用户最新输入结束】');
+
+    const header = [
+        title,
+        '下面才是本轮用户最新输入。',
+        '你本轮唯一需要直接回应的是这里的内容。',
+        '上面的聊天记录、记忆流、上一轮角色回复只能作为背景，不是本轮要继续回答的问题。',
+        allowPrev
+            ? '用户本轮明确提到了上一轮，可以自然承接。'
+            : '用户本轮没有明确提到上一轮，禁止继续回复上一轮、补答上一轮、解释上一轮。'
+    ].join('\n');
+
+    const parts = [
+        { type: 'text', text: header + '\n\n' + boundaryRules + '\n\n' + startMarker }
+    ];
+
+    if (latestParts && latestParts.length) {
+        parts.push(...latestParts);
+    } else if (latestInputText && String(latestInputText).trim()) {
+        parts.push({ type: 'text', text: String(latestInputText).trim() });
+    } else {
+        parts.push({ type: 'text', text: '（本轮没有可解析的最新输入，请不要继续更早一轮的话题。）' });
+    }
+
+    parts.push({ type: 'text', text: endMarker + '\n请只回应以上最新输入。' });
+
+    return { role: 'user', content: parts };
+}
+
 function buildPromptHistoryExcludingLatest(history, latestUserMessageId, limit) {
     const list = Array.isArray(history) ? history : [];
+    let latestUserMsg = null;
+
+    if (latestUserMessageId) {
+        latestUserMsg = list.find(m => m && m.id === latestUserMessageId);
+    }
+    if (!latestUserMsg) {
+        latestUserMsg = list.filter(m =>
+            m &&
+            (m.sender === 'user' || m.sender === 'myProfile') &&
+            !['system_notification', 'loading', 'error', 'heart_voice'].includes(m.type)
+        ).slice(-1)[0];
+    }
+
     return list
         .filter(msg => {
             if (!msg) return false;
-            if (latestUserMessageId && msg.id === latestUserMessageId) return false;
+            if (latestUserMsg && msg === latestUserMsg) return false;
+            if (latestUserMsg && latestUserMsg.id && msg.id === latestUserMsg.id) return false;
             if (msg.sender === 'system_instruction') return false;
             if (['system_notification', 'loading', 'error', 'heart_voice'].includes(msg.type)) return false;
             return true;
@@ -23473,6 +23562,12 @@ function buildPromptPartsFromLatestUserMessage(msg, contact) {
     }
 
     return parts;
+}
+
+function buildKoko0328GroupCurrentTurnMessage(group, latestUserMsg) {
+    const latestParts = buildPromptPartsFromLatestUserMessage(latestUserMsg, group);
+    const latestInputText = getGroupPromptMessageText(latestUserMsg);
+    return buildCurrentTurnUserMessage(latestParts, latestInputText, group, false);
 }
 // --- 辅助函数结束 ---
 
@@ -24677,15 +24772,18 @@ ${qzoneContextText}
 
                     try {
                         const latestParts = buildPromptPartsFromLatestUserMessage(_lastUserMsg, contact);
-                        if (latestParts && latestParts.length) {
-                            messages.push({ role: 'user', content: latestParts });
-                        } else if (_latestInputText && String(_latestInputText).trim()) {
-                            messages.push({ role: 'user', content: [{ type: 'text', text: String(_latestInputText).trim() }] });
-                        }
+                        const currentTurnMessage = buildCurrentTurnUserMessage(
+                            latestParts,
+                            _latestInputText,
+                            contact,
+                            isNarrativeMode
+                        );
+                        messages.push(currentTurnMessage);
                         console.log('[AI Prompt] 已追加当前用户最新输入', {
                             latestUserMessageId: _latestUserMsgId,
                             hasLatestParts: !!(latestParts && latestParts.length),
-                            isNarrativeMode: !!isNarrativeMode
+                            isNarrativeMode: !!isNarrativeMode,
+                            wrappedAsCurrentTurnTask: true
                         });
                     } catch (_e) {
                         console.warn('[AI Prompt] 追加当前用户最新输入失败:', _e);
