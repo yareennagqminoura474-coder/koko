@@ -18875,16 +18875,27 @@ case 'chat_history_share': {
         // 步骤2: (保持不变) 【条件性】收集AI成员与您的私聊历史
         if (group.memoryShared) {
             unmutedAiMembers.forEach(member => {
-                const contact = state.contacts.find(c => c.id === member.id); // 私聊只存在于state.contacts
+                const contact = state.contacts.find(c => c.id === member); // 私聊只存在于state.contacts
                 if (contact && contact.history && contact.history.length > 0) {
                     contact.history.slice(-30).forEach(msg => {
-                        if (msg.type !== 'text' || msg.sender === 'system_instruction') return;
+                        if (msg.sender === 'system_instruction') return;
+                        let content = '';
+                        if (msg.type === 'text' || msg.type === 'html') {
+                            content = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : '';
+                        } else if (msg.type === 'offlineSpeech') {
+                            content = `(说)${msg.content}`;
+                        } else if (msg.type === 'offlineAction') {
+                            content = `(动作)${msg.content}`;
+                        } else if (msg.type === 'voice') {
+                            content = `(语音)${msg.content?.text || ''}`;
+                        } else { return; }
+                        if (!content.trim()) return;
                         const authorProfile = (msg.sender === 'user') ? myProfile : contact;
                         unifiedMemoryStream.push({
                             timestamp: msg.timestamp,
                             type: `私聊[${contact.name}]`,
                             author: authorProfile.name,
-                            content: msg.content
+                            content: content
                         });
                     });
                 }
@@ -19756,14 +19767,22 @@ case 'takeout':
 
                     for (const group of sharedMemoryGroups) {
                         group.history.slice(-20).forEach(msg => {
-                            if (msg.type !== 'text') return;
+                            let groupMsgContent = '';
+                            if (msg.type === 'text' || msg.type === 'html') {
+                                groupMsgContent = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : '';
+                            } else if (msg.type === 'offlineSpeech') {
+                                groupMsgContent = `(说)${msg.content}`;
+                            } else if (msg.type === 'offlineAction') {
+                                groupMsgContent = `(动作)${msg.content}`;
+                            } else { return; }
+                            if (!groupMsgContent.trim()) return;
                             const authorProfile = (msg.sender === 'myProfile') ? state.myProfile : state.contacts.find(c => c.id === msg.sender);
                             if (!authorProfile) return;
                             unifiedMemoryStream.push({
                                 timestamp: msg.timestamp,
                                 type: `群聊[${group.name}]`,
                                 author: authorProfile.name,
-                                content: msg.content
+                                content: groupMsgContent
                             });
                         });
                     }
