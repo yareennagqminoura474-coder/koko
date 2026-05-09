@@ -19424,6 +19424,10 @@ const NARRATIVE_BASE_PROMPT = `
 1.  **【动作/叙述】**：所有角色的动作、表情、环境描写等非对话内容，**必须**用星号包裹。 范例： *他微笑着点了点头。*
 2.  **【心理活动】**：所有角色的内心想法、感受、猜测等，**必须**用大括号包裹。 范例： {原来用户也是这么想的。}
 3.  **【角色对话】**：所有角色说出的话，**必须**用标准的中文引号包裹。 范例： “你好，很高兴认识你。”
+
+[⚖️ 动作与对话的节奏平衡]
+每次回复中，动作描写（星号/括号块）和对话（引号内容）的数量应当大致相当，不要让任何一方占据绝对主导。自然地交替：一段动作之后接一句对话，一句对话之后配一段神态描写。不要连续写三段以上的纯动作而没有台词，也不要连续出现三句以上的纯对话而没有任何动作或神态。
+
 4.**记忆刻印**: \`[memory: 内容]\`
   * **含义**: 当用户说了让你极度感动的话、或者你们之间发生了里程碑式的事件（如确认关系、第一次约会、解开误会）时，你可以使用此指令将这段经历永久写入你的【记忆核心】。
   * **原则**: 这是你珍贵的记忆空间（容量有限），请不要记录鸡毛蒜皮的小事（如“今天吃了饭”），只记录那些触动你灵魂、你希望永远不要忘记的瞬间。
@@ -22377,13 +22381,21 @@ function looksLikeOfflineSpeechContent(text) {
     const s = cleanAiSpeechText(cleanOfflineEventContent(raw));
     if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return false;
     if (isUserControlledSpeech(s) || looksLikeOfflineAction(s)) return false;
-    if ((raw.startsWith('“') && raw.endsWith('”')) || (raw.startsWith('"') && raw.endsWith('"'))) return true;
-    if (/[\?？!！:：]/.test(s)) return true;
+    // 引号显式包裹
+    if ((raw.startsWith('”') && raw.endsWith('”')) || (raw.startsWith('”') && raw.endsWith('”'))) return true;
+    // 含问号叹号，强对话语气
+    if (/[?？!！]/.test(s)) return true;
+    // 末尾语气词
     const trimmedEnding = s.replace(/[。！？!?…~～]+$/g, '').trim();
-    if (/(吗|呢|吧|呀|啊|哦|啦|喽|哼)$/.test(trimmedEnding)) return true;
-    if (/^(欸|诶|哎|喂|嗯|哦|啊|哈|啧|行|好|可以|不用|别|先|等等|等一下|听着|进来|坐|站住|拿来|给我|没事|继续|走吧|回去|留下|慢点|别怕|疼|烫)/.test(s)) return true;
-    if (/(你|我|咱|我们|你们)/.test(s) && s.length <= 48) return true;
-    if (!/[，。！？!?；;：:\n]/.test(s) && s.length <= 14) return true;
+    if (/(吗|呢|吧|呀|啊|哦|啦|喽|哼|嘛|咧|嗯|哈)$/.test(trimmedEnding)) return true;
+    // 常见口语开头词
+    if (/^(欸|诶|哎|喂|嗯|哦|啊|哈|啧|行|好|可以|不用|别|先|等等|等一下|听着|进来|坐|站住|拿来|给我|没事|继续|走吧|回去|留下|慢点|别怕|疼|烫|说|谢|不|行了|算了|随便|随你|无所谓)/.test(s)) return true;
+    // 有人称代词且不太长——大概率是在说话
+    if (/(你|我|咱|我们|你们|他|她|它)/.test(s) && s.length <= 36) return true;
+    // 短且没有叙事符号——更可能是台词
+    if (s.length <= 20 && !/[*（(【{]/.test(raw)) return true;
+    // 说道/问道/回答 后接内容
+    if (/(?:说|道|问|答|喊|叫|低语|轻声|开口)[：:]\s*(.+)/.test(s)) return true;
     return false;
 }
 
@@ -22393,6 +22405,8 @@ function normalizeOfflineEventType(rawType, rawContent = '') {
     if (t === 'action' || t === 'offlineaction' || t === 'narrative-action' || t === 'narration' || t === 'scene' || t === 'description' || t === 'psychology' || t === 'narrative-psychology' || t === 'thought' || t === 'status') return 'offlineAction';
     if (looksLikeOfflineAction(rawContent)) return 'offlineAction';
     if (looksLikeOfflineSpeechContent(rawContent)) return 'offlineSpeech';
+    // 短内容且没有叙事结构符号，倾向于台词
+    if (rawContent.length <= 30 && !/[*（(【{]/.test(rawContent)) return 'offlineSpeech';
     return 'offlineAction';
 }
 
@@ -22504,6 +22518,34 @@ function splitMibuStyleOfflineBlocks(text) {
     const pushActionBlock = (chunk) => {
         const normalized = String(chunk || '').replace(/\u00a0/g, ' ').trim();
         if (!normalized) return;
+        // \u63d0\u53d6 "\u8bf4\u9053\uff1axxx" / "\u95ee\u9053\uff1axxx" \u91cc\u7684\u53f0\u8bcd\uff0c\u62c6\u5206\u4e3a speech
+        const speechExtractRegex = /(?:\u8bf4\u9053|\u95ee\u9053|\u5f00\u53e3|\u56de\u7b54|\u4f4e\u58f0|\u8f7b\u58f0)[\uff1a:]\s*[""]?([^""\n\uff0c\u3002]{2,30})[""]?/g;
+        let speechMatch;
+        let lastSpeechEnd = 0;
+        let hasExtracted = false;
+        const tempBlocks = [];
+        while ((speechMatch = speechExtractRegex.exec(normalized)) !== null) {
+            const before = normalized.slice(lastSpeechEnd, speechMatch.index).trim();
+            if (before) tempBlocks.push({ type: 'action', content: before });
+            tempBlocks.push({ type: 'speech', content: speechMatch[1].trim() });
+            lastSpeechEnd = speechExtractRegex.lastIndex;
+            hasExtracted = true;
+        }
+        if (hasExtracted) {
+            const tail = normalized.slice(lastSpeechEnd).trim();
+            if (tail) tempBlocks.push({ type: 'action', content: tail });
+            tempBlocks.forEach(b => {
+                if (b.type === 'speech') {
+                    pushSpeechBlock(b.content);
+                } else {
+                    b.content.split(/\n{2,}/).map(p => p.replace(/[ \t]*\n[ \t]*/g, ' ').trim()).filter(Boolean).forEach(p => {
+                        if (!isOrphanBracket(p) && !isJsonGarbageFragment(p)) blocks.push({ type: 'offlineAction', content: p });
+                    });
+                }
+            });
+            return;
+        }
+        // \u539f\u903b\u8f91
         normalized
             .split(/\n{2,}/)
             .map(part => part.replace(/[ \t]*\n[ \t]*/g, ' ').trim())
@@ -22520,7 +22562,7 @@ function splitMibuStyleOfflineBlocks(text) {
         blocks.push({ type: 'offlineSpeech', content: cleaned });
     };
 
-    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|“[^”]+”|"[^"\n]+"|\n\s*\n+)/g;
+    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|”[^”]+”|”[^”\n]+”|「[^」]+」|\n\s*\n+)/g;
     let lastIndex = 0;
     let match;
 
@@ -22530,10 +22572,17 @@ function splitMibuStyleOfflineBlocks(text) {
         pushActionBlock(before);
 
         if (!/\n\s*\n+/.test(token)) {
-            const isQuotedSpeech = (token.startsWith('“') && token.endsWith('”')) || (token.startsWith('"') && token.endsWith('"'));
-            if (isQuotedSpeech) pushSpeechBlock(token.slice(1, -1));
-            else if (token.startsWith('**') && token.endsWith('**')) pushActionBlock(token.slice(2, -2));
-            else pushActionBlock(token.slice(1, -1));
+            const isQuotedSpeech =
+                (token.startsWith('”') && token.endsWith('”')) ||
+                (token.startsWith('”') && token.endsWith('”')) ||
+                (token.startsWith('「') && token.endsWith('」'));
+            if (isQuotedSpeech) {
+                pushSpeechBlock(token.slice(1, -1));
+            } else if (token.startsWith('**') && token.endsWith('**')) {
+                pushActionBlock(token.slice(2, -2));
+            } else {
+                pushActionBlock(token.slice(1, -1));
+            }
         }
 
         lastIndex = tokenRegex.lastIndex;
