@@ -22510,93 +22510,155 @@ function joinMibuOfflineActionContent(left, right) {
     return `${a}${glue}${b}`.trim();
 }
 
-function splitMibuStyleOfflineBlocks(text) {
-    const source = String(text || '').replace(/\r/g, '');
-    if (!source.trim()) return [];
-    const blocks = [];
+function compactMibuOfflineBlocks(blocks) {
+    const result = [];
+    let actionBuffer = [];
 
-    const pushActionBlock = (chunk) => {
-        const normalized = String(chunk || '').replace(/\u00a0/g, ' ').trim();
-        if (!normalized) return;
-        // \u63d0\u53d6 "\u8bf4\u9053\uff1axxx" / "\u95ee\u9053\uff1axxx" \u91cc\u7684\u53f0\u8bcd\uff0c\u62c6\u5206\u4e3a speech
-        const speechExtractRegex = /(?:\u8bf4\u9053|\u95ee\u9053|\u5f00\u53e3|\u56de\u7b54|\u4f4e\u58f0|\u8f7b\u58f0)[\uff1a:]\s*[""]?([^""\n\uff0c\u3002]{2,30})[""]?/g;
-        let speechMatch;
-        let lastSpeechEnd = 0;
-        let hasExtracted = false;
-        const tempBlocks = [];
-        while ((speechMatch = speechExtractRegex.exec(normalized)) !== null) {
-            const before = normalized.slice(lastSpeechEnd, speechMatch.index).trim();
-            if (before) tempBlocks.push({ type: 'action', content: before });
-            tempBlocks.push({ type: 'speech', content: speechMatch[1].trim() });
-            lastSpeechEnd = speechExtractRegex.lastIndex;
-            hasExtracted = true;
-        }
-        if (hasExtracted) {
-            const tail = normalized.slice(lastSpeechEnd).trim();
-            if (tail) tempBlocks.push({ type: 'action', content: tail });
-            tempBlocks.forEach(b => {
-                if (b.type === 'speech') {
-                    pushSpeechBlock(b.content);
-                } else {
-                    b.content.split(/\n{2,}/).map(p => p.replace(/[ \t]*\n[ \t]*/g, ' ').trim()).filter(Boolean).forEach(p => {
-                        if (!isOrphanBracket(p) && !isJsonGarbageFragment(p)) blocks.push({ type: 'offlineAction', content: p });
-                    });
-                }
-            });
-            return;
-        }
-        // \u539f\u903b\u8f91
-        normalized
-            .split(/\n{2,}/)
-            .map(part => part.replace(/[ \t]*\n[ \t]*/g, ' ').trim())
+    function flushAction() {
+        const merged = actionBuffer
+            .map(block => normalizeMibuOfflineActionContent(block.content))
             .filter(Boolean)
-            .forEach(part => {
-                if (!part || isOrphanBracket(part) || isJsonGarbageFragment(part)) return;
-                blocks.push({ type: 'offlineAction', content: part });
-            });
-    };
-
-    const pushSpeechBlock = (chunk) => {
-        const cleaned = cleanAiSpeechText(cleanOfflineEventContent(chunk));
-        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned)) return;
-        blocks.push({ type: 'offlineSpeech', content: cleaned });
-    };
-
-    const structuredMarkerRegex = /[“”"{}（）()\*\n「」]/;
-    if (!structuredMarkerRegex.test(source)) {
-        if (looksLikeOfflineAction(source)) pushActionBlock(source);
-        else pushSpeechBlock(source);
-        return blocks;
+            .join('\n');
+        actionBuffer = [];
+        if (!merged || isSilentOfflinePlaceholder(merged)) return;
+        result.push({ type: 'offlineAction', content: merged });
     }
 
-    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|“[^”]+”|"[^"\n]+"|「[^」]+」|\n\s*\n+)/g;
+    (blocks || []).forEach(block => {
+        if (!block || !block.content) return;
+        if (block.type === 'offlineAction') {
+            actionBuffer.push(block);
+            return;
+        }
+
+        const cleaned = cleanAiSpeechText(cleanOfflineEventContent(block.content));
+        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
+        flushAction();
+        result.push({ type: 'offlineSpeech', content: cleaned });
+    });
+
+    flushAction();
+    return result;
+}
+
+function compactAdjacentOfflineActions(events) {
+    const list = Array.isArray(events) ? events.filter(Boolean) : [];
+    const result = [];
+    let actionBuffer = [];
+
+    function flushAction() {
+        if (!actionBuffer.length) return;
+        const base = actionBuffer[0];
+        const merged = actionBuffer
+            .map(ev => normalizeMibuOfflineActionContent(ev.content || ''))
+            .filter(Boolean)
+            .join('\n');
+
+        actionBuffer = [];
+        if (!merged || isSilentOfflinePlaceholder(merged)) return;
+        result.push({
+            ...base,
+            type: 'offlineAction',
+            content: merged
+        });
+    }
+
+    list.forEach(ev => {
+        if (!ev || !ev.content) return;
+        const type = normalizeOfflineEventType(ev.type, ev.content);
+        if (type === 'offlineAction') {
+            actionBuffer.push(ev);
+            return;
+        }
+
+        const cleaned = cleanAiSpeechText(cleanOfflineEventContent(ev.content));
+        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) {
+            flushAction();
+            return;
+        }
+
+        flushAction();
+        result.push({
+            ...ev,
+            type: 'offlineSpeech',
+            content: cleaned
+        });
+    });
+
+    flushAction();
+    return result;
+}
+
+function splitMibuStyleOfflineBlocks(text) {
+    const source = String(text || '').replace(/\r/g, '').trim();
+    if (!source) return [];
+
+    const blocks = [];
+    let actionBuffer = [];
+
+    function flushAction() {
+        const merged = actionBuffer
+            .map(s => normalizeMibuOfflineActionContent(s))
+            .filter(Boolean)
+            .join('\n');
+        actionBuffer = [];
+        if (!merged || isSilentOfflinePlaceholder(merged)) return;
+        blocks.push({ type: 'offlineAction', content: merged });
+    }
+
+    function pushAction(chunk) {
+        const cleaned = normalizeMibuOfflineActionContent(chunk);
+        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
+        actionBuffer.push(cleaned);
+    }
+
+    function pushSpeech(chunk) {
+        const cleaned = cleanAiSpeechText(cleanOfflineEventContent(chunk));
+        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
+        flushAction();
+        blocks.push({ type: 'offlineSpeech', content: cleaned });
+    }
+
+    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|“[^”]+”|"[^"\n]+"|「[^」]+」)/g;
     let lastIndex = 0;
+    let hasStructuredToken = false;
     let match;
 
     while ((match = tokenRegex.exec(source)) !== null) {
-        const token = match[0];
-        const before = source.slice(lastIndex, match.index);
-        pushActionBlock(before);
+        hasStructuredToken = true;
+        const before = source.slice(lastIndex, match.index).trim();
+        if (before) pushAction(before);
 
-        if (!/\n\s*\n+/.test(token)) {
-            const isQuotedSpeech =
-                (token.startsWith('“') && token.endsWith('”')) ||
-                (token.startsWith('"') && token.endsWith('"')) ||
-                (token.startsWith('「') && token.endsWith('」'));
-            if (isQuotedSpeech) {
-                pushSpeechBlock(token.slice(1, -1));
-            } else if (token.startsWith('**') && token.endsWith('**')) {
-                pushActionBlock(token.slice(2, -2));
-            } else {
-                pushActionBlock(token.slice(1, -1));
-            }
+        const token = match[0];
+        const isQuotedSpeech =
+            (token.startsWith('“') && token.endsWith('”')) ||
+            (token.startsWith('"') && token.endsWith('"')) ||
+            (token.startsWith('「') && token.endsWith('」'));
+
+        if (isQuotedSpeech) {
+            pushSpeech(token.slice(1, -1));
+        } else if (token.startsWith('**') && token.endsWith('**')) {
+            pushAction(token.slice(2, -2));
+        } else {
+            pushAction(token.slice(1, -1));
         }
 
         lastIndex = tokenRegex.lastIndex;
     }
 
-    pushActionBlock(source.slice(lastIndex));
-    return blocks;
+    const tail = source.slice(lastIndex).trim();
+    if (tail) {
+        if (hasStructuredToken) {
+            pushAction(tail);
+        } else if (looksLikeOfflineAction(tail)) {
+            pushAction(tail);
+        } else {
+            pushSpeech(tail);
+        }
+    }
+
+    flushAction();
+    return compactMibuOfflineBlocks(blocks);
 }
 
 function splitActionSentences(text) {
@@ -22608,101 +22670,49 @@ function splitActionSentences(text) {
 }
 
 function splitOfflineActionForRender(text) {
-    const source = String(text || '').replace(/\r/g, '').trim();
-    if (!source) return [];
+    const source = normalizeMibuOfflineActionContent(text);
+    if (!source || isSilentOfflinePlaceholder(source)) return [];
 
-    const actionBlocks = splitMibuStyleOfflineBlocks(source)
-        .filter(block => block.type === 'offlineAction')
-        .map(block => block.content);
+    const paragraphs = source
+        .split(/\n{2,}/)
+        .map(part => normalizeMibuOfflineActionContent(part))
+        .filter(Boolean);
 
-    const normalizedPieces = [];
-    const collectPiece = (input) => {
-        const cleaned = normalizeMibuOfflineActionContent(input);
-        if (cleaned) normalizedPieces.push(cleaned);
-    };
-
-    const flushLongActionBlock = (input) => {
-        const raw = String(input || '').replace(/\r/g, '').trim();
-        if (!raw) return;
-
-        const segments = raw
-            .split(/\n{2,}/)
-            .map(part => part.replace(/[ \t]*\n[ \t]*/g, ' ').trim())
+    let rawPieces = paragraphs.length ? paragraphs : [source];
+    if (rawPieces.length <= 1 && source.length > 320 && /\n/.test(source)) {
+        rawPieces = source
+            .split(/\n+/)
+            .map(part => normalizeMibuOfflineActionContent(part))
             .filter(Boolean);
-        const workingSegments = segments.length > 0 ? segments : [raw];
+    }
 
-        workingSegments.forEach(segment => {
-            if (segment.length <= 70) {
-                collectPiece(segment);
-                return;
+    const result = [];
+    let buffer = '';
+
+    rawPieces.forEach(piece => {
+        if (!piece || isWeakMibuOfflineActionFragment(piece)) {
+            if (piece) {
+                buffer = buffer ? `${buffer}\n${piece}` : piece;
             }
-
-            const sentences = splitActionSentences(segment);
-            if (sentences.length <= 1) {
-                if (segment.length > 90) {
-                    segment
-                        .split(/(?<=[，、；;：:])\s*/)
-                        .map(part => part.trim())
-                        .filter(Boolean)
-                        .forEach(part => collectPiece(part));
-                    return;
-                }
-                collectPiece(segment);
-                return;
-            }
-
-            let buffer = '';
-            let sentenceCount = 0;
-            sentences.forEach(sentence => {
-                const cleanedSentence = normalizeMibuOfflineActionContent(sentence);
-                if (!cleanedSentence) return;
-                const nextBuffer = buffer ? joinMibuOfflineActionContent(buffer, cleanedSentence) : cleanedSentence;
-                const shouldFlush = buffer && (nextBuffer.length > 65 || sentenceCount >= 2);
-
-                if (shouldFlush) {
-                    collectPiece(buffer);
-                    buffer = cleanedSentence;
-                    sentenceCount = 1;
-                    return;
-                }
-
-                buffer = nextBuffer;
-                sentenceCount += 1;
-                if (buffer.length >= 45 && sentenceCount >= 2) {
-                    collectPiece(buffer);
-                    buffer = '';
-                    sentenceCount = 0;
-                }
-            });
-            if (buffer) collectPiece(buffer);
-        });
-    };
-
-    if (actionBlocks.length > 0) actionBlocks.forEach(flushLongActionBlock);
-    else flushLongActionBlock(source);
-
-    if (normalizedPieces.length === 0) return [];
-
-    const merged = [];
-    normalizedPieces.forEach(piece => {
-        const prev = merged[merged.length - 1];
-        if (!prev) {
-            merged.push(piece);
             return;
         }
-        const prevLen = prev.replace(/\s/g, '').length;
-        const pieceLen = piece.replace(/\s/g, '').length;
-        if (pieceLen < 25 || prevLen < 25 || isWeakMibuOfflineActionFragment(piece)) {
-            const joined = normalizeMibuOfflineActionContent(joinMibuOfflineActionContent(prev, piece));
-            if (joined && joined.length <= 75) {
-                merged[merged.length - 1] = joined;
-                return;
-            }
+
+        if (!buffer) {
+            buffer = piece;
+            return;
         }
-        merged.push(piece);
+
+        const joined = `${buffer}\n${piece}`.trim();
+        if (joined.length <= 320) {
+            buffer = joined;
+        } else {
+            result.push(buffer);
+            buffer = piece;
+        }
     });
 
-    return merged.filter(Boolean);
+    if (buffer) result.push(buffer);
+    return result.filter(Boolean);
 }
 
 function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
@@ -22715,7 +22725,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
 
     const messageType = normalizeOfflineEventType(ev.type || ev.kind || ev.eventType || '', rawContent);
     if (messageType === 'offlineAction') {
-        const structuredBlocks = /[“"\*{（(\n]/.test(rawContent)
+        const structuredBlocks = /[“"\*{（(\n「]/.test(rawContent)
             ? splitMibuStyleOfflineBlocks(rawContent)
             : [{ type: 'offlineAction', content: rawContent }];
 
@@ -22725,7 +22735,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
                 const speechPieces = block.content.length <= 42 ? [cleanAiSpeechText(cleanOfflineEventContent(block.content))].filter(Boolean) : splitOfflineSpeechForRender(block.content);
                 speechPieces.forEach(piece => {
                     piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
-                    if (!piece || isUserControlledSpeech(piece)) return;
+                    if (!piece || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
                     expanded.push({
                         type: 'offlineSpeech',
                         sender: ev.sender || ev.characterId || senderProfile?.id,
@@ -22738,6 +22748,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
             }
 
             splitOfflineActionForRender(block.content).forEach(content => {
+                if (!content || isSilentOfflinePlaceholder(content)) return;
                 expanded.push({
                     type: 'offlineAction',
                     sender: 'system',
@@ -22751,7 +22762,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
         const pieces = rawContent.length <= 42 ? [cleanAiSpeechText(cleanOfflineEventContent(rawContent))].filter(Boolean) : splitOfflineSpeechForRender(rawContent);
         pieces.forEach(piece => {
             piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
-            if (!piece || isUserControlledSpeech(piece)) return;
+            if (!piece || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
             expanded.push({
                 type: 'offlineSpeech',
                 sender: ev.sender || ev.characterId || senderProfile?.id,
@@ -22762,7 +22773,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
         });
     }
 
-    return expanded;
+    return compactAdjacentOfflineActions(expanded);
 }
 
 function splitLongSpeech(text) {
@@ -22777,6 +22788,7 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
 
     function pushAction(text) {
         splitOfflineActionForRender(text).forEach(cleaned => {
+            if (!cleaned || isSilentOfflinePlaceholder(cleaned)) return;
             result.push({
                 type: 'offlineAction',
                 sender: 'system',
@@ -22790,10 +22802,10 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
 
     function pushSpeech(text) {
         const cleaned = cleanAiSpeechText(cleanOfflineEventContent(text));
-        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned)) return;
+        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
         splitLongSpeech(cleaned).forEach(piece => {
             piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
-            if (!piece || isOrphanBracket(piece) || isJsonGarbageFragment(piece) || isUserControlledSpeech(piece)) return;
+            if (!piece || isOrphanBracket(piece) || isJsonGarbageFragment(piece) || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
             result.push({
                 type: 'offlineSpeech',
                 sender: senderProfile.id,
@@ -22843,33 +22855,12 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
             Array.from(el.childNodes).forEach(walk);
         }
         Array.from(doc.body.childNodes).forEach(walk);
-        if (result.length > 0) return result;
+        if (result.length > 0) return compactAdjacentOfflineActions(result);
     }
 
-    const quoteRegex = /[“"]([^”"]+)[”"]/g;
-    let lastIndex = 0;
-    let hasQuote = false;
-    let match;
-    while ((match = quoteRegex.exec(source)) !== null) {
-        hasQuote = true;
-        const before = source.slice(lastIndex, match.index).trim();
-        if (before) pushAction(before);
-        pushSpeech(match[1]);
-        lastIndex = quoteRegex.lastIndex;
-    }
-
-    if (hasQuote) {
-        const tail = source.slice(lastIndex).trim();
-        if (tail) {
-            if (looksLikeOfflineAction(tail) || /[{}（）()\*\n]/.test(tail)) pushAction(tail);
-            else pushSpeech(tail);
-        }
-        if (result.length > 0) return result;
-    }
-
-    if (/[{}（）()\*\n「」]/.test(source)) {
+    if (structuredTextRegex.test(source)) {
         pushMixedBlocks(source);
-        if (result.length > 0) return result;
+        if (result.length > 0) return compactAdjacentOfflineActions(result);
     }
 
     if (looksLikeOfflineAction(source)) {
@@ -22877,9 +22868,9 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     } else {
         pushSpeech(source);
     }
-    if (result.length > 0) return result;
+    if (result.length > 0) return compactAdjacentOfflineActions(result);
     pushSpeech(source);
-    return result;
+    return compactAdjacentOfflineActions(result);
 }
 
 function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
@@ -23001,11 +22992,12 @@ function parseOfflineAiResponsePayload(raw) {
 
 async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatContext) {
     const list = Array.isArray(events) ? events : [];
-    const expandedEvents = [];
+    let expandedEvents = [];
     list.forEach(ev => {
         const parts = expandOfflineEventForRender(ev, senderProfile, effectiveChatContext);
         expandedEvents.push(...parts);
     });
+    expandedEvents = compactAdjacentOfflineActions(expandedEvents);
 
     let renderedCount = 0;
     let suppressedCount = 0;
