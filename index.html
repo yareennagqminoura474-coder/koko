@@ -22373,7 +22373,7 @@ function looksLikeOfflineAction(text) {
     if (/(你|我|咱|我们|你们).*(吗|呢|吧|啊|哦|嘛|回话|别|要|给我|知道|听得见|怎么|是不是|还|可不|行不行)/.test(s)) return false;
     if (/^[咔哒嘎吱嗯啧哗叮咚砰噼啪吱呀扑通]+[。！…]*$/.test(s)) return true;
     if (/[声音响起传来发出]/.test(s) && s.length < 20) return true;
-    return /^(他|她|对方|少年|男人|老师).*(走进|走到|走过去|靠近|抬眼|垂眸|低头|抬手|伸手|转身|坐下|站起|停下|沉默|看向|扫过|盯着|轻笑|皱眉|挑眉|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起)/.test(s);
+    return /^(他|她|对方|少年|男人|老师).*(走进|走到|走过去|靠近|抬眼|垂眸|垂下眼|垂下眼睫|低头|抬手|伸手|转身|坐下|站起|停下|沉默|看向|扫过|盯着|轻笑|皱眉|挑眉|叹气|敲了敲|拿起|放下|推开|拉开|整理|翻开|合上|递给|接过|靠在|倚着|迈着|穿着|露出|发出|响起|心里一沉|心头一沉|心里一紧|心头一紧|呼吸一滞|神色一滞|眸色一暗)/.test(s);
 }
 
 function looksLikeOfflineSpeechContent(text) {
@@ -22401,12 +22401,12 @@ function looksLikeOfflineSpeechContent(text) {
 
 function normalizeOfflineEventType(rawType, rawContent = '') {
     const t = String(rawType || '').toLowerCase().trim();
-    if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech' || t === 'dialogue' || t === 'line') return 'offlineSpeech';
+    if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech' || t === 'dialogue' || t === 'line' || t === 'words') return 'offlineSpeech';
     if (t === 'action' || t === 'offlineaction' || t === 'narrative-action' || t === 'narration' || t === 'scene' || t === 'description' || t === 'psychology' || t === 'narrative-psychology' || t === 'thought' || t === 'status') return 'offlineAction';
     if (looksLikeOfflineAction(rawContent)) return 'offlineAction';
     if (looksLikeOfflineSpeechContent(rawContent)) return 'offlineSpeech';
-    // 短内容且没有叙事结构符号，倾向于台词
-    if (rawContent.length <= 30 && !/[*（(【{]/.test(rawContent)) return 'offlineSpeech';
+    // 纯文本默认当作台词，避免把普通说话兜底成动作卡片
+    if (!/[“"「*（(【{\n]/.test(rawContent)) return 'offlineSpeech';
     return 'offlineAction';
 }
 
@@ -22562,7 +22562,14 @@ function splitMibuStyleOfflineBlocks(text) {
         blocks.push({ type: 'offlineSpeech', content: cleaned });
     };
 
-    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|”[^”]+”|”[^”\n]+”|「[^」]+」|\n\s*\n+)/g;
+    const structuredMarkerRegex = /[“”"{}（）()\*\n「」]/;
+    if (!structuredMarkerRegex.test(source)) {
+        if (looksLikeOfflineAction(source)) pushActionBlock(source);
+        else pushSpeechBlock(source);
+        return blocks;
+    }
+
+    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|“[^”]+”|"[^"\n]+"|「[^」]+」|\n\s*\n+)/g;
     let lastIndex = 0;
     let match;
 
@@ -22573,8 +22580,8 @@ function splitMibuStyleOfflineBlocks(text) {
 
         if (!/\n\s*\n+/.test(token)) {
             const isQuotedSpeech =
-                (token.startsWith('”') && token.endsWith('”')) ||
-                (token.startsWith('”') && token.endsWith('”')) ||
+                (token.startsWith('“') && token.endsWith('”')) ||
+                (token.startsWith('"') && token.endsWith('"')) ||
                 (token.startsWith('「') && token.endsWith('」'));
             if (isQuotedSpeech) {
                 pushSpeechBlock(token.slice(1, -1));
@@ -22766,6 +22773,7 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     const result = [];
     const source = String(raw || '').trim();
     if (!source) return result;
+    const structuredTextRegex = /[“"{}（）()\*\n「」]/;
 
     function pushAction(text) {
         splitOfflineActionForRender(text).forEach(cleaned => {
@@ -22813,7 +22821,13 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
             if (node.nodeType === Node.TEXT_NODE) {
                 const t = String(node.textContent || '').trim();
                 if (!t) return;
-                pushMixedBlocks(t);
+                if (structuredTextRegex.test(t)) {
+                    pushMixedBlocks(t);
+                } else if (looksLikeOfflineAction(t)) {
+                    pushAction(t);
+                } else {
+                    pushSpeech(t);
+                }
                 return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -22832,21 +22846,39 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
         if (result.length > 0) return result;
     }
 
-    const hasStructuredNarrativeMarkers = /<[a-z][\s\S]*>|[\*{（(“"\n]/i.test(source);
-    if (!hasStructuredNarrativeMarkers) {
-        if (looksLikeOfflineSpeechContent(source)) {
-            pushSpeech(source);
-            return result;
-        }
-        if (looksLikeOfflineAction(source)) {
-            pushAction(source);
-            return result;
-        }
+    const quoteRegex = /[“"]([^”"]+)[”"]/g;
+    let lastIndex = 0;
+    let hasQuote = false;
+    let match;
+    while ((match = quoteRegex.exec(source)) !== null) {
+        hasQuote = true;
+        const before = source.slice(lastIndex, match.index).trim();
+        if (before) pushAction(before);
+        pushSpeech(match[1]);
+        lastIndex = quoteRegex.lastIndex;
     }
 
-    pushMixedBlocks(source);
+    if (hasQuote) {
+        const tail = source.slice(lastIndex).trim();
+        if (tail) {
+            if (looksLikeOfflineAction(tail) || /[{}（）()\*\n]/.test(tail)) pushAction(tail);
+            else pushSpeech(tail);
+        }
+        if (result.length > 0) return result;
+    }
+
+    if (/[{}（）()\*\n「」]/.test(source)) {
+        pushMixedBlocks(source);
+        if (result.length > 0) return result;
+    }
+
+    if (looksLikeOfflineAction(source)) {
+        pushAction(source);
+    } else {
+        pushSpeech(source);
+    }
     if (result.length > 0) return result;
-    pushAction(source);
+    pushSpeech(source);
     return result;
 }
 
