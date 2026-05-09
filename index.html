@@ -907,6 +907,7 @@
             padding: 15px 20px;
             margin-bottom: 20px;
             box-shadow: 0 4px 12px var(--shadow-color);
+            cursor: pointer;
         }
         
         .diary-content { flex-grow: 1; overflow-y: auto; padding: 20px; }
@@ -914,6 +915,14 @@
         .diary-entry-content { font-size: 16px; line-height: 1.6; color: #333; }
         .diary-delete-btn { position: absolute; top: 15px; right: 15px; font-size: 18px; color: #aaa; cursor: pointer; transition: color 0.2s ease; }
         .diary-delete-btn:hover { color: var(--soft-red); }
+        .diary-card-header { display: flex; align-items: center; gap: 12px; padding-right: 32px; margin-bottom: 16px; }
+        .diary-card-avatar { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background-color: #f1f1f1; }
+        .diary-card-name { font-size: 17px; font-weight: 700; color: #222; line-height: 1.25; }
+        .diary-card-date { font-size: 14px; color: #999; margin-top: 3px; }
+        .diary-card-preview { color: #222; font-size: 17px; line-height: 1.75; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+        .diary-detail-content { flex-grow: 1; overflow-y: auto; padding: 18px 22px 28px; background-color: #fff; }
+        #diary-detail-date { font-size: 22px; line-height: 1.4; color: #111; margin-bottom: 28px; }
+        #diary-detail-content { font-size: 18px; line-height: 2; color: #111; word-break: break-word; }
         .preset-list { display: flex; flex-direction: column; gap: 10px; padding: 15px 20px; }
         .preset-item { background-color: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; justify-content: space-between; align-items: center; }
         .preset-info { flex-grow: 1; cursor: pointer; min-width: 0; margin-right: 10px; }
@@ -8899,14 +8908,28 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                     <div id="diary-edit-mode-bar" style="display: none;">
     <button id="delete-selected-diary-btn" class="edit-action-btn">删除已选</button>
     <button id="cancel-diary-edit-btn" class="edit-action-btn">取消</button>
-</div>
+ </div>
+             </div>
+
+            <div id="diary-detail-screen" style="display: none; flex-direction: column; background-color: #f0f2f5;">
+                <div class="moments-header">
+                    <div class="back-btn" id="back-from-diary-detail">
+                        <i class="fas fa-arrow-left"></i>
+                    </div>
+                    <div class="moments-title">日记正文</div>
+                    <div style="width: 40px;"></div>
+                </div>
+                <div class="diary-detail-content">
+                    <div id="diary-detail-date"></div>
+                    <div id="diary-detail-content"></div>
+                </div>
             </div>
 
-            <div id="memory-album-screen" style="display: none; flex-direction: column; background-color: #f0f2f5;">
-                <div class="moments-header">
-                    <div class="back-btn" id="back-from-memory-album"><i class="fas fa-arrow-left"></i></div>
-                    <div class="moments-title">小窝相册</div>
-                </div>
+             <div id="memory-album-screen" style="display: none; flex-direction: column; background-color: #f0f2f5;">
+                 <div class="moments-header">
+                     <div class="back-btn" id="back-from-memory-album"><i class="fas fa-arrow-left"></i></div>
+                     <div class="moments-title">小窝相册</div>
+                 </div>
                 <div class="diary-content" id="memory-album-list">
                     </div>
             </div>
@@ -9012,6 +9035,19 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
             <label class="form-label">选择参与自动回复的角色</label>
             <div class="world-book-list" id="automation-contact-list" style="max-height: 250px; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; padding: 10px;">
                 </div>
+        </div>
+
+        <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label class="form-label" style="margin-bottom: 0; font-size: 16px; font-weight: 600;">定时日记设置</label>
+                <label class="switch">
+                    <input type="checkbox" id="diary-schedule-enabled-toggle">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <label class="form-label" style="margin-top: 15px;">每天生成时间</label>
+            <input type="time" class="form-input" id="diary-schedule-time-input" value="22:00">
+            <p style="font-size: 13px; color: #888; margin-top: 8px; line-height: 1.5;">到点后会为有互动记录的角色生成当日日记。若错过设定时间，则下次打开 App 且已过设定时间时补生成一次。</p>
         </div>
 
         <button class="form-button" id="save-automation-settings-btn">保存设置</button>
@@ -12422,7 +12458,15 @@ function parseLyrics(lrc) {
         window.openChat = openChat;     // 把打开聊天函数挂到窗口上
         // ▲▲▲▲▲▲ 添加结束 ▲▲▲▲▲▲
         state.currentChatMode = state.currentChatMode || 'chat';
+        const DEFAULT_DIARY_SETTINGS = {
+            enabled: false,
+            time: '22:00',
+            lastRunDate: '',
+            onlyContactsWithHistory: true
+        };
         let automationTimer = null;
+        let diaryScheduleTimer = null;
+        let isDiaryScheduleRunning = false;
         let nextAutomationTimestamp = 0;
         let activeReplyTarget = null;
         let chatPagination = {};
@@ -14404,6 +14448,7 @@ function renderEmoticonPicker() {
             { id: 'garden', name: '植物园', emoji: '🌺', desc: '花海中的悠闲时光', priceLevel: 1, activities: ['赏花', '拍照', '漫步'] },
             { id: 'rooftop', name: '观景台', emoji: '🌆', desc: '俯瞰城市夜景', priceLevel: 0, activities: ['看夜景', '聊天', '拍照'] }
         ];
+        const OUTING_PLACE_PRESETS = OUTING_PLACES;
 
         const outingFlowState = {
             mode: null,
@@ -14799,23 +14844,34 @@ type只能是"action"或"character"，每次输出1到3条事件。`;
 
             const purchase = { item, amount, payerId, time: Date.now() };
             outing.purchases.push(purchase);
-            if (payerId === 'user') {
-                outing.spentTotal = (outing.spentTotal || 0) + amount;
-                state.myProfile.balance = (state.myProfile.balance || 0) - amount;
-                await kokoMemory.put('myProfile', state.myProfile);
-                const tx = { id: 'tx_outing_' + Date.now(), type: 'expense', amount, description: `出去玩·${outing.placeName}·${item}`, timestamp: Date.now() };
-                state.transactions = state.transactions || [];
-                state.transactions.unshift(tx);
-                await kokoMemory.put('transactions', tx);
-                renderMyProfile();
-                if (document.getElementById('wallet-screen').style.display === 'flex') {
-                    renderWalletScreen();
-                }
+            const payerName = payerId === 'user'
+                ? (state.myProfile?.name || '我')
+                : (outing.companions.find(c => c.id === payerId)?.name || payerId);
+            const payerNote = payerId === 'user' ? '' : `（${payerName}买单）`;
+
+            // 约定：无论谁“买单”，都从用户钱包扣钱，统一计入 spentTotal
+            outing.spentTotal = (outing.spentTotal || 0) + amount;
+            state.myProfile.balance = (state.myProfile.balance || 0) - amount;
+            await kokoMemory.put('myProfile', state.myProfile);
+
+            const tx = {
+                id: 'tx_outing_' + Date.now(),
+                type: 'expense',
+                amount,
+                description: `出去玩·${outing.placeName}·${item}${payerNote}`,
+                timestamp: Date.now()
+            };
+            state.transactions = state.transactions || [];
+            state.transactions.unshift(tx);
+            await kokoMemory.put('transactions', tx);
+
+            renderMyProfile();
+            if (document.getElementById('wallet-screen').style.display === 'flex') {
+                renderWalletScreen();
             }
 
             await saveOutingData(outing);
             modal.classList.remove('open');
-            const payerName = payerId === 'user' ? (state.myProfile?.name || '我') : (outing.companions.find(c => c.id === payerId)?.name || payerId);
             const stream = document.getElementById('outing-stream');
             const evt = { type: 'action', speaker: '', content: `${payerName} 花费了 ¥${amount.toFixed(2)}（${item}）`, time: Date.now() };
             outing.events.push(evt);
@@ -14884,8 +14940,79 @@ type只能是"action"或"character"，每次输出1到3条事件。`;
                 const date = new Date(o.startTime).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
                 const companions = o.companions.map(c => c.name).join('、');
                 const spent = o.spentTotal ? `¥${o.spentTotal.toFixed(2)}` : '未消费';
-                return `<div class="outing-history-card"><div class="ohc-header"><div class="ohc-title">${o.placeEmoji || ''} ${o.placeName}</div><div class="ohc-date">${date}</div></div><div class="ohc-companions">同行：${companions}</div><div class="ohc-spend">${spent}</div></div>`;
+                return `<div class="outing-history-card" data-outing-id="${o.id}" style="cursor:pointer;"><div class="ohc-header"><div class="ohc-title">${o.placeEmoji || ''} ${o.placeName}</div><div class="ohc-date">${date}</div></div><div class="ohc-companions">同行：${companions}</div><div class="ohc-spend">${spent}</div></div>`;
             }).join('');
+
+            content.querySelectorAll('.outing-history-card').forEach(card => {
+                card.addEventListener('click', () => openOutingHistoryDetail(card.dataset.outingId));
+            });
+        }
+
+        async function renderOutingHistory() {
+            return await renderOutingHistoryView();
+        }
+
+        async function openOutingHistoryDetail(outingId) {
+            const outing = await kokoMemory.get('outings', outingId);
+            if (!outing) {
+                alert('找不到该出行记录。');
+                return;
+            }
+
+            const content = document.getElementById('outing-content');
+            document.getElementById('outing-screen-title').textContent = `${outing.placeEmoji || ''} ${outing.placeName || '出行详情'}`.trim();
+
+            const dateText = outing.startTime
+                ? new Date(outing.startTime).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : '';
+            const endText = outing.endTime
+                ? new Date(outing.endTime).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : '';
+            const companions = (outing.companions || []).map(c => c.name).join('、') || '（无）';
+            const spent = outing.spentTotal ? `¥${outing.spentTotal.toFixed(2)}` : '未消费';
+
+            const purchases = Array.isArray(outing.purchases) ? outing.purchases : [];
+            const purchaseHtml = purchases.length
+                ? `<div style="display:flex;flex-direction:column;gap:8px;">${purchases.map(p => {
+                    const payerName = p.payerId === 'user'
+                        ? (state.myProfile?.name || '我')
+                        : ((outing.companions || []).find(c => c.id === p.payerId)?.name || p.payerId || '未知');
+                    return `<div style="background:var(--card-background);border-radius:12px;padding:12px;box-shadow:0 2px 8px var(--shadow-color);"><div style="font-weight:700;color:var(--text-dark);">${escapeDiaryHtml(p.item || '消费')}</div><div style="font-size:12px;color:#666;margin-top:6px;">金额：¥${Number(p.amount || 0).toFixed(2)} · 买单：${escapeDiaryHtml(payerName || '')}</div></div>`;
+                }).join('')}</div>`
+                : `<div style="text-align:center;color:#888;padding:10px 0;">无消费记录</div>`;
+
+            content.innerHTML = `
+                <div style="padding: 14px;">
+                    <div style="background: var(--card-background); border-radius: 14px; padding: 14px; box-shadow: 0 2px 8px var(--shadow-color); margin-bottom: 12px;">
+                        <div style="font-size: 12px; color: #666;">开始：${escapeDiaryHtml(dateText)}</div>
+                        <div style="font-size: 12px; color: #666; margin-top: 4px;">结束：${escapeDiaryHtml(endText || '（未记录）')}</div>
+                        <div style="font-size: 12px; color: #666; margin-top: 8px;">同行：${escapeDiaryHtml(companions)}</div>
+                        <div style="font-size: 13px; color: var(--theme-primary); font-weight: 800; margin-top: 10px;">总花费：${escapeDiaryHtml(spent)}</div>
+                    </div>
+                    <div style="font-size: 14px; font-weight: 800; color: var(--text-dark); margin: 12px 4px;">事件回放</div>
+                    <div class="outing-stream" id="outing-history-stream"></div>
+                    <div style="font-size: 14px; font-weight: 800; color: var(--text-dark); margin: 16px 4px 10px;">消费记录</div>
+                    ${purchaseHtml}
+                    <button class="form-button" id="outing-history-back-btn" style="margin-top: 16px;">返回记录</button>
+                </div>
+            `;
+
+            const stream = document.getElementById('outing-history-stream');
+            (outing.events || []).forEach(evt => {
+                if (!evt) return;
+                appendOutingEventToDOM(stream, evt, outing);
+            });
+            scrollOutingStream();
+
+            document.getElementById('outing-history-back-btn')?.addEventListener('click', renderOutingHistoryView);
+        }
+
+        async function clearCurrentOuting() {
+            await setCurrentOuting(null);
+        }
+
+        async function saveOutingPurchase(outing, modal) {
+            return await doOutingPurchase(outing, modal);
         }
 
         async function updateUserPersonaPresetSelect() {
@@ -14949,7 +15076,7 @@ type只能是"action"或"character"，每次输出1到3条事件。`;
 // ▼▼▼ 使用这个【修正后】的函数替换旧函数 ▼▼▼
 function hideAllScreens() {
     document.querySelectorAll(
-        '#screen > div, #wallet-screen, #outing-screen, #appearance-settings-screen, #shopping-screen, #product-detail-screen, #forum-archives-screen, #map-screen, #map-management-screen, #schedule-screen, #events-screen, #lock-screen-photos-screen, #relationship-network-screen, #snooped-app-content-screen, #sms-chat-screen, #favorites-screen, #investment-center-screen, #stock-market-screen, #forum-category-management-screen' // <-- ✨ 核心修复：在这里加上你的新页面ID
+        '#screen > div, #wallet-screen, #outing-screen, #appearance-settings-screen, #shopping-screen, #product-detail-screen, #forum-archives-screen, #map-screen, #map-management-screen, #schedule-screen, #events-screen, #lock-screen-photos-screen, #relationship-network-screen, #snooped-app-content-screen, #sms-chat-screen, #favorites-screen, #investment-center-screen, #stock-market-screen, #forum-category-management-screen, #diary-detail-screen' // <-- ✨ 核心修复：在这里加上你的新页面ID
     ).forEach(el => el.style.display = 'none');
 }
 
@@ -21716,60 +21843,176 @@ case 'share-music': {
         }
         
         function showDiaryScreen() {
-            const contact = state.contacts.find(c => c.id === state.activeChatId);
-            if (!contact) return;
+            if (!state.diaryReturnTarget) {
+                state.diaryReturnTarget = 'profile';
+                state.diaryReturnChatId = null;
+            }
             hideAllScreens();
             document.getElementById('diary-screen').style.display = 'flex';
-            document.getElementById('diary-title').textContent = `${contact.name}的日记`;
+            document.getElementById('diary-title').textContent = `日记`;
             renderDiary();
         }
 
-// 替换掉旧的 renderDiary 函数
+function escapeDiaryHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[ch]));
+}
+
+function formatDiaryDateKey(timestamp) {
+    const date = timestamp ? new Date(timestamp) : new Date();
+    if (Number.isNaN(date.getTime())) return '';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function formatDiaryChineseDate(timestamp) {
+    const date = timestamp ? new Date(timestamp) : new Date();
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function getDiaryFullText(entry) {
+    return String(entry?.full || entry?.content || '');
+}
+
+function getDiaryPreviewText(entry) {
+    const source = String(entry?.preview || entry?.full || entry?.content || '');
+    const compact = source.replace(/\s+/g, ' ').trim();
+    return compact.length > 60 ? compact.slice(0, 60) + '...' : compact;
+}
+
+function getDiaryDetailTitleAndBody(entry) {
+    const full = getDiaryFullText(entry).trim();
+    if (!full) {
+        return { title: formatDiaryChineseDate(entry?.timestamp), body: '' };
+    }
+
+    const lines = full.split(/\r?\n/);
+    const firstNonEmptyIndex = lines.findIndex(line => line.trim());
+    const firstLine = firstNonEmptyIndex >= 0 ? lines[firstNonEmptyIndex].trim() : '';
+    const looksLikeDateTitle = /^\d{4}年\d{1,2}月\d{1,2}日/.test(firstLine) || /^\d{4}-\d{1,2}-\d{1,2}/.test(firstLine);
+
+    if (looksLikeDateTitle) {
+        const body = lines.slice(firstNonEmptyIndex + 1).join('\n').trim();
+        return { title: firstLine, body: body || full };
+    }
+
+    return {
+        title: formatDiaryChineseDate(entry?.timestamp),
+        body: full
+    };
+}
+
+function getDiaryEntryId(entry, index) {
+    return entry?.id || `legacy_diary_${entry?.timestamp || index}`;
+}
+
+function buildDiaryEntryKey(contactId, entryId) {
+    return `${contactId}::${entryId}`;
+}
+
+function parseDiaryEntryKey(entryKey) {
+    const raw = String(entryKey || '');
+    const idx = raw.indexOf('::');
+    if (idx <= 0) return null;
+    return { contactId: raw.slice(0, idx), entryId: raw.slice(idx + 2) };
+}
+
 function renderDiary() {
-    const contact = state.contacts.find(c => c.id === state.activeChatId);
     const diaryContentList = document.getElementById('diary-content-list');
     diaryContentList.innerHTML = '';
 
-    if (!contact || !contact.diary || contact.diary.length === 0) {
-        diaryContentList.innerHTML = `<div style="text-align: center; padding: 50px 20px; color: #888;"><i class="fas fa-book" style="font-size: 48px; margin-bottom: 15px;"></i><p>他的日记本是空的。</p></div>`;
+    const allEntries = [];
+    (state.contacts || []).forEach(contact => {
+        if (!contact || contact.isGroup) return;
+        const list = Array.isArray(contact.diary) ? contact.diary : [];
+        list.forEach((entry, index) => {
+            const entryId = getDiaryEntryId(entry, index);
+            allEntries.push({
+                entryKey: buildDiaryEntryKey(contact.id, entryId),
+                entryId,
+                contact,
+                entry
+            });
+        });
+    });
+
+    if (allEntries.length === 0) {
+        diaryContentList.innerHTML = `<div style="text-align: center; padding: 50px 20px; color: #888;"><i class="fas fa-book" style="font-size: 48px; margin-bottom: 15px;"></i><p>还没有生成过日记。</p></div>`;
         return;
     }
 
-    const sortedDiary = [...contact.diary].sort((a, b) => b.timestamp - a.timestamp);
+    allEntries.sort((a, b) => (b.entry?.timestamp || 0) - (a.entry?.timestamp || 0));
 
-    sortedDiary.forEach(entry => {
+    allEntries.forEach(({ entryKey, entryId, contact, entry }) => {
         const entryEl = document.createElement('div');
         entryEl.className = 'diary-entry';
+        entryEl.dataset.entryKey = entryKey;
+        entryEl.dataset.contactId = contact.id;
+        entryEl.dataset.entryId = entryId;
 
-        // 如果在已选中的Set里，就加上 'selected' 类
-        if (diaryEditModeState.selectedEntryIds.has(entry.id)) {
+        if (diaryEditModeState.selectedEntryIds.has(entryKey)) {
             entryEl.classList.add('selected');
         }
 
-        let entryHTML = '';
+        const dateText = entry?.dateKey || formatDiaryDateKey(entry?.timestamp);
+        const previewText = getDiaryPreviewText(entry);
+        const avatarHtml = contact.avatar
+            ? `<img class="diary-card-avatar" src="${escapeDiaryHtml(contact.avatar)}" alt="">`
+            : `<div class="diary-card-avatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#666;">${escapeDiaryHtml((contact.name || '?')[0])}</div>`;
+
+        const cardContent = `
+            <div class="diary-card-header">
+                ${avatarHtml}
+                <div>
+                    <div class="diary-card-name">${escapeDiaryHtml(contact.name || '角色')}</div>
+                    <div class="diary-card-date">${escapeDiaryHtml(dateText)}</div>
+                </div>
+            </div>
+            <div class="diary-card-preview">${escapeDiaryHtml(previewText || '（无预览）')}</div>
+        `;
+
         if (diaryEditModeState.active) {
-            // 【编辑模式】显示复选框
-            const isChecked = diaryEditModeState.selectedEntryIds.has(entry.id) ? 'checked' : '';
-            entryHTML = `
+            const isChecked = diaryEditModeState.selectedEntryIds.has(entryKey) ? 'checked' : '';
+            entryEl.innerHTML = `
                 <div style="display: flex; align-items: center; width: 100%; cursor: pointer;">
-                    <input type="checkbox" class="diary-select-checkbox" data-diary-id="${entry.id}" ${isChecked}>
-                    <div style="flex-grow: 1;">
-                        <div class="diary-entry-meta">${formatTimeAgo(entry.timestamp)}</div>
-                        <div class="diary-entry-content">${entry.content.replace(/\n/g, '<br>')}</div>
-                    </div>
+                    <input type="checkbox" class="diary-select-checkbox" data-entry-key="${escapeDiaryHtml(entryKey)}" ${isChecked}>
+                    <div style="flex-grow: 1; min-width: 0;">${cardContent}</div>
                 </div>
             `;
         } else {
-            // 【普通模式】显示原来的删除按钮
-            entryHTML = `
-                <div class="diary-entry-meta">${formatTimeAgo(entry.timestamp)}</div>
-                <div class="diary-entry-content">${entry.content.replace(/\n/g, '<br>')}</div>
-                <div class="diary-delete-btn" data-diary-id="${entry.id}"><i class="fas fa-trash-alt"></i></div>
+            entryEl.innerHTML = `
+                ${cardContent}
+                <div class="diary-delete-btn" data-entry-key="${escapeDiaryHtml(entryKey)}"><i class="fas fa-trash-alt"></i></div>
             `;
         }
-        entryEl.innerHTML = entryHTML;
+
         diaryContentList.appendChild(entryEl);
     });
+}
+
+function openDiaryDetail(entryKey) {
+    const parsed = parseDiaryEntryKey(entryKey);
+    if (!parsed) return;
+
+    const contact = state.contacts.find(c => c.id === parsed.contactId);
+    if (!contact || !Array.isArray(contact.diary)) return;
+
+    const entry = contact.diary.find((item, index) => getDiaryEntryId(item, index) === parsed.entryId);
+    if (!entry) return;
+
+    const detail = getDiaryDetailTitleAndBody(entry);
+    hideAllScreens();
+    document.getElementById('diary-detail-screen').style.display = 'flex';
+    document.getElementById('diary-detail-date').textContent = `${contact.name || '角色'} · ${detail.title || '日记正文'}`;
+    document.getElementById('diary-detail-content').innerHTML = escapeDiaryHtml(detail.body || '').replace(/\n/g, '<br>');
 }
 // 新增的函数
 function enterDiaryEditMode() {
@@ -35392,6 +35635,9 @@ async function showAutomationScreen() {
     document.getElementById('automation-interval-input').value = settings.interval;
     document.getElementById('automation-min-replies-input').value = settings.minReplies;
     document.getElementById('automation-max-replies-input').value = settings.maxReplies;
+    const diarySettings = normalizeDiarySettings(userSettings.diarySettings);
+    document.getElementById('diary-schedule-enabled-toggle').checked = diarySettings.enabled === true;
+    document.getElementById('diary-schedule-time-input').value = diarySettings.time || '22:00';
 
     await renderAutomationContactList();
     updateAutomationStatusIndicator();
@@ -35430,9 +35676,17 @@ async function saveAutomationSettings() {
     state.automationSettings = newSettings;
 
     // 将设置保存到数据库
-    const userSettings = await kokoMemory.get('userSettings', 'main') || { id: 'main' };
-    userSettings.automationSettings = newSettings;
-    await kokoMemory.put('userSettings', userSettings);
+    const savedUserSettings = await kokoMemory.get('userSettings', 'main') || { id: 'main' };
+    savedUserSettings.automationSettings = newSettings;
+    savedUserSettings.diarySettings = {
+        ...normalizeDiarySettings(savedUserSettings.diarySettings),
+        enabled: document.getElementById('diary-schedule-enabled-toggle').checked,
+        time: document.getElementById('diary-schedule-time-input').value || '22:00',
+        onlyContactsWithHistory: true
+    };
+    await kokoMemory.put('userSettings', savedUserSettings);
+    userSettings = { ...userSettings, ...savedUserSettings, diarySettings: normalizeDiarySettings(savedUserSettings.diarySettings) };
+    window.userSettings = userSettings;
 
     alert('设置已保存！');
 
@@ -35442,7 +35696,262 @@ async function saveAutomationSettings() {
     } else {
         stopAutomationTimer();
     }
+    startDiaryScheduleTimer();
     updateAutomationStatusIndicator();
+}
+
+function parseDiaryScheduleTime(value) {
+    const match = String(value || '22:00').match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return { hour: 22, minute: 0 };
+    const hour = Math.min(23, Math.max(0, parseInt(match[1], 10)));
+    const minute = Math.min(59, Math.max(0, parseInt(match[2], 10)));
+    return { hour, minute };
+}
+
+function getNormalMessagesForScheduledDiary(contact) {
+    const ignoredTypes = new Set(['system_notification', 'loading', 'error', 'heart_voice']);
+    return (contact?.history || []).filter(msg => {
+        if (!msg) return false;
+        if (msg.sender === 'system_instruction' || msg.sender === 'system') return false;
+        if (ignoredTypes.has(msg.type)) return false;
+        return true;
+    });
+}
+
+function getMessageTextForScheduledDiary(msg, contact) {
+    if (!msg) return '';
+    switch (msg.type) {
+        case 'text':
+        case 'html':
+        case 'offlineSpeech':
+        case 'offlineAction':
+            return typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : '';
+        case 'voice':
+            return `[语音] ${msg.content?.text || ''}`;
+        case 'image':
+        case 'uploaded_image':
+            return msg.isEmoticon && msg.emoticonName ? `[表情] ${msg.emoticonName}` : '[图片]';
+        case 'picture_description':
+            return `[图片描述] ${msg.content?.description || ''}`;
+        case 'red_packet':
+            return `[红包] ${msg.content?.blessing || ''}`;
+        case 'transfer':
+            return `[转账] ${msg.content?.amount || ''}`;
+        case 'music_share':
+            return `[音乐] ${msg.content?.title || ''}`;
+        case 'location_share':
+            return `[位置] ${msg.content?.name || ''}`;
+        default:
+            return typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : '';
+    }
+}
+
+function formatScheduledDiaryHistory(contact, messages) {
+    const myName = state.myProfile?.name || '用户';
+    return messages.slice(-40).map(msg => {
+        const senderName = (msg.sender === 'user' || msg.sender === 'myProfile') ? myName : (contact.name || '角色');
+        const text = getMessageTextForScheduledDiary(msg, contact).trim();
+        return text ? `${senderName}: ${text}` : '';
+    }).filter(Boolean).join('\n') || '（暂无可用互动记录）';
+}
+
+function getLatestHeartVoiceText(contact) {
+    const latest = (contact?.history || []).slice().reverse().find(msg => msg && msg.type === 'heart_voice');
+    if (!latest) return '（暂无心声）';
+    if (latest.content && typeof latest.content === 'object') {
+        return JSON.stringify(latest.content);
+    }
+    return String(latest.content || '（暂无心声）');
+}
+
+function hasScheduledDiaryForDate(contact, dateKey) {
+    return (contact?.diary || []).some(entry => {
+        const source = entry?.source || '';
+        return entry?.dateKey === dateKey && (source === 'scheduled' || source === 'auto');
+    });
+}
+
+function shouldGenerateScheduledDiaryForContact(contact, dateKey) {
+    if (!contact || contact.isGroup) return false;
+    const settings = normalizeDiarySettings(userSettings.diarySettings);
+    if (settings.onlyContactsWithHistory !== false) {
+        const normalMessages = getNormalMessagesForScheduledDiary(contact);
+        if (normalMessages.length === 0) return false;
+    }
+    if (hasScheduledDiaryForDate(contact, dateKey)) return false;
+
+    const normalMessages = getNormalMessagesForScheduledDiary(contact);
+    const lastMessageTime = normalMessages.reduce((max, msg) => Math.max(max, msg.timestamp || 0), 0);
+    const lastDiaryTime = (contact.diary || []).reduce((max, entry) => Math.max(max, entry.timestamp || 0), 0);
+    if (lastDiaryTime && lastMessageTime && lastMessageTime <= lastDiaryTime) return false;
+
+    return true;
+}
+
+function sanitizeForbiddenRoleWords(text) {
+    if (typeof text !== 'string') return text;
+    return text
+        .replace(/小管家婆/g, '')
+        .replace(/小管家公/g, '')
+        .replace(/小管家/g, '')
+        .replace(/管家公/g, '')
+        .replace(/管婆/g, '')
+        .replace(/小助手/g, '')
+        .replace(/AI助手/g, '')
+        .replace(/智能助手/g, '')
+        .replace(/虚拟助手/g, '')
+        .replace(/机器人/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
+function startDiaryScheduleTimer() {
+    if (diaryScheduleTimer) {
+        clearInterval(diaryScheduleTimer);
+        diaryScheduleTimer = null;
+    }
+
+    diaryScheduleTimer = setInterval(() => {
+        checkAndRunScheduledDiaries().catch(error => console.error('[定时日记] 检查失败:', error));
+    }, 60 * 1000);
+    checkAndRunScheduledDiaries().catch(error => console.error('[定时日记] 检查失败:', error));
+}
+
+async function checkAndRunScheduledDiaries() {
+    const settings = normalizeDiarySettings(userSettings.diarySettings);
+    userSettings.diarySettings = settings;
+    if (settings.enabled !== true) return;
+
+    const schedule = parseDiaryScheduleTime(settings.time);
+    const now = new Date();
+    const scheduledAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), schedule.hour, schedule.minute, 0, 0);
+    if (now < scheduledAt) return;
+
+    const todayKey = formatDiaryDateKey(now.getTime());
+    if (settings.lastRunDate && settings.lastRunDate === todayKey) return;
+    await runScheduledDiaryGeneration(todayKey);
+}
+
+async function runScheduledDiaryGeneration(todayKey = formatDiaryDateKey(Date.now())) {
+    if (isDiaryScheduleRunning) return;
+    isDiaryScheduleRunning = true;
+
+    try {
+        const candidates = state.contacts.filter(contact => shouldGenerateScheduledDiaryForContact(contact, todayKey));
+        for (const contact of candidates) {
+            try {
+                await generateScheduledDiaryForContact(contact);
+            } catch (error) {
+                console.error(`[定时日记] ${contact?.name || contact?.id || '未知角色'} 生成失败:`, error);
+            }
+        }
+
+        if (candidates.length > 0) {
+            const savedUserSettings = await kokoMemory.get('userSettings', 'main') || { id: 'main' };
+            savedUserSettings.diarySettings = normalizeDiarySettings({
+                ...normalizeDiarySettings(savedUserSettings.diarySettings),
+                lastRunDate: todayKey
+            });
+            await kokoMemory.put('userSettings', savedUserSettings);
+            userSettings = { ...userSettings, ...savedUserSettings, diarySettings: normalizeDiarySettings(savedUserSettings.diarySettings) };
+            window.userSettings = userSettings;
+        }
+        console.log(`[定时日记] 检查完成，生成 ${candidates.length} 篇。`);
+    } finally {
+        isDiaryScheduleRunning = false;
+    }
+}
+
+async function generateScheduledDiaryForContact(contact) {
+    if (!contact || contact.isGroup) return;
+
+    const todayKey = formatDiaryDateKey(Date.now());
+    if (hasScheduledDiaryForDate(contact, todayKey)) return;
+
+    const recentMessages = getNormalMessagesForScheduledDiary(contact);
+    if (recentMessages.length === 0) return;
+
+    const historyText = formatScheduledDiaryHistory(contact, recentMessages);
+    const heartVoiceText = getLatestHeartVoiceText(contact);
+    const dateTitle = `${formatDiaryChineseDate(Date.now())} 晴`;
+    const prompt = `
+你现在只负责为角色“${contact.name || '角色'}”生成一篇【定时日记】，不要把它写成聊天回复，也不要生成聊天消息。
+
+【角色人设】
+${contact.persona || '（未设置）'}
+
+【用户信息】
+${state.myProfile?.name || '用户'}：${contact.userPersona || state.myProfile?.signature || '（未设置）'}
+
+【最近互动记录】
+${historyText}
+
+【最近一条心声】
+${heartVoiceText}
+
+【任务】
+1. 这是角色当天写给自己的日记，请用第一人称。
+2. 根据最近一次或最近几次互动总结今天最值得记下的情绪、关系变化和未说出口的想法。
+3. 不要写成聊天对白列表，不要解释生成过程。
+4. preview 是列表页短预览，1 到 2 句，30 到 70 字左右。
+5. full 是完整日记正文，明显比 preview 长，建议 250 到 500 字，3 到 5 段。
+6. full 第一行必须是日期标题，例如：${dateTitle}。第一行后空一行再写正文。
+
+【输出格式】
+只返回严格 JSON，不要 markdown，不要代码块，不要 JSON 外说明：
+{
+  "preview": "短预览",
+  "full": "完整日记正文"
+}
+`.trim();
+
+    const rawResponse = await generateAiResponse(
+        null,
+        [],
+        null,
+        false,
+        'chat',
+        [
+            { role: 'system', content: '你是角色日记生成器。你必须只返回严格 JSON。' },
+            { role: 'user', content: prompt }
+        ]
+    );
+
+    const parsed = tryJsonParseLoose(rawResponse);
+    if (!parsed || typeof parsed !== 'object') {
+        throw new Error('定时日记返回值不是有效 JSON');
+    }
+
+    const full = String(parsed.full || '').trim();
+    if (!full) {
+        throw new Error('定时日记缺少 full 正文');
+    }
+
+    const normalizedFull = sanitizeForbiddenRoleWords(
+        /^\d{4}年\d{1,2}月\d{1,2}日/.test(full)
+            ? full
+            : `${dateTitle}\n\n${full}`
+    );
+    const preview = sanitizeForbiddenRoleWords(
+        String(parsed.preview || getDiaryPreviewText({ full: normalizedFull })).trim()
+    );
+
+    contact.diary = contact.diary || [];
+    contact.diary.push({
+        id: 'diary_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        preview,
+        full: normalizedFull,
+        content: normalizedFull,
+        timestamp: Date.now(),
+        dateKey: todayKey,
+        source: 'scheduled'
+    });
+
+    await kokoMemory.put('contacts', contact);
+    if (document.getElementById('diary-screen')?.style.display === 'flex') {
+        renderDiary();
+    }
+    console.log(`[定时日记] 已为 ${contact.name || contact.id} 生成日记。`);
 }
 
 // 函数：启动定时器
@@ -37283,13 +37792,14 @@ function updatePreview(type, value, value2 = '') {
 if (userSettings.qzoneSettings && userSettings.qzoneSettings.autoRefreshEnabled) {
     startQzoneAutoRefresh();
 }
-            // ▼▼▼ 在函数的最后，添加这两行代码 ▼▼▼
-            if (state.automationSettings.isEnabled) {
-                startAutomationTimer();
-            }
-            showLockScreen();
-            // ▲▲▲ 新代码添加结束 ▲▲▲
-        }
+             // ▼▼▼ 在函数的最后，添加这两行代码 ▼▼▼
+             if (state.automationSettings.isEnabled) {
+                 startAutomationTimer();
+             }
+            startDiaryScheduleTimer();
+             showLockScreen();
+             // ▲▲▲ 新代码添加结束 ▲▲▲
+         }
 
         // (替换原有的 renderPet 函数)
 async function renderPet(contact) {
@@ -38095,9 +38605,19 @@ let userSettings = {
     customFontSize: null,
     autoLockDelay: 0,
     showSparkAndLuckyChar: true,
-    notificationSoundUrl: ''
+    notificationSoundUrl: '',
+    diarySettings: {
+        enabled: false,
+        time: '22:00',
+        lastRunDate: '',
+        onlyContactsWithHistory: true
+    }
 };
 window.userSettings = userSettings; // 🔧 修复：同步到window，防止其他代码用空对象覆盖数据库
+
+function normalizeDiarySettings(settings) {
+    return { ...DEFAULT_DIARY_SETTINGS, ...(settings || {}) };
+}
 
 // 函数：动态更新自定义字体
 function updateCustomFont(fontUrl, fontName) {
@@ -38284,8 +38804,9 @@ async function loadAppearanceSettings() {
     if (savedSettings) {
         userSettings = { ...userSettings, ...savedSettings };
     }
+    userSettings.diarySettings = normalizeDiarySettings(userSettings.diarySettings);
     window.userSettings = userSettings; // 🔧 修复：保持window引用同步
-    
+     
     // ▼▼▼ 新增下面这2行 ▼▼▼
     autoLockDelay = userSettings.autoLockDelay || 0; // 加载延迟设置
     document.getElementById('auto-lock-delay-input').value = autoLockDelay > 0 ? autoLockDelay : '';
@@ -38940,7 +39461,24 @@ document.getElementById('back-from-chat').addEventListener('click', async () => 
         openChat(state.activeChatId);
         // ▲▲▲ 修复结束 ▲▲▲
     });
-    document.getElementById('back-from-diary').addEventListener('click', showCharProfileScreen);
+    document.getElementById('back-from-diary').addEventListener('click', async () => {
+        const returnChatId = (state.diaryReturnTarget === 'chat') ? state.diaryReturnChatId : null;
+        state.diaryReturnTarget = null;
+        state.diaryReturnChatId = null;
+
+        if (returnChatId) {
+            await openChat(returnChatId);
+            return;
+        }
+
+        const contact = state.contacts.find(c => c.id === state.activeChatId);
+        if (contact && !contact.isGroup) {
+            showCharProfileScreen();
+        } else {
+            await showMainScreen();
+        }
+    });
+    document.getElementById('back-from-diary-detail')?.addEventListener('click', showDiaryScreen);
     document.getElementById('back-from-post-detail').addEventListener('click', showFeedScreen);
     document.getElementById('back-from-trending-topic').addEventListener('click', showFeedScreen);
     // ▼▼▼ 这整段代码在新版本中都缺失了 ▼▼▼
@@ -39245,7 +39783,7 @@ document.getElementById('char-voice-id-input').value = contact.voiceId || '';
             uploader.click();
         });
         
-        document.getElementById('reset-contact-user-avatar-btn').addEventListener('click', async () => {
+    document.getElementById('reset-contact-user-avatar-btn').addEventListener('click', async () => {
             const contact = state.contacts.find(c => c.id === state.activeChatId);
             if (!contact) return;
             contact.customUserAvatar = null;
@@ -39257,21 +39795,29 @@ document.getElementById('char-voice-id-input').value = contact.voiceId || '';
     document.getElementById('view-char-diary-btn').addEventListener('click', showDiaryScreen);
     // ▼▼▼ 将这段完整的代码粘贴到 attachEventListeners 函数中 ▼▼▼
 document.getElementById('diary-content-list').addEventListener('click', async (e) => {
-    // 检查点击的是不是删除按钮
-    if (e.target.closest('.diary-delete-btn')) {
-        const diaryId = e.target.closest('.diary-delete-btn').dataset.diaryId;
+    if (diaryEditModeState.active) return;
+
+    const deleteBtn = e.target.closest('.diary-delete-btn');
+    if (deleteBtn) {
+        const entryKey = deleteBtn.dataset.entryKey;
         const confirmed = await showCustomConfirm('删除日记', '确定要删除这条日记吗？', true);
-        if (confirmed) {
-            const contact = state.contacts.find(c => c.id === state.activeChatId);
-            if(contact && contact.diary) {
-                // 从联系人的日记数组中过滤掉要删除的条目
-                contact.diary = contact.diary.filter(entry => entry.id !== diaryId);
-                // 保存更改到数据库
-                await kokoMemory.put('contacts', contact);
-                // 重新渲染日记列表，让界面刷新
-                renderDiary();
-            }
+        if (!confirmed) return;
+
+        const parsed = parseDiaryEntryKey(entryKey);
+        if (!parsed) return;
+
+        const contact = state.contacts.find(c => c.id === parsed.contactId);
+        if (contact && Array.isArray(contact.diary)) {
+            contact.diary = contact.diary.filter((entry, index) => getDiaryEntryId(entry, index) !== parsed.entryId);
+            await kokoMemory.put('contacts', contact);
+            renderDiary();
         }
+        return;
+    }
+
+    const entryEl = e.target.closest('.diary-entry');
+    if (entryEl?.dataset?.entryKey) {
+        openDiaryDetail(entryEl.dataset.entryKey);
     }
 });
     document.getElementById('delete-contact-btn').addEventListener('click', async () => {
@@ -43313,13 +43859,22 @@ document.getElementById('delete-selected-diary-btn').addEventListener('click', a
     }
     const confirmed = await showCustomConfirm('删除日记', `确定要删除选中的 ${diaryEditModeState.selectedEntryIds.size} 篇日记吗？`, true);
     if (confirmed) {
-        const contact = state.contacts.find(c => c.id === state.activeChatId);
-        if (contact && contact.diary) {
-            // 核心：过滤掉所有被选中的日记
-            contact.diary = contact.diary.filter(entry => !diaryEditModeState.selectedEntryIds.has(entry.id));
+        const keys = Array.from(diaryEditModeState.selectedEntryIds);
+        const byContact = new Map();
+        keys.forEach(key => {
+            const parsed = parseDiaryEntryKey(key);
+            if (!parsed) return;
+            if (!byContact.has(parsed.contactId)) byContact.set(parsed.contactId, new Set());
+            byContact.get(parsed.contactId).add(parsed.entryId);
+        });
+
+        for (const [contactId, entryIds] of byContact.entries()) {
+            const contact = state.contacts.find(c => c.id === contactId);
+            if (!contact || !Array.isArray(contact.diary)) continue;
+            contact.diary = contact.diary.filter((entry, index) => !entryIds.has(getDiaryEntryId(entry, index)));
             await kokoMemory.put('contacts', contact);
-            exitDiaryEditMode(); // 退出编辑模式并刷新列表
         }
+        exitDiaryEditMode(); // 退出编辑模式并刷新列表
     }
 });
 
@@ -43341,7 +43896,7 @@ diaryContentList.addEventListener('click', async (e) => {
                 checkbox.checked = !checkbox.checked;
             }
 
-            const diaryId = checkbox.dataset.diaryId;
+            const diaryId = checkbox.dataset.entryKey;
             if (checkbox.checked) {
                 diaryEditModeState.selectedEntryIds.add(diaryId);
                 entryEl.classList.add('selected');
