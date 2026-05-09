@@ -19363,6 +19363,7 @@ const NORMAL_BASE_PROMPT = `
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
+⚡ 【最高优先级信息源】以下记忆流反映的是最近真实发生的事，比世界书中的任何历史摘要都更新、更准确。
 以下是你和用户最近按【时间顺序】发生的所有互动记录，包含了[私聊]和[论坛]两个场景。这是你决策和回应的【最高优先级】信息源。在回复前，你必须仔细阅读并理解所有记录。
 ---
 {{memory_stream}}
@@ -19484,7 +19485,7 @@ const NARRATIVE_BASE_PROMPT = `
                 const memoryWindow = 24 * 60 * 60 * 1000; 
 
                 if (contact && contact.history) {
-                    const recentChatHistory = contact.history.filter(msg => (now - msg.timestamp < memoryWindow));
+                    const recentChatHistory = contact.history.slice(-200);
                     recentChatHistory.forEach(msg => {
                         let content = '';
                         let memoryType = '私聊';
@@ -19758,33 +19759,55 @@ case 'takeout':
                     }
                 });
                 
-                // (你原来的群聊记忆互通逻辑)
+                // (群聊记忆互通逻辑 - 独立注入版，不占主记忆池名额)
+                let groupMemorySection = '';
                 if (contact && !contact.isGroup) {
                     const allGroups = state.contacts.filter(c => c.isGroup);
-                    const sharedMemoryGroups = allGroups.filter(g => 
+                    const sharedMemoryGroups = allGroups.filter(g =>
                         g.memoryShared && g.members.includes(contact.id)
                     );
 
+                    const groupLines = [];
                     for (const group of sharedMemoryGroups) {
-                        group.history.slice(-20).forEach(msg => {
-                            let groupMsgContent = '';
+                        // 不限24小时，取最近50条
+                        const groupMsgs = group.history
+                            .filter(msg => msg.sender !== 'system_instruction')
+                            .slice(-50);
+
+                        groupMsgs.forEach(msg => {
+                            let content = '';
                             if (msg.type === 'text' || msg.type === 'html') {
-                                groupMsgContent = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : '';
+                                content = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, '') : '';
                             } else if (msg.type === 'offlineSpeech') {
-                                groupMsgContent = `(说)${msg.content}`;
+                                content = `(说)${msg.content}`;
                             } else if (msg.type === 'offlineAction') {
-                                groupMsgContent = `(动作)${msg.content}`;
+                                content = `(动作)${msg.content}`;
+                            } else if (msg.type === 'voice') {
+                                content = `(语音)${msg.content?.text || ''}`;
                             } else { return; }
-                            if (!groupMsgContent.trim()) return;
-                            const authorProfile = (msg.sender === 'myProfile') ? state.myProfile : state.contacts.find(c => c.id === msg.sender);
+                            if (!content.trim()) return;
+
+                            const authorProfile = (msg.sender === 'myProfile' || msg.sender === 'user')
+                                ? state.myProfile
+                                : state.contacts.find(c => c.id === msg.sender)
+                                  || (group.npcMembers || []).find(npc => npc.id === msg.sender);
                             if (!authorProfile) return;
-                            unifiedMemoryStream.push({
-                                timestamp: msg.timestamp,
-                                type: `群聊[${group.name}]`,
-                                author: authorProfile.name,
-                                content: groupMsgContent
-                            });
+
+                            const timeTag = (contact && contact.isTimeAware === true)
+                                ? formatHybridTimeForAI(msg.timestamp) + ' '
+                                : '';
+                            groupLines.push(`${timeTag}[群聊-${group.name}] ${authorProfile.name}: ${content}`);
                         });
+                    }
+
+                    if (groupLines.length > 0) {
+                        groupMemorySection = `
+[🔗 关联群聊记录 (与你同在的群聊历史，供参考)]
+这些是你和用户在共同群聊中的最新互动，作为补充背景，优先级低于上方记忆流。
+---
+${groupLines.join('\n')}
+---
+`;
                     }
                 }
                 
@@ -19903,7 +19926,7 @@ ${memoriesList}
 1. 如果一致（例如你要去睡了，且状态已经是“睡觉中”），则无需操作。
 2. 如果不一致（例如你要去睡了，但状态显示“在线”），这属于信息不同步！你**必须**在回复中包含 \`[status:睡觉中 💤]\` 指令来修正它。
 `;
-                const worldBookContextString = (contact?.worldBooks || []).map(bookId => { const book = state.worldBooks.find(b => b.id === bookId); return book ? `\n[World Book Entry: ${book.name}]\n${book.content}` : ''; }).join('');
+                const worldBookContextString = (contact?.worldBooks || []).map(bookId => { const book = state.worldBooks.find(b => b.id === bookId); return book ? `\n[世界书背景资料: ${book.name}]\n⚠️ 以下内容为历史背景设定，不代表当前最新状态。如与上方【统一时序记忆流】有任何冲突，必须以记忆流为准。\n${book.content}` : ''; }).join('');
                 
                 // (你原来的 snoopedDataContextString 逻辑)
                 let snoopedDataContextString = '';
@@ -20085,6 +20108,7 @@ ${npcBriefs ? `[相关人物简报]\n${npcBriefs}` : ''}
             }
             // ▲▲▲▲▲▲▲▲▲▲ 修复结束 ▲▲▲▲▲▲▲▲▲▲
                 let systemContent = isNarrativeMode ? finalSystemPrompt : finalSystemPrompt.replace("{{memory_stream}}", finalMemoryString);
+                if (groupMemorySection) { systemContent += groupMemorySection; }
                 if (worldBookContextString) { systemContent += worldBookContextString; }
                 if (snoopedDataContextString) { systemContent += snoopedDataContextString; }
                 if (relationshipContextString) { systemContent += relationshipContextString; }
