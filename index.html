@@ -17966,14 +17966,56 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
     return result;
 }
 
+function compactLeadingOfflineActions(events) {
+    const list = Array.isArray(events) ? events.filter(Boolean) : [];
+    if (!list.length) return list;
+
+    const normalized = list.map(ev => ({
+        ...ev,
+        _normalizedType: normalizeOfflineEventType(ev.type, ev.content)
+    }));
+
+    const firstSpeechIndex = normalized.findIndex(ev => ev._normalizedType === 'offlineSpeech');
+    if (firstSpeechIndex <= 1) {
+        return normalized.map(({ _normalizedType, ...rest }) => rest);
+    }
+
+    const leadingActions = normalized.slice(0, firstSpeechIndex)
+        .filter(ev => ev._normalizedType === 'offlineAction');
+    const rest = normalized.slice(firstSpeechIndex);
+
+    if (leadingActions.length <= 1) {
+        return normalized.map(({ _normalizedType, ...rest }) => rest);
+    }
+
+    const mergedContent = leadingActions
+        .map(ev => cleanOfflineActionText(ev.content || ''))
+        .filter(Boolean)
+        .join('\n');
+
+    if (!mergedContent) {
+        return normalized.map(({ _normalizedType, ...rest }) => rest);
+    }
+
+    const mergedAction = {
+        ...leadingActions[0],
+        type: 'offlineAction',
+        content: mergedContent
+    };
+
+    return [mergedAction, ...rest].map(({ _normalizedType, ...rest }) => rest);
+}
+
 async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatContext) {
     const list = Array.isArray(events) ? events : [];
-    const expandedEvents = [];
+    let expandedEvents = [];
 
     list.forEach(ev => {
         const parts = expandOfflineEventForRender(ev, senderProfile, effectiveChatContext);
         expandedEvents.push(...parts);
     });
+
+    expandedEvents = compactLeadingOfflineActions(expandedEvents);
 
     console.log('[线下分条渲染]', {
         originalCount: list.length,
