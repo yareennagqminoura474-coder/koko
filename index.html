@@ -22396,6 +22396,17 @@ function isSilentOfflinePlaceholder(text) {
     return /^(?:对方(?:没有立刻回应|没有回应|沉默着|沉默了|只是沉默|没有说话)|等待(?:用户|对方)?回应|请等待(?:用户|对方)?回应)$/.test(s);
 }
 
+function isStandalonePunctuationFragment(text) {
+    const s = String(text || '')
+        .replace(/\s+/g, '')
+        .replace(/&nbsp;/g, '')
+        .trim();
+
+    if (!s) return true;
+
+    return /^[。！？!?，,、；;：:…·.'"“”‘’`~～—\-_=+|/\\*()[\]{}【】《》<>（）「」『』]+$/.test(s);
+}
+
 function getLatestUserTextForChat(chatContext) {
     const history = Array.isArray(chatContext?.history) ? chatContext.history : [];
     for (let i = history.length - 1; i >= 0; i--) {
@@ -22781,10 +22792,10 @@ function compactMibuOfflineBlocks(blocks) {
             .filter(Boolean)
             .join('\n');
         actionBuffer = [];
-        if (!merged || isSilentOfflinePlaceholder(merged)) return;
+        if (!merged || isStandalonePunctuationFragment(merged) || isSilentOfflinePlaceholder(merged)) return;
         const pieces = splitOfflineActionForRender(merged);
         pieces.forEach(piece => {
-            if (!piece || isSilentOfflinePlaceholder(piece)) return;
+            if (!piece || isStandalonePunctuationFragment(piece) || isSilentOfflinePlaceholder(piece)) return;
             result.push({ type: 'offlineAction', content: piece });
         });
     }
@@ -22797,7 +22808,7 @@ function compactMibuOfflineBlocks(blocks) {
         }
 
         const cleaned = cleanAiSpeechText(cleanOfflineEventContent(block.content));
-        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
+        if (!cleaned || isStandalonePunctuationFragment(cleaned) || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
         flushAction();
         result.push({ type: 'offlineSpeech', content: cleaned });
     });
@@ -22820,10 +22831,10 @@ function compactAdjacentOfflineActions(events, chatContext = null) {
             .join('\n');
 
         actionBuffer = [];
-        if (!merged || isSilentOfflinePlaceholder(merged)) return;
+        if (!merged || isStandalonePunctuationFragment(merged) || isSilentOfflinePlaceholder(merged)) return;
         const pieces = splitOfflineActionForRender(merged);
         pieces.forEach(piece => {
-            if (!piece || isSilentOfflinePlaceholder(piece)) return;
+            if (!piece || isStandalonePunctuationFragment(piece) || isSilentOfflinePlaceholder(piece)) return;
             result.push({
                 ...base,
                 type: 'offlineAction',
@@ -22846,7 +22857,7 @@ function compactAdjacentOfflineActions(events, chatContext = null) {
         }
 
         const cleaned = cleanAiSpeechText(cleanOfflineEventContent(ev.content));
-        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) {
+        if (!cleaned || isStandalonePunctuationFragment(cleaned) || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) {
             flushAction();
             return;
         }
@@ -22876,19 +22887,19 @@ function splitMibuStyleOfflineBlocks(text) {
             .filter(Boolean)
             .join('\n');
         actionBuffer = [];
-        if (!merged || isSilentOfflinePlaceholder(merged)) return;
+        if (!merged || isStandalonePunctuationFragment(merged) || isSilentOfflinePlaceholder(merged)) return;
         blocks.push({ type: 'offlineAction', content: merged });
     }
 
     function pushAction(chunk) {
         const cleaned = normalizeMibuOfflineActionContent(chunk);
-        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
+        if (!cleaned || isStandalonePunctuationFragment(cleaned) || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
         actionBuffer.push(cleaned);
     }
 
     function pushSpeech(chunk) {
         const cleaned = cleanAiSpeechText(cleanOfflineEventContent(chunk));
-        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
+        if (!cleaned || isStandalonePunctuationFragment(cleaned) || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
         flushAction();
         blocks.push({ type: 'offlineSpeech', content: cleaned });
     }
@@ -22985,7 +22996,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
 
     function pushExpandedSegment(typeHint, content) {
         const rawSegment = String(content || '').trim();
-        if (!rawSegment) return;
+        if (!rawSegment || isStandalonePunctuationFragment(rawSegment)) return;
 
         const finalType = classifyOfflineSegment(typeHint, rawSegment, effectiveChatContext);
         if (finalType === 'offlineSpeech') {
@@ -22995,12 +23006,12 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
 
             speechPieces.forEach(piece => {
                 piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
-                if (!piece || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
+                if (!piece || isStandalonePunctuationFragment(piece) || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
 
                 const pieceType = classifyOfflineSegment('speech', piece, effectiveChatContext);
                 if (pieceType === 'offlineAction') {
                     splitOfflineActionForRender(piece).forEach(actionContent => {
-                        if (!actionContent || isSilentOfflinePlaceholder(actionContent)) return;
+                        if (!actionContent || isStandalonePunctuationFragment(actionContent) || isSilentOfflinePlaceholder(actionContent)) return;
                         expanded.push({
                             type: 'offlineAction',
                             sender: 'system',
@@ -23024,7 +23035,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
         }
 
         splitOfflineActionForRender(rawSegment).forEach(actionContent => {
-            if (!actionContent || isSilentOfflinePlaceholder(actionContent)) return;
+            if (!actionContent || isStandalonePunctuationFragment(actionContent) || isSilentOfflinePlaceholder(actionContent)) return;
             expanded.push({
                 type: 'offlineAction',
                 sender: 'system',
@@ -23060,7 +23071,7 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile, effectiveCh
 
     function pushAction(text) {
         splitOfflineActionForRender(text).forEach(cleaned => {
-            if (!cleaned || isSilentOfflinePlaceholder(cleaned)) return;
+            if (!cleaned || isStandalonePunctuationFragment(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
             result.push({
                 type: 'offlineAction',
                 sender: 'system',
@@ -23074,10 +23085,10 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile, effectiveCh
 
     function pushSpeech(text) {
         const cleaned = cleanAiSpeechText(cleanOfflineEventContent(text));
-        if (!cleaned || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
+        if (!cleaned || isStandalonePunctuationFragment(cleaned) || isOrphanBracket(cleaned) || isJsonGarbageFragment(cleaned) || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
         splitLongSpeech(cleaned).forEach(piece => {
             piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
-            if (!piece || isOrphanBracket(piece) || isJsonGarbageFragment(piece) || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
+            if (!piece || isStandalonePunctuationFragment(piece) || isOrphanBracket(piece) || isJsonGarbageFragment(piece) || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
             result.push({
                 type: 'offlineSpeech',
                 sender: senderProfile.id,
@@ -23278,7 +23289,7 @@ async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatC
                     ? 'offlineSpeech'
                     : classifyOfflineSegment(ev.type, ev.content, effectiveChatContext);
         const content = messageType === 'offlineAction' ? cleanOfflineActionText(ev.content) : cleanAiSpeechText(cleanOfflineEventContent(ev.content));
-        if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
+        if (!content || isStandalonePunctuationFragment(content) || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
         if (isSilentOfflinePlaceholder(content)) {
             suppressedCount += 1;
             continue;
