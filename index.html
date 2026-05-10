@@ -18018,7 +18018,7 @@ async function requestAiReply(systemInstruction = null, targetContactId = null) 
 
                 }
 
-                const forceDiary = (contact.apiCallCounter % 3 === 0);
+                const forceDiary = false; // 普通聊天不触发日记，日记仅由定时器生成
                 const rawResponse = await generateAiResponse(contact, contact.history, null, forceDiary, 'chat');
                 
                 await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
@@ -22826,7 +22826,20 @@ function splitMibuStyleOfflineBlocks(text) {
         blocks.push({ type: 'offlineSpeech', content: cleaned });
     }
 
-    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|“[^”]+”|"[^"\n]+"|「[^」]+」)/g;
+    // 判断引号前的文字是”叙事引用”语境（引用用户说过的话），而非角色正在开口说话
+    const isNarrativeReferenceQuote = (beforeText) => {
+        const b = String(beforeText || '').trimEnd();
+        if (!b) return false;
+        // “那句xxx的” / “这句xxx的” / “那轻飘飘的” 等结尾 → 叙事引用
+        if (/(那句|这句|那两个字|那几个字|那个词|那话|这话|那声|那一声|那轻飘飘|那淡淡|刚才的|说出口的)/.test(b)) return true;
+        // 以指示代词 + 短修饰 + “的” 结尾 → 叙事引用
+        if (/[那这]\S{0,10}的$/.test(b)) return true;
+        // 以”说/道/问/喊/叫”结尾 → 正常说话，不是叙事引用
+        if (/[说道问喊叫]$/.test(b.replace(/\s/g, ''))) return false;
+        return false;
+    };
+
+    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|”[^”]+”|”[^”\n]+”|「[^」]+」)/g;
     let lastIndex = 0;
     let hasStructuredToken = false;
     let match;
@@ -22834,20 +22847,30 @@ function splitMibuStyleOfflineBlocks(text) {
     while ((match = tokenRegex.exec(source)) !== null) {
         hasStructuredToken = true;
         const before = source.slice(lastIndex, match.index).trim();
-        if (before) pushAction(before);
 
         const token = match[0];
         const isQuotedSpeech =
-            (token.startsWith('“') && token.endsWith('”')) ||
-            (token.startsWith('"') && token.endsWith('"')) ||
+            (token.startsWith('”') && token.endsWith('”')) ||
+            (token.startsWith('”') && token.endsWith('”')) ||
             (token.startsWith('「') && token.endsWith('」'));
 
-        if (isQuotedSpeech) {
-            pushSpeech(token.slice(1, -1));
-        } else if (token.startsWith('**') && token.endsWith('**')) {
-            pushAction(token.slice(2, -2));
+        if (isQuotedSpeech && isNarrativeReferenceQuote(before)) {
+            // 叙事引用：before + 引号内容合并为一个动作卡片，引号保留让读者看到引用
+            const combined = (before ? before + token : token);
+            combined.split(/\n{2,}/).map(p => p.replace(/[ \t]*\n[ \t]*/g, ' ').trim()).filter(Boolean).forEach(p => {
+                if (!isOrphanBracket(p) && !isJsonGarbageFragment(p))
+                    pushAction(p);
+            });
         } else {
-            pushAction(token.slice(1, -1));
+            // 正常处理：before 单独推入，token 按类型分发
+            if (before) pushAction(before);
+            if (isQuotedSpeech) {
+                pushSpeech(token.slice(1, -1));
+            } else if (token.startsWith('**') && token.endsWith('**')) {
+                pushAction(token.slice(2, -2));
+            } else {
+                pushAction(token.slice(1, -1));
+            }
         }
 
         lastIndex = tokenRegex.lastIndex;
@@ -23572,13 +23595,8 @@ if (heartVoiceMatch) {
     }
 
     if (diaryContent) {
-        if (!senderProfile.diary) senderProfile.diary = [];
-        senderProfile.diary.push({
-            id: `diary_${Date.now()}`,
-            content: diaryContent,
-            timestamp: Date.now()
-        });
-        await kokoMemory.put('contacts', senderProfile);
+        // 普通回复中的 diary 只剥离，不保存——日记由定时器统一生成
+        console.log('[日记] 已从普通回复中剥离 [diary]，不再自动保存。');
     }
     
 // ... 省略了日记保存的代码 ...
