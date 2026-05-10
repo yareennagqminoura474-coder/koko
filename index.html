@@ -8685,6 +8685,26 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
     </div>
 </div>
 
+<div class="mask-editor">
+    <div class="mask-editor-title">关系与称呼设定</div>
+    <div class="mask-editor-group">
+        <label class="mask-editor-label">与用户关系</label>
+        <input type="text" class="form-input" id="relationship-to-user-input" placeholder="例如：恋人 / 朋友 / 同学 / 室友">
+    </div>
+    <div class="mask-editor-group">
+        <label class="mask-editor-label">角色称呼用户</label>
+        <input type="text" class="form-input" id="call-user-as-input" placeholder="例如：宝宝 / 姐姐 / 主人 / 你的名字">
+    </div>
+    <div class="mask-editor-group">
+        <label class="mask-editor-label">用户称呼角色</label>
+        <input type="text" class="form-input" id="user-calls-me-as-input" placeholder="例如：阿屿 / 哥哥 / 老师">
+    </div>
+    <div class="mask-editor-group">
+        <label class="mask-editor-label">称呼补充规则</label>
+        <textarea class="mask-editor-textarea" id="addressing-rules-input" placeholder="例如：平时叫宝宝，生气时叫全名；不要叫姐姐" style="height: 90px;"></textarea>
+    </div>
+</div>
+
                     <div class="mask-editor">
     <div class="mask-editor-title">对话模式</div>
     <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0;">
@@ -12587,7 +12607,7 @@ async function loadDataFromDB() {
             isInitialPostLoad = true;
         } else {
             console.log("从数据库加载数据。");
-            state.contacts = contacts;
+            state.contacts = (contacts || []).map(contact => ensureContactRelationshipSettings(contact));
             state.worldBooks = worldBooks;
             state.posts = posts;
             state.userPersonaPresets = userPersonaPresets;
@@ -12794,6 +12814,15 @@ const GROUP_PRIVATE_MEMORY_RULES = `
 4. 群聊当前最新消息优先级最高。
 `;
 
+const RELATIONSHIP_ADDRESSING_PRIORITY_RULES = `
+[关系与称呼优先级规则]
+1. 结构化的“关系与称呼设定”优先级高于普通聊天记忆。
+2. 普通聊天记忆只能反映发生过的事，不能自动改变固定关系。
+3. 只有用户明确说“以后你叫我……” “我们的关系改成……”时，才可以建议更新设定。
+4. 如果记忆流和关系设定冲突，以关系设定为准。
+5. 不要把其他角色对用户的称呼复制到当前角色身上。
+`;
+
 function getDefaultDiarySettings() {
     return {
         enabled: false,
@@ -12815,6 +12844,15 @@ function normalizeRoleId(roleId) {
 function stripHtmlTags(text) {
     if (typeof text !== 'string') return '';
     return text.replace(/<[^>]+>/g, '').trim();
+}
+
+function ensureContactRelationshipSettings(contact) {
+    if (!contact || typeof contact !== 'object') return contact;
+    contact.relationshipToUser = contact.relationshipToUser || '';
+    contact.callUserAs = contact.callUserAs || '';
+    contact.userCallsMeAs = contact.userCallsMeAs || '';
+    contact.addressingRules = contact.addressingRules || '';
+    return contact;
 }
 
 function getProfileInGroupContext(group, roleId) {
@@ -13033,6 +13071,90 @@ function formatUnifiedMemoryEntry(entry, options = {}) {
     const sceneLabel = entry.sceneName ? `${entry.sceneType}-${entry.sceneName}` : entry.sceneType;
     const authorTag = entry.authorId === 'user' ? '(你)' : '';
     return `${timeTag}[${sceneLabel}] ${entry.authorName || '系统事件'}${authorTag}: ${entry.content}`;
+}
+
+function buildAddressingPromptForPrivateChat(contact) {
+    ensureContactRelationshipSettings(contact);
+    const myName = state.myProfile?.name || '用户';
+
+    return `
+[关系与称呼硬性设定]
+- 你是：${contact.name}
+- 用户是：${myName}
+- 你和用户的固定关系：${contact.relationshipToUser || '未明确，请以角色人设和记忆为准，但不要擅自改变关系'}
+- 你称呼用户时必须优先使用：${contact.callUserAs || myName}
+- 用户通常称呼你为：${contact.userCallsMeAs || contact.name}
+- 补充称呼规则：${contact.addressingRules || '无'}
+
+[重要规则]
+1. 上面的关系和称呼是硬性设定，优先级高于普通聊天记忆。
+2. 不要把用户和其他角色的关系套到你身上。
+3. 不要因为群聊里别人对用户的称呼，就改变你对用户的称呼。
+4. 如果用户没有明确要求改关系，不要擅自把朋友改成恋人、恋人改成朋友、哥哥改成弟弟。
+5. 称呼要自然，但不能乱改辈分、身份、亲密度。
+`.trim();
+}
+
+async function buildAddressingPromptForGroupChat(group) {
+    const myName = state.myProfile?.name || '用户';
+    const memberProfiles = (group.members || [])
+        .map(id => getProfileInGroupContext(group, id))
+        .filter(Boolean);
+    const nonUserProfiles = memberProfiles.filter(profile => normalizeRoleId(profile.id) !== 'user');
+    const lines = [];
+
+    lines.push('[群聊关系与称呼硬性设定]');
+    lines.push(`- 群聊名称：${group.name}`);
+    lines.push(`- 用户名称：${myName}`);
+
+    nonUserProfiles.forEach(profile => {
+        const realContact = ensureContactRelationshipSettings(
+            state.contacts.find(contact => contact.id === profile.id) || profile
+        );
+        lines.push(`
+[成员：${profile.name}]
+- 与用户关系：${realContact.relationshipToUser || '未明确'}
+- 该成员称呼用户：${realContact.callUserAs || myName}
+- 用户通常称呼该成员：${realContact.userCallsMeAs || profile.name}
+- 称呼补充规则：${realContact.addressingRules || '无'}
+- 核心人设：${(profile.persona || '').replace(/\n/g, ' ') || '(未设置)'}
+`.trim());
+    });
+
+    try {
+        const networkData = await kokoMemory.get('relationshipNetworks', group.id);
+        if (networkData && Array.isArray(networkData.edges) && networkData.edges.length > 0) {
+            const relationshipLines = networkData.edges.map(edge => {
+                const fromId = edge.from || edge.source;
+                const toId = edge.to || edge.target;
+                const relation = edge.label || edge.relationship || edge.type || edge.name || '';
+                const from = nonUserProfiles.find(profile => profile.id === fromId);
+                const to = nonUserProfiles.find(profile => profile.id === toId);
+                if (!from || !to || !relation) return null;
+                return `- ${from.name} 与 ${to.name}：${relation}`;
+            }).filter(Boolean);
+
+            if (relationshipLines.length > 0) {
+                lines.push('');
+                lines.push('[群成员之间的固定关系]');
+                lines.push(...relationshipLines);
+            }
+        }
+    } catch (error) {
+        console.warn('读取群聊关系网失败:', error);
+    }
+
+    lines.push(`
+[重要规则]
+1. 群聊成员之间的关系和称呼必须按上面设定执行。
+2. 不要把 A 和用户的关系套到 B 身上。
+3. 不要把 A 对用户的称呼变成 B 对用户的称呼。
+4. 如果某个角色和用户是恋人，只有这个角色能用对应亲密称呼，其他角色不能乱叫。
+5. 如果某个角色是哥哥/姐姐/老师/同学/朋友，不要擅自改变辈分和身份。
+6. 群聊输出时，每条消息前的说话人必须使用成员列表里的准确角色名。
+`.trim());
+
+    return lines.join('\n');
 }
 
 function buildUnifiedMemoryStreamForChat(chatTarget, options = {}) {
@@ -18831,6 +18953,8 @@ async function triggerGroupFreeChat(group) {
             return book ? `- ${book.name}: ${book.content}` : '';
         }).filter(Boolean).join('\n') || '(本次对话无世界书)';
         const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
+        const addressingPrompt = await buildAddressingPromptForGroupChat(group);
+        const allowedSpeakerList = allMemberProfiles.map(profile => profile.name).join('、');
         const characterDossiersPrompt = allMemberProfiles.map(profile => `
 - 角色名: ${profile.name}
   - 核心人设: ${(profile.persona || '').replace(/\n/g, ' ')}
@@ -18847,6 +18971,9 @@ async function triggerGroupFreeChat(group) {
 - 用户(观察者): ${myProfile.name} (人设: ${userPersonaInGroup})
 - 你只能控制这些 AI 角色: ${allMemberProfiles.map(profile => profile.name).join('、')}
 - 你绝对禁止扮演用户“${myProfile.name}”。
+
+[群聊关系与称呼设定]
+${addressingPrompt}
 
 [角色记忆核心]
 ${memoryContext.formattedPermanentMemories}
@@ -18877,10 +19004,14 @@ ${GROUP_PRIVATE_MEMORY_RULES}
 3. 不要机械总结记忆来源，不要公开复述私聊原文。
 
 [输出格式]
-MESSAGE_START
-SPEAKER: 角色名
-CONTENT: 单条消息内容
-MESSAGE_END
+允许发言角色：${allowedSpeakerList}
+你必须使用以下格式，每一行一条消息：
+[角色名]：消息内容
+规则：
+1. 角色名前缀必须从“允许发言角色”里逐字复制。
+2. 不允许使用昵称、外号、代称、我、他、她、某人作为前缀。
+3. 不允许创造新角色。
+4. 不允许输出 MESSAGE_START、SPEAKER、CONTENT、MESSAGE_END 这类旧格式。
 `.trim()
             }
         ];
@@ -18888,7 +19019,7 @@ MESSAGE_END
         const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
         if (!isLatestAiRequest(group.id, requestId)) return;
 
-        const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
+        const messageRegex = /\[([^\]]+)\][:：]\s*([\s\S]*?)(?=\n\[|$)/g;
         const messageMatches = Array.from(rawResponse.matchAll(messageRegex));
         if (messageMatches.length === 0) {
             throw new Error('AI未能生成有效的自由聊天内容。');
@@ -18949,6 +19080,8 @@ async function triggerGroupChatAiReply(group) {
         const memoryContext = buildUnifiedMemoryStreamForChat(group, {
             memoryLimit: Math.max(40, Number(state.apiSettings.longTermMemoryLength) || 40)
         });
+        const addressingPrompt = await buildAddressingPromptForGroupChat(group);
+        const allowedSpeakerList = allMemberProfiles.map(profile => profile.name).join('、');
         const characterDossiersPrompt = allMemberProfiles.map(profile => `
 - 角色名: ${profile.name}
   - 核心人设: ${(profile.persona || '').replace(/\n/g, ' ')}
@@ -19014,6 +19147,9 @@ async function triggerGroupChatAiReply(group) {
 - 你只能控制这些 AI 角色: ${allMemberProfiles.map(profile => profile.name).join('、')}
 - 你绝对禁止扮演用户“${myProfile.name}”。
 
+[群聊关系与称呼设定]
+${addressingPrompt}
+
 [相关世界书]
 ${worldBookContextString}
 
@@ -19034,10 +19170,14 @@ ${GROUP_PRIVATE_MEMORY_RULES}
 3. 你可以参考私聊关系变化来调整态度，但不能直接曝光私聊原文。
 
 [输出格式]
-MESSAGE_START
-SPEAKER: 角色名
-CONTENT: 单条消息内容
-MESSAGE_END
+允许发言角色：${allowedSpeakerList}
+你必须使用以下格式，每一行一条消息：
+[角色名]：消息内容
+规则：
+1. 角色名前缀必须从“允许发言角色”里逐字复制。
+2. 不允许使用昵称、外号、代称、我、他、她、某人作为前缀。
+3. 不允许创造新角色。
+4. 不允许输出 MESSAGE_START、SPEAKER、CONTENT、MESSAGE_END 这类旧格式。
 `.trim()
             },
             ...messages
@@ -19046,7 +19186,7 @@ MESSAGE_END
         const rawResponse = await generateAiResponse(null, [], null, false, 'chat', finalRequestMessages);
         if (!isLatestAiRequest(group.id, requestId)) return;
 
-        const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
+        const messageRegex = /\[([^\]]+)\][:：]\s*([\s\S]*?)(?=\n\[|$)/g;
         const messageMatches = Array.from(rawResponse.matchAll(messageRegex));
 
         for (const match of messageMatches) {
@@ -19304,6 +19444,8 @@ const NORMAL_BASE_PROMPT = `
 
 ${PRIVATE_UNIFIED_MEMORY_RULES}
 
+${RELATIONSHIP_ADDRESSING_PRIORITY_RULES}
+
 [!!! 核心时间反应规则 (极高优先级) !!!]
 在你生成任何回复之前，你必须检查【统一时序记忆流】中最后几条消息的时间标签。
 1.  **识别时间跳跃**: 如果你发现【上一条消息】的时间标签（例如 "(昨天 09:15)" 或 "(3天前)") 与【最新消息】的时间标签（例如 "(今天 20:55)"）之间存在【超过几个小时或数天】的明显跳跃...
@@ -19380,6 +19522,8 @@ const NARRATIVE_BASE_PROMPT = `
 [heart_voice]{"emotion": "期待", "thoughts": "不知道她会不会同意我的邀请，心跳得好快。", "heartRate": "110 bpm", "jealousy": ""}[/heart_voice]
 
 ${PRIVATE_UNIFIED_MEMORY_RULES}
+
+${RELATIONSHIP_ADDRESSING_PRIORITY_RULES}
 `;
 
 // --- (替换) 核心 AI 响应函数 (V3.1 - 支持 forceMessages "后门" ) ---
@@ -36244,6 +36388,10 @@ ${data.assets || "（AI未生成资产详情）"}
         avatar: data.avatar,
         persona: personaPrompt,
         userPersona: '', 
+        relationshipToUser: '',
+        callUserAs: '',
+        userCallsMeAs: '',
+        addressingRules: '',
         thoughtPreset: '',
         signature: data.signature || "这个家伙很懒，什么都没写", 
         worldBooks: [newBook.id], 
@@ -38462,6 +38610,10 @@ document.getElementById('char-more-info-btn').addEventListener('click', async ()
         document.getElementById('contact-bubble-css-input').value = contact.customBubbleCss || '';
         document.getElementById('user-mask-textarea').value = contact.userPersona || '';
         document.getElementById('custom-user-name-input').value = contact.customUserName || '';
+        document.getElementById('relationship-to-user-input').value = contact.relationshipToUser || '';
+        document.getElementById('call-user-as-input').value = contact.callUserAs || '';
+        document.getElementById('user-calls-me-as-input').value = contact.userCallsMeAs || '';
+        document.getElementById('addressing-rules-input').value = contact.addressingRules || '';
         const currentPersonaPreset = state.userPersonaPresets.find(p => p.description === contact.userPersona);
         document.getElementById('select-user-persona-preset').value = currentPersonaPreset ? currentPersonaPreset.id : '';
         
@@ -39074,6 +39226,10 @@ const newContact = {
     diary: [],
     diarySettings: getDefaultDiarySettings(),
     userPersona: '',
+    relationshipToUser: '',
+    callUserAs: '',
+    userCallsMeAs: '',
+    addressingRules: '',
     thoughtPreset: '',
     signature: '',
     isNarrativeMode: false,
@@ -39109,10 +39265,15 @@ document.getElementById('save-contact-settings-btn').addEventListener('click', a
     if (!contact) return;
     const oldNarrativeModeState = contact.isNarrativeMode;
     
+    ensureContactRelationshipSettings(contact);
     contact.persona = document.getElementById('char-mask-textarea').value;
     contact.userPersona = document.getElementById('user-mask-textarea').value;
     contact.thoughtPreset = document.getElementById('thought-preset-select').value;
     contact.customUserName = document.getElementById('custom-user-name-input').value.trim() || null;
+    contact.relationshipToUser = document.getElementById('relationship-to-user-input').value.trim();
+    contact.callUserAs = document.getElementById('call-user-as-input').value.trim();
+    contact.userCallsMeAs = document.getElementById('user-calls-me-as-input').value.trim();
+    contact.addressingRules = document.getElementById('addressing-rules-input').value.trim();
 
     // ▼▼▼ 核心修复点在这里 ▼▼▼
     // 1. (聊天) 只查找 #world-book-selector-list 内部的勾选
@@ -42982,11 +43143,13 @@ function buildPrivateChatOpenAiMessages(contact, history = []) {
 }
 
 function buildPrivateChatRequestMessages(contact, mode = 'reply') {
+    ensureContactRelationshipSettings(contact);
     const myProfile = state.myProfile;
     const isNarrativeMode = !!contact.isNarrativeMode;
     const memoryContext = buildUnifiedMemoryStreamForChat(contact, {
         memoryLimit: Math.max(60, Number(state.apiSettings.longTermMemoryLength) || 60)
     });
+    const addressingPrompt = buildAddressingPromptForPrivateChat(contact);
     const worldBookContextString = (contact.worldBooks || []).map(bookId => {
         const book = state.worldBooks.find(item => item.id === bookId);
         return book ? `--- (世界书: ${book.name}) ---\n${book.content}` : '';
@@ -43017,6 +43180,9 @@ ${memoryContext.formattedPermanentMemories}
 ${memoryContext.latestHeartVoiceString}
 
 ${baseSystemPrompt}
+
+[关系与称呼设定]
+${addressingPrompt}
 
 [额外背景资料：角色档案]
 ---
