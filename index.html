@@ -22277,6 +22277,17 @@ function cleanAiSpeechText(text) {
         s = s.replace(/^(小声|低声|压低声音|忍不住|抬手|起身|站起|坐下|看着|望向|伸手|收回|垂眼|点头|皱眉|笑着|叹了口气)[^，。！？!?]{0,24}[）)】\]]?\s*/g, '').trim();
     }
 
+    // 剥离大括号包裹（心理活动标记泄漏）
+    if (/^\{[\s\S]*\}$/.test(s)) {
+        s = s.slice(1, -1).trim();
+    }
+    s = s.replace(/^\{/, '').trim();
+    s = s.replace(/\}$/, '').trim();
+
+    // 清除内容中残留的 * 号（动作标记泄漏）
+    s = s.replace(/\*([^*\n]+)\*/g, '$1').trim();
+    s = s.replace(/\*/g, '').trim();
+
     return s.trim();
 }
 
@@ -22352,7 +22363,8 @@ function tryJsonParseLoose(text) {
 
 function isOrphanBracket(text) {
     const s = String(text || '').trim();
-    return s === ')' || s === '）' || s === '(' || s === '（';
+    return s === ')' || s === '）' || s === '(' || s === '（'
+        || s === '{' || s === '}' || s === '*';
 }
 
 function isUserControlledSpeech(text) {
@@ -22947,18 +22959,49 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
             });
         });
     } else {
-        const pieces = rawContent.length <= 42 ? [cleanAiSpeechText(cleanOfflineEventContent(rawContent))].filter(Boolean) : splitOfflineSpeechForRender(rawContent);
-        pieces.forEach(piece => {
-            piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
-            if (!piece || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
-            expanded.push({
-                type: 'offlineSpeech',
-                sender: ev.sender || ev.characterId || senderProfile?.id,
-                characterId: ev.characterId || senderProfile?.id,
-                characterName: ev.characterName || senderProfile?.name,
-                content: piece
+        // 如果 speech 内容里混入了 *...* 或 {...} 动作/心理标记，先走 splitMibuStyleOfflineBlocks 拆分
+        const hasMixedMarkers = /\*[^*\n]+\*|\{[^{}]+\}/.test(rawContent);
+        if (hasMixedMarkers) {
+            const blocks = splitMibuStyleOfflineBlocks(rawContent);
+            blocks.forEach(block => {
+                if (!block || !block.content) return;
+                if (block.type === 'offlineSpeech') {
+                    const cleaned = cleanAiSpeechText(cleanOfflineEventContent(block.content));
+                    if (!cleaned || isUserControlledSpeech(cleaned) || isSilentOfflinePlaceholder(cleaned)) return;
+                    expanded.push({
+                        type: 'offlineSpeech',
+                        sender: ev.sender || ev.characterId || senderProfile?.id,
+                        characterId: ev.characterId || senderProfile?.id,
+                        characterName: ev.characterName || senderProfile?.name,
+                        content: cleaned
+                    });
+                } else {
+                    splitOfflineActionForRender(block.content).forEach(content => {
+                        if (!content || isSilentOfflinePlaceholder(content)) return;
+                        expanded.push({
+                            type: 'offlineAction',
+                            sender: 'system',
+                            characterId: ev.characterId || senderProfile?.id,
+                            characterName: ev.characterName || senderProfile?.name,
+                            content
+                        });
+                    });
+                }
             });
-        });
+        } else {
+            const pieces = rawContent.length <= 42 ? [cleanAiSpeechText(cleanOfflineEventContent(rawContent))].filter(Boolean) : splitOfflineSpeechForRender(rawContent);
+            pieces.forEach(piece => {
+                piece = cleanAiSpeechText(cleanOfflineEventContent(piece));
+                if (!piece || isUserControlledSpeech(piece) || isSilentOfflinePlaceholder(piece)) return;
+                expanded.push({
+                    type: 'offlineSpeech',
+                    sender: ev.sender || ev.characterId || senderProfile?.id,
+                    characterId: ev.characterId || senderProfile?.id,
+                    characterName: ev.characterName || senderProfile?.name,
+                    content: piece
+                });
+            });
+        }
     }
 
     return compactAdjacentOfflineActions(expanded, effectiveChatContext);
