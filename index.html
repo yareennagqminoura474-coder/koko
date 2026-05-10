@@ -321,11 +321,34 @@
         .attachment-btn {
             margin-right: 10px; /* 附件按钮和输入框之间的间距 */
         }
+
+        .bracket-btn {
+            border: none;
+            border-radius: 50%;
+            width: 34px;
+            height: 34px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            align-self: flex-end;
+            margin-right: 8px;
+            font-size: 14px;
+            font-weight: 700;
+            background-color: #f0f2f5;
+            color: var(--text-gray);
+            transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+        }
         
         /* 4. (可选) 悬浮效果 */
         .emoji-btn:hover, .attachment-btn:hover {
             transform: scale(1.1);
             background-color: #e0e0e0; /* 悬浮时变深一点 */
+        }
+        .bracket-btn:hover {
+            transform: scale(1.1);
+            background-color: #e0e0e0;
         }
         /* ▲▲▲ 替换结束 ▲▲▲ */
         #edit-mode-bar, #moments-edit-mode-bar, #diary-edit-mode-bar { display: none; padding: 10px 15px; background-color: #f0f0f0; border-top: 1px solid #ddd; justify-content: space-between; align-items: center; flex-shrink: 0; }
@@ -7629,6 +7652,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                 <div class="chat-input-area" id="chat-input-area">
 <div class="emoji-btn" id="emoji-btn"><i class="far fa-smile"></i></div>
                     <button class="attachment-btn" id="attachment-btn"><i class="fas fa-plus"></i></button>
+                    <button class="bracket-btn" id="bracket-btn" title="插入动作括号">（）</button>
                     <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
                     <button id="send-btn" class="input-action-btn" title="发送消息"><i class="fas fa-arrow-up"></i></button>
                     <button id="request-reply-btn" class="input-action-btn" title="请求AI回复"><i class="fas fa-apple-whole"></i></button>
@@ -35135,8 +35159,9 @@ function updateChatInputLockState(blockedStatus) {
     const requestBtn = document.getElementById('request-reply-btn');
     const emojiBtn = document.getElementById('emoji-btn');
     const attachBtn = document.getElementById('attachment-btn');
+    const bracketBtn = document.getElementById('bracket-btn');
 
-    if (!inputArea || !messageInput || !sendBtn || !requestBtn || !emojiBtn || !attachBtn) {
+    if (!inputArea || !messageInput || !sendBtn || !requestBtn || !emojiBtn || !attachBtn || !bracketBtn) {
         console.warn("无法找到所有聊天输入框元素来进行锁定/解锁。");
         return;
     }
@@ -35149,6 +35174,8 @@ function updateChatInputLockState(blockedStatus) {
         requestBtn.style.display = 'none';
         emojiBtn.style.pointerEvents = 'none';
         attachBtn.style.pointerEvents = 'none';
+        bracketBtn.style.pointerEvents = 'none';
+        bracketBtn.style.opacity = '0.5';
     } else if (blockedStatus === 'ai_blocked_user') {
         inputArea.style.opacity = '0.7';
         messageInput.disabled = true;
@@ -35157,6 +35184,8 @@ function updateChatInputLockState(blockedStatus) {
         requestBtn.style.display = 'none';
         emojiBtn.style.pointerEvents = 'none';
         attachBtn.style.pointerEvents = 'none';
+        bracketBtn.style.pointerEvents = 'none';
+        bracketBtn.style.opacity = '0.5';
     } else { // 状态为 'none' (正常)
         inputArea.style.opacity = '1';
         messageInput.disabled = false;
@@ -35165,7 +35194,36 @@ function updateChatInputLockState(blockedStatus) {
         requestBtn.style.display = 'flex';
         emojiBtn.style.pointerEvents = 'auto';
         attachBtn.style.pointerEvents = 'auto';
+        bracketBtn.style.pointerEvents = 'auto';
+        bracketBtn.style.opacity = '1';
     }
+}
+
+function insertActionBrackets() {
+    const input = document.getElementById('message-input');
+    if (!input || input.disabled) return;
+
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const selectedText = input.value.slice(start, end);
+
+    let insertText;
+    let cursorOffset;
+
+    if (selectedText) {
+        insertText = `（${selectedText}）`;
+        cursorOffset = insertText.length;
+    } else {
+        insertText = '（）';
+        cursorOffset = 1;
+    }
+
+    input.value = input.value.slice(0, start) + insertText + input.value.slice(end);
+
+    const newCursorPos = start + cursorOffset;
+    input.focus();
+    input.setSelectionRange(newCursorPos, newCursorPos);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 // ==========================================================
 // --- 情侣默契挑战 核心逻辑 ---
@@ -39472,6 +39530,7 @@ document.getElementById('persona-avatar-uploader').addEventListener('change', as
             renderEmoticonPicker();
         }
     });
+document.getElementById('bracket-btn')?.addEventListener('click', insertActionBrackets);
 // 在 attachEventListeners 函数中...
 
 // 新的、智能的附件按钮逻辑
