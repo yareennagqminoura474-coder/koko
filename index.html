@@ -22886,17 +22886,21 @@ function splitMibuStyleOfflineBlocks(text) {
             (token.startsWith('「') && token.endsWith('」'));
 
         if (isQuotedSpeech && isNarrativeReferenceQuote(before)) {
-            // 叙事引用：before + 引号内容合并为一个动作卡片，引号保留让读者看到引用
-            const combined = (before ? before + token : token);
-            combined.split(/\n{2,}/).map(p => p.replace(/[ \t]*\n[ \t]*/g, ' ').trim()).filter(Boolean).forEach(p => {
-                if (!isOrphanBracket(p) && !isJsonGarbageFragment(p))
-                    pushAction(p);
-            });
+            // 叙事引用（如 那句轻飘飘的"随便你"）：before + 引号合并为一张动作卡片
+            const combined = ((before || '') + token).trim();
+            pushAction(combined);
         } else {
-            // 正常处理：before 单独推入，token 按类型分发
             if (before) pushAction(before);
             if (isQuotedSpeech) {
-                pushSpeech(token.slice(1, -1));
+                const inner = token.slice(1, -1).trim();
+                const cleaned = cleanOfflineEventContent(inner);
+                if (cleaned.length > 25 && !looksLikeOfflineSpeechContent(inner)) {
+                    // 长内容且不像台词（叙事被 AI 错标为 speech）→ 动作卡片
+                    pushAction(cleaned);
+                } else {
+                    // 真台词 → 气泡
+                    pushSpeech(inner);
+                }
             } else if (token.startsWith('**') && token.endsWith('**')) {
                 pushAction(token.slice(2, -2));
             } else {
@@ -22979,7 +22983,8 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
         });
     } else {
         // 如果 speech 内容里混入了 *...* 或 {...} 动作/心理标记，先走 splitMibuStyleOfflineBlocks 拆分
-        const hasMixedMarkers = /\*[^*\n]+\*|\{[^{}]+\}|\}[""「]/.test(rawContent);
+        // 长内容一律走 splitMibuStyleOfflineBlocks 重新拆分，不只靠标记检测
+        const hasMixedMarkers = rawContent.length > 25 || /\*[^*\n]+\*|\{[^{}]+\}|\}[""「]/.test(rawContent);
         if (hasMixedMarkers) {
             const blocks = splitMibuStyleOfflineBlocks(rawContent);
             blocks.forEach(block => {
