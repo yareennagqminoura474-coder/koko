@@ -20495,12 +20495,27 @@ ${qzoneContextText}
                 } else if (msg.type === 'offlineAction' || msg.type === 'offlineSpeech') {
                     const offlineContent = typeof msg.content === 'string' ? msg.content.trim() : '';
                     if (offlineContent) {
+                        let historyContent = offlineContent;
+                        if (contact && contact.isNarrativeMode) {
+                            if (msg.type === 'offlineAction') {
+                                historyContent = `[场景/动作] ${offlineContent}`;
+                            } else {
+                                const speakerName = String(
+                                    msg.characterName ||
+                                    ((msg.characterId === 'myProfile' || msg.sender === 'user' || msg.sender === 'myProfile')
+                                        ? state.myProfile?.name
+                                        : contact?.name) ||
+                                    '角色'
+                                ).trim();
+                                historyContent = `${speakerName || '角色'}：${offlineContent}`;
+                            }
+                        }
                         // 合并到上一条 assistant 消息，避免产生连续的多条 assistant 消息
                         const lastMsg = messages[messages.length - 1];
                         if (lastMsg && lastMsg.role === 'assistant' && typeof lastMsg.content === 'string') {
-                            lastMsg.content += '\n' + offlineContent;
+                            lastMsg.content += '\n' + historyContent;
                         } else {
-                            messages.push({ role: 'assistant', content: offlineContent });
+                            messages.push({ role: 'assistant', content: historyContent });
                         }
                     }
                 }
@@ -22365,6 +22380,68 @@ function isSilentOfflinePlaceholder(text) {
     return /^(?:对方(?:没有立刻回应|没有回应|沉默着|沉默了|只是沉默|没有说话)|等待(?:用户|对方)?回应|请等待(?:用户|对方)?回应)$/.test(s);
 }
 
+function getLatestUserTextForChat(chatContext) {
+    const history = Array.isArray(chatContext?.history) ? chatContext.history : [];
+    for (let i = history.length - 1; i >= 0; i--) {
+        const msg = history[i];
+        if (!msg || (msg.sender !== 'user' && msg.sender !== 'myProfile')) continue;
+
+        if (msg.type === 'voice' && msg.content?.text) {
+            return String(msg.content.text || '').trim();
+        }
+
+        if (msg.type === 'html' && typeof msg.content === 'string') {
+            const div = document.createElement('div');
+            div.innerHTML = msg.content;
+            const text = String(div.textContent || div.innerText || '').trim();
+            if (text) return text;
+            continue;
+        }
+
+        if ((msg.type === 'text' || msg.type === 'video_call_text' || msg.type === 'offlineSpeech') && typeof msg.content === 'string') {
+            const text = cleanAiSpeechText(cleanOfflineEventContent(msg.content));
+            if (text) return text;
+        }
+    }
+    return '';
+}
+
+function looksLikeNarrationAboutUserUtterance(text, chatContext) {
+    const s = String(text || '').replace(/\s+/g, '').trim();
+    if (!s) return false;
+
+    const latest = getLatestUserTextForChat(chatContext) || '';
+    const latestClean = String(latest || '').replace(/\s+/g, '').replace(/[。！？!?…~～]+$/g, '').trim();
+
+    const latestIsShortReply =
+        latestClean &&
+        latestClean.length <= 6 &&
+        /^(嗯|恩|哦|啊|好|行|可以|不用|不要|没事|继续|知道了|疼|算了|随便)$/.test(latestClean);
+
+    if (!latestIsShortReply) return false;
+
+    if (/(这个|那个|这一个|那一个|这一声|那一声|这句话|那句话|这句回应|那句回应|这个字|那个字|轻轻的字|短短的字|简单的回应|这个嗯|那个嗯|这一声回应)/.test(s)
+        && /(像|仿佛|似乎|激起|落进|投进|落在|让|使|带来|压下|松开|松弛|松了下来|刺进|敲在|撞进)/.test(s)) {
+        return true;
+    }
+
+    return false;
+}
+
+function looksLikeLiteraryNarration(text) {
+    const s = String(text || '').trim();
+    if (!s) return false;
+
+    if ((s.startsWith('“') && s.endsWith('”')) || (s.startsWith('"') && s.endsWith('"'))) return false;
+
+    const hasLiteraryCue = /(像|仿佛|似乎|终于|此刻|那一个|这一个|这一声|那一声|这一句|那一句|这个字|那个字|轻轻的字|短短的回应)/.test(s);
+    const hasSceneCue = /(眼神|肩膀|指尖|掌心|声音|笑意|沉默|空气|窗外|办公室|纸页|心中|潭水|涟漪|重担)/.test(s);
+    const hasNarrativeVerb = /(流露|激起|落下|松弛|松了下来|压下|按住|放下|垂下|抬起|靠近|转身|望着|盯着|看着|传来|响起|翻动)/.test(s);
+    const hasNamedSubjectAction = /^(?:他|她|对方|少年|男人|老师|女人|女孩|[一-龥]{2,4})(?:的|正|慢慢|轻轻|只是|忽然|忽地|静静|仍)?/.test(s) && hasNarrativeVerb;
+
+    return (hasLiteraryCue && (hasSceneCue || hasNarrativeVerb)) || (hasSceneCue && hasNarrativeVerb) || hasNamedSubjectAction;
+}
+
 function looksLikeOfflineAction(text) {
     const s = cleanOfflineEventContent(text);
     if (!s || isOrphanBracket(s) || isJsonGarbageFragment(s)) return false;
@@ -22399,10 +22476,11 @@ function looksLikeOfflineSpeechContent(text) {
     return false;
 }
 
-function normalizeOfflineEventType(rawType, rawContent = '') {
+function normalizeOfflineEventType(rawType, rawContent = '', chatContext = null) {
     const t = String(rawType || '').toLowerCase().trim();
     if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech' || t === 'dialogue' || t === 'line' || t === 'words') return 'offlineSpeech';
     if (t === 'action' || t === 'offlineaction' || t === 'narrative-action' || t === 'narration' || t === 'scene' || t === 'description' || t === 'psychology' || t === 'narrative-psychology' || t === 'thought' || t === 'status') return 'offlineAction';
+    if (looksLikeNarrationAboutUserUtterance(rawContent, chatContext) || looksLikeLiteraryNarration(rawContent)) return 'offlineAction';
     if (looksLikeOfflineAction(rawContent)) return 'offlineAction';
     if (looksLikeOfflineSpeechContent(rawContent)) return 'offlineSpeech';
     // 纯文本默认当作台词，避免把普通说话兜底成动作卡片
@@ -22666,7 +22744,7 @@ function compactMibuOfflineBlocks(blocks) {
     return result;
 }
 
-function compactAdjacentOfflineActions(events) {
+function compactAdjacentOfflineActions(events, chatContext = null) {
     const list = Array.isArray(events) ? events.filter(Boolean) : [];
     const result = [];
     let actionBuffer = [];
@@ -22694,7 +22772,7 @@ function compactAdjacentOfflineActions(events) {
 
     list.forEach(ev => {
         if (!ev || !ev.content) return;
-        const type = normalizeOfflineEventType(ev.type, ev.content);
+        const type = normalizeOfflineEventType(ev.type, ev.content, chatContext);
         if (type === 'offlineAction') {
             actionBuffer.push(ev);
             return;
@@ -22810,7 +22888,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
     rawContent = String(rawContent || '').trim();
     if (!rawContent) return expanded;
 
-    const messageType = normalizeOfflineEventType(ev.type || ev.kind || ev.eventType || '', rawContent);
+    const messageType = normalizeOfflineEventType(ev.type || ev.kind || ev.eventType || '', rawContent, effectiveChatContext);
     if (messageType === 'offlineAction') {
         const structuredBlocks = /[“"\*{（(\n「]/.test(rawContent)
             ? splitMibuStyleOfflineBlocks(rawContent)
@@ -22860,14 +22938,14 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
         });
     }
 
-    return compactAdjacentOfflineActions(expanded);
+    return compactAdjacentOfflineActions(expanded, effectiveChatContext);
 }
 
 function splitLongSpeech(text) {
     return String(text || '').split(/(?<=[。！？!?])\s*/).map(s => s.trim()).filter(Boolean);
 }
 
-function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
+function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile, effectiveChatContext = null) {
     const result = [];
     const source = String(raw || '').trim();
     if (!source) return result;
@@ -22922,7 +23000,11 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
                 if (!t) return;
                 if (structuredTextRegex.test(t)) {
                     pushMixedBlocks(t);
-                } else if (looksLikeOfflineAction(t)) {
+                } else if (
+                    looksLikeNarrationAboutUserUtterance(t, effectiveChatContext) ||
+                    looksLikeOfflineAction(t) ||
+                    looksLikeLiteraryNarration(t)
+                ) {
                     pushAction(t);
                 } else {
                     pushSpeech(t);
@@ -22942,22 +23024,26 @@ function parseNarrativeHtmlOrTextToOfflineEvents(raw, senderProfile) {
             Array.from(el.childNodes).forEach(walk);
         }
         Array.from(doc.body.childNodes).forEach(walk);
-        if (result.length > 0) return compactAdjacentOfflineActions(result);
+        if (result.length > 0) return compactAdjacentOfflineActions(result, effectiveChatContext);
     }
 
     if (structuredTextRegex.test(source)) {
         pushMixedBlocks(source);
-        if (result.length > 0) return compactAdjacentOfflineActions(result);
+        if (result.length > 0) return compactAdjacentOfflineActions(result, effectiveChatContext);
     }
 
-    if (looksLikeOfflineAction(source)) {
+    if (
+        looksLikeNarrationAboutUserUtterance(source, effectiveChatContext) ||
+        looksLikeOfflineAction(source) ||
+        looksLikeLiteraryNarration(source)
+    ) {
         pushAction(source);
     } else {
         pushSpeech(source);
     }
-    if (result.length > 0) return compactAdjacentOfflineActions(result);
+    if (result.length > 0) return compactAdjacentOfflineActions(result, effectiveChatContext);
     pushSpeech(source);
-    return compactAdjacentOfflineActions(result);
+    return compactAdjacentOfflineActions(result, effectiveChatContext);
 }
 
 function resolveOfflineSpeechSender(ev, senderProfile, effectiveChatContext) {
@@ -23037,7 +23123,7 @@ async function recordOfflineMoneyToWallet(message, contact) {
     if (contact) await kokoMemory.put('contacts', contact);
 }
 
-function parseOfflineAiResponsePayload(raw) {
+function parseOfflineAiResponsePayload(raw, chatContext = null) {
     const source = String(raw || '').trim();
     if (!source) return null;
 
@@ -23066,7 +23152,7 @@ function parseOfflineAiResponsePayload(raw) {
         const content = cleanOfflineEventContent(rawContent);
         if (!content || isJsonGarbageFragment(content) || isOrphanBracket(content)) return null;
         return {
-            type: normalizeOfflineEventType(type, content),
+            type: normalizeOfflineEventType(type, content, chatContext),
             characterId: ev.characterId || ev.character_id || ev.speakerId || '',
             characterName: ev.characterName || ev.speaker || ev.name || '',
             sender: ev.sender || '',
@@ -23084,12 +23170,12 @@ async function renderOfflineEventsOneByOne(events, senderProfile, effectiveChatC
         const parts = expandOfflineEventForRender(ev, senderProfile, effectiveChatContext);
         expandedEvents.push(...parts);
     });
-    expandedEvents = compactAdjacentOfflineActions(expandedEvents);
+    expandedEvents = compactAdjacentOfflineActions(expandedEvents, effectiveChatContext);
 
     let renderedCount = 0;
     let suppressedCount = 0;
     for (const ev of expandedEvents) {
-        const messageType = normalizeOfflineEventType(ev.type, ev.content);
+        const messageType = normalizeOfflineEventType(ev.type, ev.content, effectiveChatContext);
         const content = messageType === 'offlineAction' ? cleanOfflineActionText(ev.content) : cleanAiSpeechText(cleanOfflineEventContent(ev.content));
         if (!content || isOrphanBracket(content) || isJsonGarbageFragment(content)) continue;
         if (isSilentOfflinePlaceholder(content)) {
@@ -23132,8 +23218,8 @@ async function processOfflineNarrativeAiReply(conversation, senderProfile, effec
     const source = String(conversation || '').trim();
     if (!source) return false;
 
-    const payload = parseOfflineAiResponsePayload(source);
-    const events = payload?.events?.length ? payload.events : parseNarrativeHtmlOrTextToOfflineEvents(source, senderProfile);
+    const payload = parseOfflineAiResponsePayload(source, effectiveChatContext);
+    const events = payload?.events?.length ? payload.events : parseNarrativeHtmlOrTextToOfflineEvents(source, senderProfile, effectiveChatContext);
     if (!events || events.length === 0) return false;
 
     const result = await renderOfflineEventsOneByOne(events, senderProfile, effectiveChatContext);
