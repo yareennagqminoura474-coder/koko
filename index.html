@@ -12014,7 +12014,7 @@ const dbConfig = {
     themePresets: { keyPath: 'id' }
 };
 // ▼▼▼ 把这里的版本号数字加 1 (例如 13 -> 19) ▼▼▼
-const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 24, dbConfig);
+const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 25, dbConfig);
 // ▲▲▲ 版本号修改结束 ▲▲▲
 
     // --------------------------------------------------------------------
@@ -13656,6 +13656,44 @@ async function exportData() {
         alert(`导出数据失败: ${error.message}`);
     }
 }
+
+function normalizeImportedRecord(storeName, record) {
+    if (!record || typeof record !== 'object') return null;
+
+    record = { ...record };
+
+    const singleStores = {
+        myProfile: 'main',
+        apiSettings: 'main',
+        squareApiSettings: 'main',
+        snoopApiSettings: 'main',
+        forumSettings: 'main',
+        userSettings: 'main'
+    };
+
+    if (singleStores[storeName]) {
+        record.id = record.id || singleStores[storeName];
+        return record;
+    }
+
+    if (storeName === 'relationshipNetworks') {
+        record.contactId = record.contactId || record.id || record.roleId || record.contact_id;
+        if (!record.contactId) return null;
+        return record;
+    }
+
+    if (storeName === 'snoopData') {
+        record.contactId = record.contactId || record.id || record.roleId || record.contact_id;
+        if (!record.contactId) return null;
+        return record;
+    }
+
+    if (!record.id) {
+        record.id = `${storeName}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    }
+
+    return record;
+}
         
 // --- 新增：导入数据功能 (V3 - 兼容 JSON 和 JSONL) ---
 async function importData(event) {
@@ -13676,6 +13714,9 @@ async function importData(event) {
         try {
             // --- 步骤 1: 尝试按旧的 JSON 格式解析 ---
             dataToImport = JSON.parse(fileContent);
+            if (!dataToImport || typeof dataToImport !== 'object' || Array.isArray(dataToImport)) {
+                throw new Error('备份结构不是对象');
+            }
             console.log("检测到旧版 .json 备份文件。");
 
         } catch (jsonError) {
@@ -13698,63 +13739,89 @@ async function importData(event) {
                     }
                     dataToImport[table].push(data);
                 }
-                
-                // 关键一步：将 "单条目" 数据（如 myProfile）从数组解包回对象
-                const singleItemStores = ['myProfile', 'apiSettings', 'squareApiSettings', 'snoopApiSettings', 'forumSettings', 'userSettings'];
-                for (const storeName of singleItemStores) {
-                    if (dataToImport[storeName] && Array.isArray(dataToImport[storeName]) && dataToImport[storeName].length > 0) {
-                        dataToImport[storeName] = dataToImport[storeName][0]; // 只取第一个（也应该是唯一一个）
-                    }
-                }
                 console.log("成功按 .jsonl 格式解析备份文件。");
 
             } catch (jsonlError) {
                 // --- 步骤 3: 两种格式都失败了 ---
                 console.error('导入失败，文件既不是 JSON 也不是 JSONL 格式:', jsonlError);
-                alert(`导入失败：文件格式不正确，无法解析。\n错误信息: ${jsonlError.message}`);
+                alert('导入失败：这个文件不是 Koko 数据备份。请确认你导入的是【数据备份 json/jsonl】，不是主题包、角色卡 PNG 或 html 文件。');
                 event.target.value = '';
                 return;
             }
         }
         
-        // --- 步骤 4: (这是你原有的逻辑，保持不变) ---
-        //   无论数据来自 .json 还是 .jsonl，到这里 dataToImport 的结构都应该是一致的了
         try {
-            const supportedStores = Object.keys(dbConfig);
+            await kokoMemory.init();
+            const existingStores = Array.from(kokoMemory.db.objectStoreNames);
+            const normalizedImport = {};
             let importedCount = 0;
             let skippedCount = 0;
+            const failedStores = [];
 
             for (const storeName in dataToImport) {
-                if (supportedStores.includes(storeName)) {
-                    if (dataToImport[storeName]) {
-                        await kokoMemory.clear(storeName); // 清空表
-                        
-                        if (Array.isArray(dataToImport[storeName])) {
-                            await kokoMemory.bulkPut(storeName, dataToImport[storeName]);
-                        } else {
-                            // 导入单条目数据 (e.g., myProfile)
-                            await kokoMemory.put(storeName, dataToImport[storeName]);
-                        }
-                        importedCount++;
-                    }
-                } else {
-                    console.warn(`跳过导入：当前版本不包含数据表 "${storeName}"。`);
+                if (!dbConfig[storeName]) {
+                    console.warn(`跳过未知数据表: ${storeName}`);
                     skippedCount++;
+                    continue;
+                }
+
+                if (!existingStores.includes(storeName)) {
+                    console.warn(`跳过不存在的数据表: ${storeName}`);
+                    skippedCount++;
+                    continue;
+                }
+
+                let records = dataToImport[storeName];
+                if (!Array.isArray(records)) {
+                    records = [records];
+                }
+
+                const normalizedRecords = records
+                    .map(record => normalizeImportedRecord(storeName, record))
+                    .filter(Boolean);
+
+                if (normalizedRecords.length === 0) {
+                    console.warn(`数据表 ${storeName} 没有可导入的数据，跳过`);
+                    skippedCount++;
+                    continue;
+                }
+
+                normalizedImport[storeName] = normalizedRecords;
+            }
+
+            if (Object.keys(normalizedImport).length === 0) {
+                alert('导入失败：这个文件里没有可识别的 Koko 数据备份表。请确认你导入的是【数据备份 json/jsonl】，不是主题包、角色卡 PNG 或 html 文件。');
+                event.target.value = '';
+                return;
+            }
+
+            for (const storeName in normalizedImport) {
+                try {
+                    await kokoMemory.clear(storeName);
+                    await kokoMemory.bulkPut(storeName, normalizedImport[storeName]);
+                    importedCount++;
+                } catch (err) {
+                    console.error(`导入 ${storeName} 失败:`, err);
+                    failedStores.push(`${storeName}: ${err.message || err.name}`);
                 }
             }
-            
-            let alertMessage = `数据导入完成！\n\n- 成功导入 ${importedCount} 个数据表。\n- 跳过了 ${skippedCount} 个不兼容的数据表。`;
-            if (skippedCount > 0) {
-                alertMessage += '\n\n（注意：部分新版本数据因不兼容已被忽略）';
+
+            let alertMessage = `数据导入完成！\n\n- 成功导入 ${importedCount} 个数据表。\n- 跳过了 ${skippedCount} 个数据表。`;
+            if (failedStores.length > 0) {
+                alertMessage += `\n- 失败 ${failedStores.length} 个数据表。\n\n失败详情：\n${failedStores.join('\n')}`;
             }
-            alertMessage += '\n\n页面即将刷新以应用更改。';
+            if (importedCount > 0) {
+                alertMessage += '\n\n页面即将刷新以应用更改。';
+            }
 
             alert(alertMessage);
-            setTimeout(() => window.location.reload(), 1500);
+            if (importedCount > 0) {
+                setTimeout(() => window.location.reload(), 1500);
+            }
 
         } catch (error) {
             console.error('导入数据时出错:', error);
-            alert(`导入失败：数据写入数据库时出错: ${error.message}`);
+            alert(`导入失败：数据写入数据库时出错。\n错误信息: ${error.message}`);
         } finally {
             event.target.value = '';
         }
