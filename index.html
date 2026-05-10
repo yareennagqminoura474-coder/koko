@@ -12398,6 +12398,7 @@ function parseLyrics(lrc) {
             forumCategories: [],
             aiTypingStatus: {},
             latestAiRequestId: {},
+            debugAiVisible: false,
             // ▼▼▼ 在这里添加新代码 ▼▼▼
             automationSettings: {
                 isEnabled: false,
@@ -13380,6 +13381,117 @@ function createAiRequestId(chatId) {
 
 function isLatestAiRequest(chatId, requestId) {
     return !!chatId && !!requestId && state.latestAiRequestId?.[chatId] === requestId && state.activeChatId === chatId;
+}
+
+function normalizeSpeakerName(name) {
+    return String(name || '')
+        .trim()
+        .replace(/^【|】$/g, '')
+        .replace(/^\[|\]$/g, '')
+        .replace(/^「|」$/g, '')
+        .replace(/^“|”$/g, '')
+        .replace(/[:：]$/g, '')
+        .replace(/\s+/g, '');
+}
+
+function resolveSpeakerProfile(speakerName, profiles) {
+    const normalized = normalizeSpeakerName(speakerName);
+
+    if (!normalized || normalized === '角色名' || normalized === '成员名') {
+        return null;
+    }
+
+    let found = profiles.find(profile => normalizeSpeakerName(profile.name) === normalized);
+    if (found) return found;
+
+    found = profiles.find(profile => {
+        const candidates = [
+            profile.name,
+            profile.nickname,
+            profile.alias,
+            profile.userCallsMeAs,
+            profile.callUserAs
+        ].filter(Boolean).map(normalizeSpeakerName);
+        return candidates.includes(normalized);
+    });
+    if (found) return found;
+
+    found = profiles.find(profile => {
+        const normalizedName = normalizeSpeakerName(profile.name);
+        return normalizedName && (normalized.includes(normalizedName) || normalizedName.includes(normalized));
+    });
+    if (found) return found;
+
+    return null;
+}
+
+function parseGroupAiMessages(rawResponse, allMemberProfiles) {
+    const text = String(rawResponse || '').trim();
+    const results = [];
+
+    if (!text) return results;
+
+    let regex = /\s*[\[【]([^\]】]+)[\]】]\s*[:：]\s*([\s\S]*?)(?=\n\s*[\[【][^\]】]+[\]】]\s*[:：]|$)/g;
+    for (const match of text.matchAll(regex)) {
+        const speakerName = match[1].trim();
+        const content = match[2].trim();
+        const speaker = resolveSpeakerProfile(speakerName, allMemberProfiles);
+        if (speaker && content) {
+            results.push({ speaker, content });
+        } else {
+            if (!speaker) {
+                console.warn('[UNKNOWN SPEAKER]', speakerName, text);
+            }
+            console.warn('[GROUP PARSE SKIPPED]', { speakerName, content });
+        }
+    }
+    if (results.length > 0) return results;
+
+    regex = /MESSAGE_START\s*SPEAKER:\s*([\s\S]*?)\s*CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
+    for (const match of text.matchAll(regex)) {
+        const speakerName = match[1].trim();
+        const content = match[2].trim();
+        const speaker = resolveSpeakerProfile(speakerName, allMemberProfiles);
+        if (speaker && content) {
+            results.push({ speaker, content });
+        } else {
+            if (!speaker) {
+                console.warn('[UNKNOWN SPEAKER]', speakerName, text);
+            }
+            console.warn('[GROUP OLD FORMAT SKIPPED]', { speakerName, content });
+        }
+    }
+    if (results.length > 0) return results;
+
+    regex = /^\s*([^：:\n]{1,20})\s*[:：]\s*([\s\S]*?)(?=\n\s*[^：:\n]{1,20}\s*[:：]|$)/gm;
+    for (const match of text.matchAll(regex)) {
+        const speakerName = match[1].trim();
+        const content = match[2].trim();
+        const speaker = resolveSpeakerProfile(speakerName, allMemberProfiles);
+        if (speaker && content) {
+            results.push({ speaker, content });
+        } else {
+            if (!speaker) {
+                console.warn('[UNKNOWN SPEAKER]', speakerName, text);
+            }
+            console.warn('[GROUP BARE FORMAT SKIPPED]', { speakerName, content });
+        }
+    }
+    if (results.length > 0) return results;
+
+    const fallbackSpeaker = allMemberProfiles[0];
+    if (!fallbackSpeaker) {
+        console.warn('[GROUP FALLBACK FAILED] no speaker available', text);
+    }
+    if (fallbackSpeaker && text) {
+        console.warn('[GROUP FALLBACK DISPLAY RAW]', text);
+        results.push({
+            speaker: fallbackSpeaker,
+            content: text
+        });
+    }
+
+    return results;
 }
 
 function parseDiaryTimeToDate(timeString, baseDate = new Date()) {
@@ -18063,7 +18175,10 @@ async function triggerAiReply(contact) {
             
             try {
                 const rawResponse = await generateAiResponse(contact, contact.history, null, false, 'chat');
-                if (!isLatestAiRequest(contact.id, requestId)) return;
+if (!isLatestAiRequest(contact.id, requestId)) {
+    console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
+    return;
+}
                 await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
             } finally {
                 state.aiTypingStatus[contact.id] = false; 
@@ -18168,7 +18283,10 @@ ${worldBookContextString}
         ];
 
         const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-        if (!isLatestAiRequest(contact.id, requestId)) return;
+if (!isLatestAiRequest(contact.id, requestId)) {
+    console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
+    return;
+}
         await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
     } catch (e) {
         console.error("私聊自由聊天执行失败:", e);
@@ -18904,13 +19022,27 @@ MESSAGE_END
             // 如果找到了匹配的、且未被禁言的成员，就显示他们的发言
             if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
                 await sleep(800 + Math.random() * 700);
-                await processAndDisplayAiResponse(content, speakerProfile, group, 'chat');
+                try {
+                    await processAndDisplayAiResponse(content, speakerProfile, group, 'chat');
+                } catch (renderError) {
+                    console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker: speakerProfile });
+                    await createAndAddMessage({
+                        type: 'text',
+                        sender: speakerProfile.id,
+                        content: String(content || '').trim()
+                    }, speakerProfile.id, group, false, 'chat');
+                }
             }
         }
     } catch (e) {
         console.error("群聊AI回复生成失败:", e);
+        await createAndAddMessage({
+            type: 'system_notification',
+            sender: 'system',
+            content: `群聊AI回复生成失败: ${e.message || e.name || '未知错误'}`
+        }, 'system', group, false, 'chat');
     } finally {
-        state.aiTypingStatus[group.id] = false; 
+        state.aiTypingStatus[group.id] = false;
         
         if (state.activeChatId === group.id) {
             // ▼▼▼ 修改：读取真实状态 (如果是群聊，通常不用改状态，或者是群公告) ▼▼▼
@@ -19017,23 +19149,56 @@ ${GROUP_PRIVATE_MEMORY_RULES}
         ];
 
         const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-        if (!isLatestAiRequest(group.id, requestId)) return;
+        console.log('[AI RAW RESPONSE]', rawResponse);
 
-        const messageRegex = /\[([^\]]+)\][:：]\s*([\s\S]*?)(?=\n\[|$)/g;
-        const messageMatches = Array.from(rawResponse.matchAll(messageRegex));
-        if (messageMatches.length === 0) {
-            throw new Error('AI未能生成有效的自由聊天内容。');
+        if (!isLatestAiRequest(group.id, requestId)) {
+            console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+            if (state.debugAiVisible) {
+                await createAndAddMessage({
+                    type: 'system_notification',
+                    sender: 'system',
+                    content: 'AI 已返回，但这次回复被判定为旧请求，已丢弃。'
+                }, 'system', group, false, 'chat');
+            }
+            return;
         }
 
-        for (const match of messageMatches) {
-            if (!isLatestAiRequest(group.id, requestId)) return;
-            const speakerName = match[1].trim();
-            const content = match[2].trim();
-            const speakerProfile = allMemberProfiles.find(profile => profile.name === speakerName);
-            if (speakerProfile && content) {
+        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
+        console.log('[GROUP PARSED MESSAGES]', parsedMessages);
+        console.log('[GROUP ALLOWED SPEAKERS]', allMemberProfiles.map(profile => profile.name));
+
+        if (parsedMessages.length === 0) {
+            console.warn('[GROUP NO PARSED MESSAGE]', rawResponse);
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: `AI 有返回内容，但前端没有解析出可显示消息。返回内容预览：${String(rawResponse || '').slice(0, 120)}`
+            }, 'system', group, false, 'chat');
+            return;
+        }
+
+        for (const item of parsedMessages) {
+            if (!isLatestAiRequest(group.id, requestId)) {
+                console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+                return;
+            }
+
+            if (item.speaker && item.content && !(group.mutedMembers || []).includes(item.speaker.id)) {
                 await sleep(800 + Math.random() * 700);
-                if (!isLatestAiRequest(group.id, requestId)) return;
-                await processAndDisplayAiResponse(content, speakerProfile, group, 'chat');
+                if (!isLatestAiRequest(group.id, requestId)) {
+                    console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+                    return;
+                }
+                try {
+                    await processAndDisplayAiResponse(item.content, item.speaker, group, 'chat');
+                } catch (renderError) {
+                    console.error('[GROUP MESSAGE RENDER FAILED]', renderError, item);
+                    await createAndAddMessage({
+                        type: 'text',
+                        sender: item.speaker.id,
+                        content: String(item.content || '').trim()
+                    }, item.speaker.id, group, false, 'chat');
+                }
             }
         }
     } catch (error) {
@@ -19184,26 +19349,65 @@ ${GROUP_PRIVATE_MEMORY_RULES}
         ];
 
         const rawResponse = await generateAiResponse(null, [], null, false, 'chat', finalRequestMessages);
-        if (!isLatestAiRequest(group.id, requestId)) return;
+        console.log('[AI RAW RESPONSE]', rawResponse);
 
-        const messageRegex = /\[([^\]]+)\][:：]\s*([\s\S]*?)(?=\n\[|$)/g;
-        const messageMatches = Array.from(rawResponse.matchAll(messageRegex));
+        if (!isLatestAiRequest(group.id, requestId)) {
+            console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+            if (state.debugAiVisible) {
+                await createAndAddMessage({
+                    type: 'system_notification',
+                    sender: 'system',
+                    content: 'AI 已返回，但这次回复被判定为旧请求，已丢弃。'
+                }, 'system', group, false, 'chat');
+            }
+            return;
+        }
 
-        for (const match of messageMatches) {
-            if (!isLatestAiRequest(group.id, requestId)) return;
-            const speakerName = match[1].trim();
-            const content = match[2].trim();
-            const speakerProfile = (group.members || []).map(memberId => getProfileInGroupContext(group, memberId))
-                .find(profile => profile && profile.name === speakerName);
+        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
+        console.log('[GROUP PARSED MESSAGES]', parsedMessages);
+        console.log('[GROUP ALLOWED SPEAKERS]', allMemberProfiles.map(profile => profile.name));
 
-            if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
+        if (parsedMessages.length === 0) {
+            console.warn('[GROUP NO PARSED MESSAGE]', rawResponse);
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: `AI 有返回内容，但前端没有解析出可显示消息。返回内容预览：${String(rawResponse || '').slice(0, 120)}`
+            }, 'system', group, false, 'chat');
+            return;
+        }
+
+        for (const item of parsedMessages) {
+            if (!isLatestAiRequest(group.id, requestId)) {
+                console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+                return;
+            }
+
+            if (item.speaker && item.content && !(group.mutedMembers || []).includes(item.speaker.id)) {
                 await sleep(800 + Math.random() * 700);
-                if (!isLatestAiRequest(group.id, requestId)) return;
-                await processAndDisplayAiResponse(content, speakerProfile, group, 'chat');
+                if (!isLatestAiRequest(group.id, requestId)) {
+                    console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+                    return;
+                }
+                try {
+                    await processAndDisplayAiResponse(item.content, item.speaker, group, 'chat');
+                } catch (renderError) {
+                    console.error('[GROUP MESSAGE RENDER FAILED]', renderError, item);
+                    await createAndAddMessage({
+                        type: 'text',
+                        sender: item.speaker.id,
+                        content: String(item.content || '').trim()
+                    }, item.speaker.id, group, false, 'chat');
+                }
             }
         }
     } catch (error) {
         console.error('群聊AI回复生成失败:', error);
+        await createAndAddMessage({
+            type: 'system_notification',
+            sender: 'system',
+            content: `群聊AI回复生成失败: ${error.message || error.name || '未知错误'}`
+        }, 'system', group, false, 'chat');
     } finally {
         state.aiTypingStatus[group.id] = false;
         if (state.activeChatId === group.id) {
@@ -43293,7 +43497,22 @@ async function triggerAiReply(contact) {
             ? await generateAiResponse(contact, contact.history, null, false, 'chat')
             : await generateAiResponse(null, [], null, false, 'chat', buildPrivateChatRequestMessages(contact, 'reply'));
 
-        if (!isLatestAiRequest(contact.id, requestId)) return;
+        console.log('[AI RAW RESPONSE]', rawResponse);
+        console.log('[PRIVATE RAW RESPONSE]', rawResponse);
+
+        if (!rawResponse || !String(rawResponse).trim()) {
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: 'AI 请求成功，但返回内容为空。'
+            }, 'system', contact, false, 'chat');
+            return;
+        }
+
+        if (!isLatestAiRequest(contact.id, requestId)) {
+            console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
+            return;
+        }
         await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
     } finally {
         state.aiTypingStatus[contact.id] = false;
@@ -43324,7 +43543,22 @@ async function triggerPrivateFreeChat(contact) {
 
     try {
         const rawResponse = await generateAiResponse(null, [], null, false, 'chat', buildPrivateChatRequestMessages(contact, 'free'));
-        if (!isLatestAiRequest(contact.id, requestId)) return;
+        console.log('[AI RAW RESPONSE]', rawResponse);
+        console.log('[PRIVATE RAW RESPONSE]', rawResponse);
+
+        if (!rawResponse || !String(rawResponse).trim()) {
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: 'AI 请求成功，但返回内容为空。'
+            }, 'system', contact, false, 'chat');
+            return;
+        }
+
+        if (!isLatestAiRequest(contact.id, requestId)) {
+            console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
+            return;
+        }
         await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
     } catch (error) {
         console.error('私聊自由聊天执行失败:', error);
