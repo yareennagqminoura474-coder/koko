@@ -22282,6 +22282,10 @@ function cleanAiSpeechText(text) {
         s = s.slice(1, -1).trim();
     }
     s = s.replace(/^\{/, '').trim();
+    // 清除句末后、引号前的孤立 }（如 "结局。}"行" → "结局。"行"）
+    s = s.replace(/\}([""「『])/g, '$1').trim();
+    s = s.replace(/([。！？!?…])\}(\s*)/g, '$1$2').trim();
+    // 清除剩余首尾孤立 }
     s = s.replace(/\}$/, '').trim();
 
     // 清除内容中残留的 * 号（动作标记泄漏）
@@ -22851,7 +22855,7 @@ function splitMibuStyleOfflineBlocks(text) {
         return false;
     };
 
-    const tokenRegex = /(\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|”[^”]+”|”[^”\n]+”|「[^」]+」)/g;
+    const tokenRegex = /(\{[^{}]*\}|\*\*[\s\S]+?\*\*|\*(?!\*)[\s\S]+?\*(?!\*)|\{[^{}]+\}|（[^（）]+）|\([^()\n]+\)|”[^”]+”|”[^”\n]+”|「[^」]+」)/g;
     let lastIndex = 0;
     let hasStructuredToken = false;
     let match;
@@ -22960,7 +22964,7 @@ function expandOfflineEventForRender(ev, senderProfile, effectiveChatContext) {
         });
     } else {
         // 如果 speech 内容里混入了 *...* 或 {...} 动作/心理标记，先走 splitMibuStyleOfflineBlocks 拆分
-        const hasMixedMarkers = /\*[^*\n]+\*|\{[^{}]+\}/.test(rawContent);
+        const hasMixedMarkers = /\*[^*\n]+\*|\{[^{}]+\}|\}[""「]/.test(rawContent);
         if (hasMixedMarkers) {
             const blocks = splitMibuStyleOfflineBlocks(rawContent);
             blocks.forEach(block => {
