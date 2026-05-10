@@ -22484,7 +22484,7 @@ function looksLikeOfflineSpeechContent(text) {
     // 常见口语开头词
     if (/^(欸|诶|哎|喂|嗯|哦|啊|哈|啧|行|好|可以|不用|别|先|等等|等一下|听着|进来|坐|站住|拿来|给我|没事|继续|走吧|回去|留下|慢点|别怕|疼|烫|说|谢|不|行了|算了|随便|随你|无所谓)/.test(s)) return true;
     // 有人称代词且不太长——大概率是在说话
-    if (/(你|我|咱|我们|你们|他|她|它)/.test(s) && s.length <= 36) return true;
+    if (/(你|我|咱|我们|你们)/.test(s) && s.length <= 36) return true;
     // 短且没有叙事符号——更可能是台词
     if (s.length <= 20 && !/[*（(【{]/.test(raw)) return true;
     // 说道/问道/回答 后接内容
@@ -22886,20 +22886,17 @@ function splitMibuStyleOfflineBlocks(text) {
             (token.startsWith('「') && token.endsWith('」'));
 
         if (isQuotedSpeech && isNarrativeReferenceQuote(before)) {
-            // 叙事引用（如 那句轻飘飘的"随便你"）：before + 引号合并为一张动作卡片
+            // 叙事引用（那句轻飘飘的"随便你"）→ 合并为动作
             const combined = ((before || '') + token).trim();
             pushAction(combined);
         } else {
             if (before) pushAction(before);
             if (isQuotedSpeech) {
                 const inner = token.slice(1, -1).trim();
-                const cleaned = cleanOfflineEventContent(inner);
-                if (cleaned.length > 25 && !looksLikeOfflineSpeechContent(inner)) {
-                    // 长内容且不像台词（叙事被 AI 错标为 speech）→ 动作卡片
-                    pushAction(cleaned);
-                } else {
-                    // 真台词 → 气泡
+                if (looksLikeOfflineSpeechContent(inner)) {
                     pushSpeech(inner);
+                } else {
+                    pushAction(inner);
                 }
             } else if (token.startsWith('**') && token.endsWith('**')) {
                 pushAction(token.slice(2, -2));
