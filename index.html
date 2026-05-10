@@ -322,32 +322,47 @@
             margin-right: 10px; /* 附件按钮和输入框之间的间距 */
         }
 
-        .bracket-btn {
-            border: none;
-            border-radius: 50%;
-            width: 34px;
-            height: 34px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: pointer;
-            flex-shrink: 0;
-            align-self: flex-end;
-            margin-right: 8px;
-            font-size: 14px;
-            font-weight: 700;
-            background-color: #f0f2f5;
-            color: var(--text-gray);
-            transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
-        }
-        
         /* 4. (可选) 悬浮效果 */
         .emoji-btn:hover, .attachment-btn:hover {
             transform: scale(1.1);
-            background-color: #e0e0e0; /* 悬浮时变深一点 */
+            background-color: #e0e0e0;
+        }
+
+        /* 输入框 + 括号按钮的包裹层 */
+        .message-input-wrap {
+            position: relative;
+            flex-grow: 1;
+            display: flex;
+            align-items: flex-end;
+        }
+        .message-input-wrap #message-input {
+            width: 100%;
+            flex-grow: 1;
+            padding-right: 42px; /* 给右侧括号小按钮留空间 */
+        }
+
+        /* 括号小按钮：绝对定位在输入框内右侧 */
+        .bracket-btn {
+            position: absolute;
+            right: 8px;
+            bottom: 6px;
+            width: 26px;
+            height: 22px;
+            border: none;
+            border-radius: 11px;
+            background-color: rgba(240, 242, 245, 0.9);
+            color: var(--text-gray);
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+            z-index: 2;
         }
         .bracket-btn:hover {
-            transform: scale(1.1);
             background-color: #e0e0e0;
         }
         /* ▲▲▲ 替换结束 ▲▲▲ */
@@ -7652,8 +7667,10 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                 <div class="chat-input-area" id="chat-input-area">
 <div class="emoji-btn" id="emoji-btn"><i class="far fa-smile"></i></div>
                     <button class="attachment-btn" id="attachment-btn"><i class="fas fa-plus"></i></button>
-                    <button class="bracket-btn" id="bracket-btn" title="插入动作括号">（）</button>
-                    <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
+                    <div class="message-input-wrap">
+                        <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
+                        <button class="bracket-btn" id="bracket-btn" title="插入动作括号" type="button">（）</button>
+                    </div>
                     <button id="send-btn" class="input-action-btn" title="发送消息"><i class="fas fa-arrow-up"></i></button>
                     <button id="request-reply-btn" class="input-action-btn" title="请求AI回复"><i class="fas fa-apple-whole"></i></button>
                 </div>
