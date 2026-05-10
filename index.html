@@ -22512,45 +22512,73 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
     const extractionRegex = /\[发送了一段静态内容，文本是：["']([\s\S]*?)["']\]/g;
     conversation = conversation.replace(extractionRegex, '').trim();
 
- // ========================= 【核心修复：心声解析】 =========================
+// ========================= 【心声解析：兼容文本+JSON+兜底】 =========================
 let heartVoiceContent = null;
 
-// 先匹配完整的 [heart_voice]...[/heart_voice]，兼容 JSON 和纯文本两种格式
-const heartVoiceRegex = /\[heart_voice\]\s*([\s\S]*?)\s*\[\/heart_voice\]/;
+const heartVoiceRegex = /\[heart_voice\]([\s\S]*?)(?:\[\/heart_voice\]|$)/i;
 const heartVoiceMatch = conversation.match(heartVoiceRegex);
 
 if (heartVoiceMatch) {
-    const rawContent = heartVoiceMatch[1] ? heartVoiceMatch[1].trim() : '';
+    const rawHeartVoice = (heartVoiceMatch[1] || '').trim();
 
-    if (rawContent) {
-        // 优先尝试 JSON 解析（私聊格式）；群聊纯文本则直接存字符串
-        try {
-            const jsonStart = rawContent.indexOf('{');
-            const jsonEnd = rawContent.lastIndexOf('}');
-            if (jsonStart !== -1 && jsonEnd !== -1) {
-                heartVoiceContent = JSON.parse(rawContent.slice(jsonStart, jsonEnd + 1));
-            } else {
-                heartVoiceContent = rawContent;
+    if (rawHeartVoice) {
+        if (rawHeartVoice.startsWith('{') && rawHeartVoice.endsWith('}')) {
+            try {
+                const parsed = JSON.parse(rawHeartVoice);
+                heartVoiceContent = {
+                    emotion: parsed.emotion || parsed.mood || '微妙',
+                    thoughts: parsed.thoughts || parsed.content || parsed.text || rawHeartVoice,
+                    heartRate: parsed.heartRate || parsed.heart_rate || '平稳',
+                    jealousy: parsed.jealousy || '无'
+                };
+            } catch (e) {
+                console.warn('[HEART_VOICE JSON PARSE FAILED, USE AS TEXT]', e, rawHeartVoice);
+                heartVoiceContent = {
+                    emotion: '微妙',
+                    thoughts: rawHeartVoice,
+                    heartRate: '平稳',
+                    jealousy: '无'
+                };
             }
-        } catch (e) {
-            console.error("解析心声JSON失败 (AI格式错误):", e, "原始字符串:", rawContent);
-            heartVoiceContent = rawContent; // JSON 解析失败时也保存原文
+        } else {
+            // 纯文本心声（群聊常见格式）
+            heartVoiceContent = {
+                emotion: '微妙',
+                thoughts: rawHeartVoice,
+                heartRate: '平稳',
+                jealousy: '无'
+            };
         }
     }
 
-    // 把心声标签从对话中彻底移除，防止显示成普通气泡
+    // 不管解析成功与否，都从对话正文里移除，避免显示成普通气泡
     conversation = conversation.replace(heartVoiceMatch[0], '').trim();
-} else {
-    // 兜底：如果 AI 忘了写 [/heart_voice] 闭合标签，也尝试剥离开头标签后的内容
-    const looseMatch = conversation.match(/\[heart_voice\]\s*({[\s\S]*?})/);
-    if (looseMatch) {
-        try {
-            heartVoiceContent = JSON.parse(looseMatch[1]);
-        } catch (e) { /* ignore */ }
-        conversation = conversation.replace(looseMatch[0], '').trim();
-    }
 }
-// ========================= 【修复结束】 =========================
+
+// 兜底：AI 没输出 heart_voice 时自动生成一条
+const shouldEnsureHeartVoice =
+    contextMode === 'chat'
+    && senderProfile
+    && senderProfile.id !== 'myProfile'
+    && senderProfile.id !== 'user'
+    && !String(rawResponse || '').includes('[diary]');
+
+if (!heartVoiceContent && shouldEnsureHeartVoice) {
+    const plainConversation = String(conversation || '').replace(/\[[^\]]+\]/g, '').trim();
+    heartVoiceContent = {
+        emotion: '微妙',
+        thoughts: plainConversation
+            ? `刚刚说完"${plainConversation.slice(0, 30)}"，我心里其实还在顺着这个情绪往下想。`
+            : '刚刚那一瞬间，我其实有些话没有直接说出口。',
+        heartRate: '平稳',
+        jealousy: '无'
+    };
+    console.warn('[HEART_VOICE FALLBACK CREATED]', {
+        sender: senderProfile.name || senderProfile.id,
+        thoughts: heartVoiceContent.thoughts
+    });
+}
+// ========================= 【心声解析结束】 =========================
 
     // ▼▼▼▼▼▼▼▼▼▼ 【新增：优先提取状态指令】 ▼▼▼▼▼▼▼▼▼▼
     // 在进入任何渲染逻辑前，先把 status 指令挖出来执行掉，并从文本中删除
