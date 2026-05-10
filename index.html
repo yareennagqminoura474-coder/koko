@@ -22494,13 +22494,28 @@ function looksLikeOfflineSpeechContent(text) {
 
 function normalizeOfflineEventType(rawType, rawContent = '', chatContext = null) {
     const t = String(rawType || '').toLowerCase().trim();
-    if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech' || t === 'dialogue' || t === 'line' || t === 'words') return 'offlineSpeech';
+    if (t === 'speech' || t === 'offlinespeech' || t === 'narrative-speech' || t === 'dialogue' || t === 'line' || t === 'words') {
+        // AI 说是 speech，但需要验证内容是否真的像台词
+        const s = cleanOfflineEventContent(rawContent);
+        // 规则1：整体被 {...} 包裹 → 心理/动作块，变卡片
+        if (/^\{[\s\S]*\}$/.test(rawContent.trim())) return 'offlineAction';
+        // 规则2：内容通过了说话检测 → 信任 AI，保持气泡
+        if (looksLikeOfflineSpeechContent(rawContent)) return 'offlineSpeech';
+        // 规则3：内容没通过说话检测，且长度够长 → 极可能是叙事被误标为 speech
+        if (s.length > 25) {
+            // 第三人称叙事开头
+            if (/^(?:他|她|那|这|沈逸|林澈|少年|男人|老师|对方)/.test(s)) return 'offlineAction';
+            // 明确是动作
+            if (looksLikeOfflineAction(rawContent)) return 'offlineAction';
+        }
+        return 'offlineSpeech';
+    }
     if (t === 'action' || t === 'offlineaction' || t === 'narrative-action' || t === 'narration' || t === 'scene' || t === 'description' || t === 'psychology' || t === 'narrative-psychology' || t === 'thought' || t === 'status') return 'offlineAction';
     if (looksLikeNarrationAboutUserUtterance(rawContent, chatContext) || looksLikeLiteraryNarration(rawContent)) return 'offlineAction';
     if (looksLikeOfflineAction(rawContent)) return 'offlineAction';
     if (looksLikeOfflineSpeechContent(rawContent)) return 'offlineSpeech';
     // 纯文本默认当作台词，避免把普通说话兜底成动作卡片
-    if (!/[“"「*（(【{\n]/.test(rawContent)) return 'offlineSpeech';
+    if (!/[“”「*（(【{\n]/.test(rawContent)) return 'offlineSpeech';
     return 'offlineAction';
 }
 
