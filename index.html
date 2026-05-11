@@ -22518,26 +22518,162 @@ function splitAiTextIntoBubbles(text) {
     return finalParts;
 }
 
+// ===== 心声辅助函数 =====
+
+function inferHeartVoiceEmotion(text) {
+    const t = String(text || '');
+    if (/开心|高兴|松了口气|放心|期待|喜欢|想靠近/.test(t)) return '开心';
+    if (/生气|烦|不爽|恼|冷|压着火/.test(t)) return '不爽';
+    if (/委屈|难过|失落|酸|怕|慌/.test(t)) return '低落';
+    if (/在意|试探|犹豫|不确定|想知道/.test(t)) return '在意';
+    return '微妙';
+}
+
+function inferHeartVoiceJealousy(text) {
+    const t = String(text || '');
+    if (/吃醋|嫉妒|别人|他|她|他们|不想让|抢走/.test(t)) return '有一点';
+    return '无';
+}
+
+function stripAiMetaTags(text) {
+    return String(text || '')
+        .replace(/\[heart_voice\][\s\S]*?(?:\[\/heart_voice\]|$)/gi, '')
+        .replace(/\[diary\][\s\S]*?(?:\[\/diary\]|$)/gi, '')
+        .replace(/\[status\][\s\S]*?(?:\[\/status\]|$)/gi, '')
+        .replace(/\[[^\]]+\]/g, '')
+        .replace(/[（）()]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extractHeartVoiceFromRaw(rawText) {
+    const text = String(rawText || '');
+    const match = text.match(/\[heart_voice\]([\s\S]*?)(?:\[\/heart_voice\]|$)/i);
+    if (!match) return null;
+
+    const rawHeartVoice = (match[1] || '').trim();
+    if (!rawHeartVoice) return null;
+
+    if (rawHeartVoice.startsWith('{') && rawHeartVoice.endsWith('}')) {
+        try {
+            const parsed = JSON.parse(rawHeartVoice);
+            return {
+                emotion: parsed.emotion || parsed.mood || '微妙',
+                thoughts: parsed.thoughts || parsed.content || parsed.text || '',
+                heartRate: parsed.heartRate || parsed.heart_rate || '平稳',
+                jealousy: parsed.jealousy || '无'
+            };
+        } catch (e) {
+            console.warn('[HEART_VOICE JSON PARSE FAILED, USE AS TEXT]', e);
+        }
+    }
+
+    return {
+        emotion: inferHeartVoiceEmotion(rawHeartVoice),
+        thoughts: rawHeartVoice,
+        heartRate: '平稳',
+        jealousy: inferHeartVoiceJealousy(rawHeartVoice)
+    };
+}
+
+function createNaturalFallbackHeartVoice(rawText, senderProfile) {
+    const cleaned = stripAiMetaTags(rawText);
+
+    let thoughts = '';
+
+    if (/走|离开|逃|躲|不见|回来/.test(cleaned)) {
+        thoughts = '他总是下意识想离开，我嘴上没有拦得太紧，其实还是有点在意。';
+    } else if (/考试|作业|检讨|题目|学习|老师/.test(cleaned)) {
+        thoughts = '我说得像是在讲道理，其实更想知道他到底有没有把我的话放在心上。';
+    } else if (/喜欢|在意|靠近|陪|留下/.test(cleaned)) {
+        thoughts = '有些话我没有说得太明白，但那点偏心其实已经藏不住了。';
+    } else if (/生气|不爽|烦|冷/.test(cleaned)) {
+        thoughts = '我把语气压得很平，可心里并没有表面看起来那么无所谓。';
+    } else {
+        thoughts = '我表面上说得很平静，其实心里还在反复想着他刚才的反应。';
+    }
+
+    return {
+        emotion: inferHeartVoiceEmotion(cleaned),
+        thoughts,
+        heartRate: '平稳',
+        jealousy: inferHeartVoiceJealousy(cleaned)
+    };
+}
+
+async function saveLatestHeartVoice(senderProfile, effectiveChatContext, heartVoiceContent) {
+    if (!senderProfile || !effectiveChatContext || !heartVoiceContent) return;
+    if (senderProfile.id === 'myProfile' || senderProfile.id === 'user') return;
+
+    const normalized = {
+        emotion: heartVoiceContent.emotion || '微妙',
+        thoughts: heartVoiceContent.thoughts || heartVoiceContent.content || heartVoiceContent.text || '',
+        heartRate: heartVoiceContent.heartRate || heartVoiceContent.heart_rate || '平稳',
+        jealousy: heartVoiceContent.jealousy || '无'
+    };
+
+    if (!normalized.thoughts) return;
+
+    if (effectiveChatContext.history) {
+        effectiveChatContext.history = effectiveChatContext.history.filter(msg => {
+            return !(msg.type === 'heart_voice' && msg.sender === senderProfile.id);
+        });
+    }
+
+    await createAndAddMessage({
+        type: 'heart_voice',
+        content: normalized
+    }, senderProfile.id, effectiveChatContext, false, 'chat');
+}
+
+// ===== END 心声辅助函数 =====
+
 async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat') {
-    const parts = splitAiTextIntoBubbles(rawText);
+    const shouldHandleHeartVoice =
+        contextMode === 'chat'
+        && senderProfile
+        && senderProfile.id !== 'myProfile'
+        && senderProfile.id !== 'user'
+        && originContext;
+
+    let roundHeartVoice = null;
+
+    if (shouldHandleHeartVoice) {
+        roundHeartVoice = extractHeartVoiceFromRaw(rawText);
+
+        if (!roundHeartVoice && !String(rawText || '').includes('[diary]')) {
+            roundHeartVoice = createNaturalFallbackHeartVoice(rawText, senderProfile);
+        }
+    }
+
+    // 移除 heart_voice 标签，避免作为普通气泡显示
+    const visibleText = String(rawText || '')
+        .replace(/\[heart_voice\][\s\S]*?(?:\[\/heart_voice\]|$)/gi, '')
+        .trim();
+
+    const parts = splitAiTextIntoBubbles(visibleText);
 
     console.log('[AI SPLIT PARTS]', parts);
 
-    if (parts.length === 0) return;
-
     for (const part of parts) {
-        await processAndDisplayAiResponse(part, senderProfile, originContext, contextMode);
+        await processAndDisplayAiResponse(part, senderProfile, originContext, contextMode, {
+            skipHeartVoiceFallback: true
+        });
 
         if (parts.length > 1) {
             await sleep(300 + Math.random() * 350);
         }
+    }
+
+    if (roundHeartVoice) {
+        await saveLatestHeartVoice(senderProfile, originContext, roundHeartVoice);
     }
 }
 
 // ===== END AI 回复分条气泡核心函数 =====
 
 // ▼▼▼ 使用这个【最终解决方案】替换掉你原来的 processAndDisplayAiResponse 函数 ▼▼▼
-async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat') { // 默认设为 'chat'
+async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat', options = {}) { // 默认设为 'chat'
     if (!senderProfile) return;
         // ▼▼▼ ✨✨✨ 粘贴这个 if 判断 ✨✨✨ ▼▼▼
   // ▼▼▼ 使用这个【V2 完整修正版】替换掉旧的 "if (state.currentChatMode === 'sms')" 代码块 ▼▼▼
@@ -22694,23 +22830,17 @@ if (heartVoiceMatch) {
 }
 
 // 兜底：AI 没输出 heart_voice 时自动生成一条
+// 如果是从 displayAiTextInBubbles 拆分而来的单条气泡，skipHeartVoiceFallback=true，跳过此处
 const shouldEnsureHeartVoice =
-    contextMode === 'chat'
+    !options.skipHeartVoiceFallback
+    && contextMode === 'chat'
     && senderProfile
     && senderProfile.id !== 'myProfile'
     && senderProfile.id !== 'user'
     && !String(rawResponse || '').includes('[diary]');
 
 if (!heartVoiceContent && shouldEnsureHeartVoice) {
-    const plainConversation = String(conversation || '').replace(/\[[^\]]+\]/g, '').trim();
-    heartVoiceContent = {
-        emotion: '微妙',
-        thoughts: plainConversation
-            ? `刚刚说完"${plainConversation.slice(0, 30)}"，我心里其实还在顺着这个情绪往下想。`
-            : '刚刚那一瞬间，我其实有些话没有直接说出口。',
-        heartRate: '平稳',
-        jealousy: '无'
-    };
+    heartVoiceContent = createNaturalFallbackHeartVoice(rawResponse, senderProfile);
     console.warn('[HEART_VOICE FALLBACK CREATED]', {
         sender: senderProfile.name || senderProfile.id,
         thoughts: heartVoiceContent.thoughts
