@@ -18179,7 +18179,7 @@ if (!isLatestAiRequest(contact.id, requestId)) {
     console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
     return;
 }
-                await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
+                await displayAiTextInBubbles(rawResponse, contact, contact, 'chat');
             } finally {
                 state.aiTypingStatus[contact.id] = false; 
                 
@@ -18289,7 +18289,7 @@ if (!isLatestAiRequest(contact.id, requestId)) {
     console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
     return;
 }
-        await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
+        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat');
     } catch (e) {
         console.error("私聊自由聊天执行失败:", e);
         await createAndAddMessage({
@@ -18604,7 +18604,7 @@ MESSAGE_END
             
             if (speakerProfile && content) {
                 await sleep(800 + Math.random() * 700);
-                await processAndDisplayAiResponse(content, speakerProfile, group, 'chat');
+                await displayAiTextInBubbles(content, speakerProfile, group, 'chat');
             }
         }
 
@@ -19025,7 +19025,7 @@ MESSAGE_END
             if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
                 await sleep(800 + Math.random() * 700);
                 try {
-                    await processAndDisplayAiResponse(content, speakerProfile, group, 'chat');
+                    await displayAiTextInBubbles(content, speakerProfile, group, 'chat');
                 } catch (renderError) {
                     console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker: speakerProfile });
                     await createAndAddMessage({
@@ -19197,7 +19197,7 @@ ${GROUP_PRIVATE_MEMORY_RULES}
                     return;
                 }
                 try {
-                    await processAndDisplayAiResponse(item.content, item.speaker, group, 'chat');
+                    await displayAiTextInBubbles(item.content, item.speaker, group, 'chat');
                 } catch (renderError) {
                     console.error('[GROUP MESSAGE RENDER FAILED]', renderError, item);
                     await createAndAddMessage({
@@ -19402,7 +19402,7 @@ ${GROUP_PRIVATE_MEMORY_RULES}
                     return;
                 }
                 try {
-                    await processAndDisplayAiResponse(item.content, item.speaker, group, 'chat');
+                    await displayAiTextInBubbles(item.content, item.speaker, group, 'chat');
                 } catch (renderError) {
                     console.error('[GROUP MESSAGE RENDER FAILED]', renderError, item);
                     await createAndAddMessage({
@@ -22398,6 +22398,144 @@ async function refreshMessageBubbleInDOM(messageId) {
         await openChat(contact.id);
     }
 }
+// ===== AI 回复分条气泡核心函数 =====
+
+function splitAiTextIntoBubbles(text) {
+    let raw = String(text || '').trim();
+    if (!raw) return [];
+
+    const protectedBlocks = [];
+
+    raw = raw.replace(/\[(heart_voice|diary|status)\][\s\S]*?\[\/\1\]/gi, (match) => {
+        const key = `__PROTECTED_BLOCK_${protectedBlocks.length}__`;
+        protectedBlocks.push(match);
+        return key;
+    });
+
+    raw = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    const parts = [];
+    let buffer = '';
+
+    function pushBuffer() {
+        const t = buffer.trim();
+        if (t) parts.push(t);
+        buffer = '';
+    }
+
+    for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+
+        if (ch === '（' || ch === '(') {
+            pushBuffer();
+
+            const close = ch === '（' ? '）' : ')';
+            let j = i + 1;
+            let block = ch;
+
+            while (j < raw.length) {
+                block += raw[j];
+                if (raw[j] === close) break;
+                j++;
+            }
+
+            const trimmedBlock = block.trim();
+            if (trimmedBlock) parts.push(trimmedBlock);
+
+            i = j;
+        } else if (ch === '\n') {
+            pushBuffer();
+        } else {
+            buffer += ch;
+        }
+    }
+
+    pushBuffer();
+
+    let finalParts = [];
+
+    for (const part of parts) {
+        let p = part.trim();
+        if (!p) continue;
+
+        if (/^__PROTECTED_BLOCK_\d+__$/.test(p)) {
+            finalParts.push(p);
+            continue;
+        }
+
+        p = p.replace(/^(?:\d+[\.、)]|[①②③④⑤⑥⑦⑧⑨]|[-•])\s*/, '').trim();
+
+        if (
+            p.length > 45 &&
+            !/^[(（][\s\S]*[)）]$/.test(p) &&
+            !/__PROTECTED_BLOCK_\d+__/.test(p)
+        ) {
+            const sentences = p
+                .split(/(?<=[。！？!?~～])\s*/)
+                .map(s => s.trim())
+                .filter(Boolean);
+
+            if (sentences.length > 1) {
+                let buf = '';
+                for (const s of sentences) {
+                    if (!buf) {
+                        buf = s;
+                    } else if ((buf + s).length <= 40) {
+                        buf += s;
+                    } else {
+                        finalParts.push(buf);
+                        buf = s;
+                    }
+                }
+                if (buf) finalParts.push(buf);
+            } else {
+                finalParts.push(p);
+            }
+        } else {
+            finalParts.push(p);
+        }
+    }
+
+    finalParts = finalParts.map(part => {
+        let restored = part;
+        protectedBlocks.forEach((block, i) => {
+            restored = restored.replace(`__PROTECTED_BLOCK_${i}__`, block);
+        });
+        return restored.trim();
+    });
+
+    finalParts = finalParts.filter(part => {
+        const cleaned = part.replace(/[，。！？!?,.\s~～…（）()]/g, '');
+        return cleaned.length > 0;
+    });
+
+    if (finalParts.length > 40) {
+        const first = finalParts.slice(0, 39);
+        const rest = finalParts.slice(39).join('\n');
+        return [...first, rest].filter(Boolean);
+    }
+
+    return finalParts;
+}
+
+async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat') {
+    const parts = splitAiTextIntoBubbles(rawText);
+
+    console.log('[AI SPLIT PARTS]', parts);
+
+    if (parts.length === 0) return;
+
+    for (const part of parts) {
+        await processAndDisplayAiResponse(part, senderProfile, originContext, contextMode);
+
+        if (parts.length > 1) {
+            await sleep(300 + Math.random() * 350);
+        }
+    }
+}
+
+// ===== END AI 回复分条气泡核心函数 =====
+
 // ▼▼▼ 使用这个【最终解决方案】替换掉你原来的 processAndDisplayAiResponse 函数 ▼▼▼
 async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat') { // 默认设为 'chat'
     if (!senderProfile) return;
@@ -43567,7 +43705,7 @@ async function triggerAiReply(contact) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
-        await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
+        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat');
     } finally {
         state.aiTypingStatus[contact.id] = false;
 
@@ -43613,7 +43751,7 @@ async function triggerPrivateFreeChat(contact) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
-        await processAndDisplayAiResponse(rawResponse, contact, contact, 'chat');
+        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat');
     } catch (error) {
         console.error('私聊自由聊天执行失败:', error);
         await createAndAddMessage({
