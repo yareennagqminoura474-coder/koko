@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -13104,7 +13104,7 @@ async function buildAddressingPromptForGroupChat(group) {
     const nonUserProfiles = memberProfiles.filter(profile => normalizeRoleId(profile.id) !== 'user');
     const lines = [];
 
-    lines.push('[群聊关系与称呼硬性设定]');
+    lines.push('[群聊关系与称呼参考]');
     lines.push(`- 群聊名称：${group.name}`);
     lines.push(`- 用户名称：${myName}`);
 
@@ -13137,7 +13137,7 @@ async function buildAddressingPromptForGroupChat(group) {
 
             if (relationshipLines.length > 0) {
                 lines.push('');
-                lines.push('[群成员之间的固定关系]');
+                lines.push('[群成员之间的关系参考]');
                 lines.push(...relationshipLines);
             }
         }
@@ -13146,13 +13146,12 @@ async function buildAddressingPromptForGroupChat(group) {
     }
 
     lines.push(`
-[重要规则]
-1. 群聊成员之间的关系和称呼必须按上面设定执行。
+[称呼参考规则]
+1. 上面的关系和称呼是参考，用于避免角色乱称呼，不要因此让群聊变得死板。
 2. 不要把 A 和用户的关系套到 B 身上。
-3. 不要把 A 对用户的称呼变成 B 对用户的称呼。
-4. 如果某个角色和用户是恋人，只有这个角色能用对应亲密称呼，其他角色不能乱叫。
-5. 如果某个角色是哥哥/姐姐/老师/同学/朋友，不要擅自改变辈分和身份。
-6. 群聊输出时，每条消息前的说话人必须使用成员列表里的准确角色名。
+3. 不要因为称呼规则影响群聊的自然感和节奏。
+4. 不要机械复述这些设定，群聊对话要自然流畅。
+5. 群聊输出时，每条消息前的说话人必须使用成员列表里的准确角色名。
 `.trim());
 
     return lines.join('\n');
@@ -18604,7 +18603,7 @@ MESSAGE_END
             
             if (speakerProfile && content) {
                 await sleep(800 + Math.random() * 700);
-                await displayAiTextInBubbles(content, speakerProfile, group, 'chat');
+                await processAndDisplayAiResponse(content, speakerProfile, group, 'chat', { skipHeartVoiceFallback: true });
             }
         }
 
@@ -19025,7 +19024,7 @@ MESSAGE_END
             if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
                 await sleep(800 + Math.random() * 700);
                 try {
-                    await displayAiTextInBubbles(content, speakerProfile, group, 'chat');
+                    await processAndDisplayAiResponse(content, speakerProfile, group, 'chat', { skipHeartVoiceFallback: true });
                 } catch (renderError) {
                     console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker: speakerProfile });
                     await createAndAddMessage({
@@ -19056,377 +19055,6 @@ MESSAGE_END
 }
 // ▲▲▲ 复制到这里结束 ▲▲▲
 
-        
-// ▼▼▼ 使用这个【新版本】替换掉你旧的 getApiFor 函数 ▼▼▼
-async function triggerGroupFreeChat(group) {
-    if (!group || !group.isGroup) return;
-
-    const chatStatusEl = document.getElementById('chat-contact-status');
-    state.aiTypingStatus[group.id] = true;
-    if (chatStatusEl && state.activeChatId === group.id) {
-        chatStatusEl.textContent = '群成员正在热烈讨论中...';
-    }
-
-    const requestId = createAiRequestId(group.id);
-
-    try {
-        const myProfile = state.myProfile;
-        const activeMemberIds = (group.members || []).filter(memberId =>
-            memberId !== 'myProfile' && !(group.mutedMembers || []).includes(memberId)
-        );
-        const allMemberProfiles = activeMemberIds.map(memberId => getProfileInGroupContext(group, memberId)).filter(Boolean);
-        if (allMemberProfiles.length === 0) {
-            throw new Error('群里没有可以发言的AI成员。');
-        }
-
-        const memoryContext = buildUnifiedMemoryStreamForChat(group, {
-            memoryLimit: Math.max(40, Number(state.apiSettings.longTermMemoryLength) || 40)
-        });
-        const worldBookContextString = (group.worldBooks || []).map(bookId => {
-            const book = state.worldBooks.find(item => item.id === bookId);
-            return book ? `- ${book.name}: ${book.content}` : '';
-        }).filter(Boolean).join('\n') || '(本次对话无世界书)';
-        const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
-        const addressingPrompt = await buildAddressingPromptForGroupChat(group);
-        const allowedSpeakerList = allMemberProfiles.map(profile => profile.name).join('、');
-        const characterDossiersPrompt = allMemberProfiles.map(profile => `
-- 角色名: ${profile.name}
-  - 核心人设: ${(profile.persona || '').replace(/\n/g, ' ')}
-  - 与用户有私聊参考时，只能结合统一记忆流判断关系和情绪，不要公开复述私聊原文。
-`).join('');
-
-        const requestMessages = [
-            {
-                role: 'system',
-                content: `
-[SYSTEM] 你是一个顶级的群聊模拟器和剧本导演。
-[群聊背景与成员列表]
-- 群聊名称: ${group.name}
-- 用户(观察者): ${myProfile.name} (人设: ${userPersonaInGroup})
-- 你只能控制这些 AI 角色: ${allMemberProfiles.map(profile => profile.name).join('、')}
-- 你绝对禁止扮演用户“${myProfile.name}”。
-
-[群聊关系与称呼设定]
-${addressingPrompt}
-
-[角色记忆核心]
-${memoryContext.formattedPermanentMemories}
-
-[相关世界书]
-${worldBookContextString}
-
-[角色档案]
-${characterDossiersPrompt}
-
-[统一时序记忆流]
-${memoryContext.formattedMemoryString}
-
-${GROUP_PRIVATE_MEMORY_RULES}
-
-[额外规则]
-1. 这是一段群成员之间的自然互动，不要直接对用户提问。
-2. 普通群聊不要主动输出 [diary]。
-3. 你可以使用 [sticker:表情名]、[voice:内容]、[picture:描述] 等原有指令。
-4. 每个本轮发言的角色，都必须在自己的发言内容后面附带一段 [heart_voice]...[/heart_voice]，内容是该角色此刻没有说出口的真实内心想法。[heart_voice] 属于对应角色，不要把 A 的心声写到 B 身上。不要输出 [diary]。
-`.trim()
-            },
-            {
-                role: 'user',
-                content: `
-[任务]
-1. 让 2 到 3 位群成员围绕最新上下文自然继续聊下去。
-2. 他们可以顺着刚才的话题延续，也可以因为统一记忆流里的关系变化而自然转向新话题。
-3. 不要机械总结记忆来源，不要公开复述私聊原文。
-
-[输出格式]
-允许发言角色：${allowedSpeakerList}
-每个角色先写发言，紧接着写该角色自己的心声，再写下一个角色。格式示例：
-[角色A]：我知道了。
-[heart_voice]其实我有点在意他刚刚的反应。[/heart_voice]
-[角色B]：行，那就这样。
-[heart_voice]我嘴上说随便，其实还是有点不爽。[/heart_voice]
-规则：
-1. 角色名前缀必须从”允许发言角色”里逐字复制。
-2. 不允许使用昵称、外号、代称、我、他、她、某人作为前缀。
-3. 不允许创造新角色。
-4. 不允许输出 MESSAGE_START、SPEAKER、CONTENT、MESSAGE_END 这类旧格式。
-5. 每个发言角色都必须附带自己的 [heart_voice]，不能省略，不能省略。
-`.trim()
-            }
-        ];
-
-        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-        console.log('[AI RAW RESPONSE]', rawResponse);
-
-        if (!isLatestAiRequest(group.id, requestId)) {
-            console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-            if (state.debugAiVisible) {
-                await createAndAddMessage({
-                    type: 'system_notification',
-                    sender: 'system',
-                    content: 'AI 已返回，但这次回复被判定为旧请求，已丢弃。'
-                }, 'system', group, false, 'chat');
-            }
-            return;
-        }
-
-        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
-        console.log('[GROUP PARSED MESSAGES]', parsedMessages);
-        console.log('[GROUP ALLOWED SPEAKERS]', allMemberProfiles.map(profile => profile.name));
-
-        if (parsedMessages.length === 0) {
-            console.warn('[GROUP NO PARSED MESSAGE]', rawResponse);
-            await createAndAddMessage({
-                type: 'system_notification',
-                sender: 'system',
-                content: `AI 有返回内容，但前端没有解析出可显示消息。返回内容预览：${String(rawResponse || '').slice(0, 120)}`
-            }, 'system', group, false, 'chat');
-            return;
-        }
-
-        for (const item of parsedMessages) {
-            if (!isLatestAiRequest(group.id, requestId)) {
-                console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-                return;
-            }
-
-            if (item.speaker && item.content && !(group.mutedMembers || []).includes(item.speaker.id)) {
-                await sleep(800 + Math.random() * 700);
-                if (!isLatestAiRequest(group.id, requestId)) {
-                    console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-                    return;
-                }
-                try {
-                    await displayAiTextInBubbles(item.content, item.speaker, group, 'chat');
-                } catch (renderError) {
-                    console.error('[GROUP MESSAGE RENDER FAILED]', renderError, item);
-                    await createAndAddMessage({
-                        type: 'text',
-                        sender: item.speaker.id,
-                        content: String(item.content || '').trim()
-                    }, item.speaker.id, group, false, 'chat');
-                }
-            }
-        }
-    } catch (error) {
-        console.error('群聊自由聊天执行失败:', error);
-        await createAndAddMessage({
-            type: 'system_notification',
-            sender: 'system',
-            content: `AI自由聊天失败: ${error.message}`
-        }, 'system', group, false, 'chat');
-    } finally {
-        state.aiTypingStatus[group.id] = false;
-        if (chatStatusEl && state.activeChatId === group.id) {
-            chatStatusEl.textContent = group.status || '在线';
-        }
-    }
-}
-
-async function triggerGroupChatAiReply(group) {
-    const chatStatusEl = document.getElementById('chat-contact-status');
-    state.aiTypingStatus[group.id] = true;
-    if (chatStatusEl && state.activeChatId === group.id) {
-        chatStatusEl.textContent = '群成员正在热烈讨论中...';
-    }
-
-    const requestId = createAiRequestId(group.id);
-
-    try {
-        const myProfile = state.myProfile;
-        const activeMemberIds = (group.members || []).filter(memberId =>
-            memberId !== 'myProfile' && !(group.mutedMembers || []).includes(memberId)
-        );
-        const allMemberProfiles = activeMemberIds.map(memberId => getProfileInGroupContext(group, memberId)).filter(Boolean);
-        if (allMemberProfiles.length === 0) return;
-
-        const allMemberNames = (group.members || []).map(memberId => {
-            const profile = getProfileInGroupContext(group, memberId);
-            return profile ? profile.name : '';
-        }).filter(Boolean);
-        const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
-        const worldBookContextString = (group.worldBooks || []).map(bookId => {
-            const book = state.worldBooks.find(item => item.id === bookId);
-            return book ? `- ${book.name}: ${book.content}` : '';
-        }).filter(Boolean).join('\n') || '(本次对话无世界书)';
-        const memoryContext = buildUnifiedMemoryStreamForChat(group, {
-            memoryLimit: Math.max(40, Number(state.apiSettings.longTermMemoryLength) || 40)
-        });
-        const addressingPrompt = await buildAddressingPromptForGroupChat(group);
-        const allowedSpeakerList = allMemberProfiles.map(profile => profile.name).join('、');
-        const characterDossiersPrompt = allMemberProfiles.map(profile => `
-- 角色名: ${profile.name}
-  - 核心人设: ${(profile.persona || '').replace(/\n/g, ' ')}
-  - 你与用户之间可能存在私聊历史，只能作为态度和情绪参考，不要在群里直接复述。
-`).join('');
-
-        const messages = [];
-        let currentUserMessageParts = [];
-        const recentHistory = group.history
-            .filter(message => message.sender !== 'system_instruction' && message.type !== 'system_notification')
-            .slice(-(state.apiSettings.contextLength || 20));
-
-        for (const message of recentHistory) {
-            const role = (message.sender === 'user' || message.sender === 'myProfile') ? 'user' : 'assistant';
-
-            if (role === 'user') {
-                let textContent = null;
-                if (message.type === 'uploaded_image' && message.content?.base64) {
-                    currentUserMessageParts.push({
-                        type: 'image_url',
-                        image_url: { url: message.content.base64 }
-                    });
-                } else if (message.type === 'text') {
-                    textContent = message.content;
-                } else if (message.type === 'image') {
-                    textContent = message.isEmoticon ? `(发送了一个表情包: ${message.emoticonName || '表情'})` : '(发送了一张图片)';
-                } else if (message.type === 'voice') {
-                    textContent = `(发送了一条语音: ${message.content?.text || '语音消息'})`;
-                } else if (message.type === 'red_packet') {
-                    textContent = `(发了一个红包: ${message.content?.blessing || '恭喜发财'})`;
-                } else if (message.type === 'post_share' || message.type === 'product_share') {
-                    textContent = '(分享了一条内容)';
-                }
-
-                if (textContent) {
-                    currentUserMessageParts.push({ type: 'text', text: textContent });
-                }
-            } else {
-                if (currentUserMessageParts.length > 0) {
-                    messages.push({ role: 'user', content: currentUserMessageParts });
-                    currentUserMessageParts = [];
-                }
-                if (message.type === 'text' || message.type === 'html') {
-                    messages.push({ role: 'assistant', content: message.content });
-                }
-            }
-        }
-
-        if (currentUserMessageParts.length > 0) {
-            messages.push({ role: 'user', content: currentUserMessageParts });
-        }
-
-        const finalRequestMessages = [
-            {
-                role: 'system',
-                content: `
-[SYSTEM] 你是一个顶级的群聊模拟器和剧本导演。
-[群聊背景与成员列表]
-- 群聊名称: ${group.name}
-- 所有群成员: ${allMemberNames.join('、')}
-- 用户(话题发起者): ${myProfile.name}
-  - 用户人设/签名: ${userPersonaInGroup}
-- 你只能控制这些 AI 角色: ${allMemberProfiles.map(profile => profile.name).join('、')}
-- 你绝对禁止扮演用户“${myProfile.name}”。
-
-[群聊关系与称呼设定]
-${addressingPrompt}
-
-[相关世界书]
-${worldBookContextString}
-
-[角色记忆核心]
-${memoryContext.formattedPermanentMemories}
-
-[统一时序记忆流]
-${memoryContext.formattedMemoryString}
-
-[角色档案]
-${characterDossiersPrompt}
-
-${GROUP_PRIVATE_MEMORY_RULES}
-
-[通用规则]
-1. 群聊当前最新消息优先级最高。
-2. 普通群聊不要主动输出 [diary]。
-3. 你可以参考私聊关系变化来调整态度，但不能直接曝光私聊原文。
-4. 每个本轮发言的角色，都必须在自己的发言内容后面附带一段 [heart_voice]...[/heart_voice]，内容是该角色此刻没有说出口的真实内心想法。[heart_voice] 属于对应角色，不要把 A 的心声写到 B 身上。不要输出 [diary]。
-
-[输出格式]
-允许发言角色：${allowedSpeakerList}
-每个角色先写发言，紧接着写该角色自己的心声，再写下一个角色。格式示例：
-[角色A]：我知道了。
-[heart_voice]其实我有点在意他刚刚的反应。[/heart_voice]
-[角色B]：行，那就这样。
-[heart_voice]我嘴上说随便，其实还是有点不爽。[/heart_voice]
-规则：
-1. 角色名前缀必须从”允许发言角色”里逐字复制。
-2. 不允许使用昵称、外号、代称、我、他、她、某人作为前缀。
-3. 不允许创造新角色。
-4. 不允许输出 MESSAGE_START、SPEAKER、CONTENT、MESSAGE_END 这类旧格式。
-5. 每个发言角色都必须附带自己的 [heart_voice]，不能省略。
-`.trim()
-            },
-            ...messages
-        ];
-
-        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', finalRequestMessages);
-        console.log('[AI RAW RESPONSE]', rawResponse);
-
-        if (!isLatestAiRequest(group.id, requestId)) {
-            console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-            if (state.debugAiVisible) {
-                await createAndAddMessage({
-                    type: 'system_notification',
-                    sender: 'system',
-                    content: 'AI 已返回，但这次回复被判定为旧请求，已丢弃。'
-                }, 'system', group, false, 'chat');
-            }
-            return;
-        }
-
-        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
-        console.log('[GROUP PARSED MESSAGES]', parsedMessages);
-        console.log('[GROUP ALLOWED SPEAKERS]', allMemberProfiles.map(profile => profile.name));
-
-        if (parsedMessages.length === 0) {
-            console.warn('[GROUP NO PARSED MESSAGE]', rawResponse);
-            await createAndAddMessage({
-                type: 'system_notification',
-                sender: 'system',
-                content: `AI 有返回内容，但前端没有解析出可显示消息。返回内容预览：${String(rawResponse || '').slice(0, 120)}`
-            }, 'system', group, false, 'chat');
-            return;
-        }
-
-        for (const item of parsedMessages) {
-            if (!isLatestAiRequest(group.id, requestId)) {
-                console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-                return;
-            }
-
-            if (item.speaker && item.content && !(group.mutedMembers || []).includes(item.speaker.id)) {
-                await sleep(800 + Math.random() * 700);
-                if (!isLatestAiRequest(group.id, requestId)) {
-                    console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-                    return;
-                }
-                try {
-                    await displayAiTextInBubbles(item.content, item.speaker, group, 'chat');
-                } catch (renderError) {
-                    console.error('[GROUP MESSAGE RENDER FAILED]', renderError, item);
-                    await createAndAddMessage({
-                        type: 'text',
-                        sender: item.speaker.id,
-                        content: String(item.content || '').trim()
-                    }, item.speaker.id, group, false, 'chat');
-                }
-            }
-        }
-    } catch (error) {
-        console.error('群聊AI回复生成失败:', error);
-        await createAndAddMessage({
-            type: 'system_notification',
-            sender: 'system',
-            content: `群聊AI回复生成失败: ${error.message || error.name || '未知错误'}`
-        }, 'system', group, false, 'chat');
-    } finally {
-        state.aiTypingStatus[group.id] = false;
-        if (state.activeChatId === group.id) {
-            chatStatusEl.textContent = group.status || '在线';
-        }
-    }
-}
 
 function getApiFor(type = 'chat') {
     // 1. 优先检查 窥探(Snoop) API
@@ -22830,9 +22458,11 @@ if (heartVoiceMatch) {
 }
 
 // 兜底：AI 没输出 heart_voice 时自动生成一条
-// 如果是从 displayAiTextInBubbles 拆分而来的单条气泡，skipHeartVoiceFallback=true，跳过此处
+// 群聊不生成心声兜底；从 displayAiTextInBubbles 拆分的气泡也跳过
+const isGroupContext = originContext && originContext.isGroup === true;
 const shouldEnsureHeartVoice =
-    !options.skipHeartVoiceFallback
+    !isGroupContext
+    && !options.skipHeartVoiceFallback
     && contextMode === 'chat'
     && senderProfile
     && senderProfile.id !== 'myProfile'
