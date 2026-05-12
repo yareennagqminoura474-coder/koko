@@ -18309,6 +18309,34 @@ if (!isLatestAiRequest(contact.id, requestId)) {
  * (此版本修复了 "contents is required" 错误，并【添加了私聊记忆互通】)
  * @param {object} group - 当前的群聊联系人对象
  */
+function getGroupReplyCountRange(group, allMemberProfiles) {
+    const count = Array.isArray(allMemberProfiles) ? allMemberProfiles.length : 0;
+    if (count <= 0) return { min: 0, max: 0 };
+    if (count === 1) return { min: 1, max: 1 };
+    if (count === 2) return { min: 1, max: 2 };
+    if (count === 3) return { min: 2, max: 3 };
+    if (count === 4) return { min: 2, max: 4 };
+    if (count === 5) return { min: 3, max: 4 };
+    if (count === 6) return { min: 3, max: 5 };
+    return { min: 4, max: Math.min(6, count) };
+}
+
+function getRecentGroupSpeakers(group, limit = 12) {
+    if (!group || !Array.isArray(group.history)) return [];
+    return group.history
+        .filter(msg =>
+            msg
+            && msg.sender
+            && msg.sender !== 'user'
+            && msg.sender !== 'myProfile'
+            && msg.sender !== 'system'
+            && msg.type !== 'system_notification'
+            && msg.type !== 'heart_voice'
+        )
+        .slice(-limit)
+        .map(msg => msg.sender);
+}
+
 async function triggerGroupFreeChat(group) {
     if (!group || !group.isGroup) return;
 
@@ -18358,7 +18386,16 @@ async function triggerGroupFreeChat(group) {
         // 1d. 构建所有AI成员的档案
         const allMemberProfiles = unmutedAiMembers.map(id => getProfileInGroup(id)).filter(Boolean);
         const aiMemberNames = allMemberProfiles.map(profile => profile.name);
+        const allowedSpeakerList = aiMemberNames.join('、');
         const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
+
+        // 动态回复人数
+        const replyRange = getGroupReplyCountRange(group, allMemberProfiles);
+        const recentSpeakers = getRecentGroupSpeakers(group, 12);
+        const lessRecentSpeakerNames = allMemberProfiles
+            .filter(profile => !recentSpeakers.includes(profile.id))
+            .map(profile => profile.name)
+            .join('、') || '无';
         
         // 1e. 【核心V7：构建完整的统一时序记忆流】
         const memoryLimit = state.apiSettings.longTermMemoryLength || 40;
@@ -18556,19 +18593,28 @@ ${finalMemoryString}
         // (Part B: 这是 contents，只包含任务)
         const freeChatUserTaskPrompt = `
 [！！！核心任务！！！]
-用户（${myProfile.name}）正在“观察”群聊，TA没有发言。
+用户（${myProfile.name}）正在”观察”群聊，TA没有发言。
 你的任务是：
 1.  **分析上下文**：阅读你(System)的背景资料中提供的【统一时序记忆流】（它包含了群聊和私聊），看看大家最后聊了什么。
-2.  **选择发言人**：从你“可控制的角色”列表中，选择 2 到 3 名角色。
-3.  **生成对话**：让他们围绕“记忆流”中的最后一个话题【继续深入】，或者开启一个【符合人设、世界观、以及私聊记忆】的新话题。
-4.  **禁止回复用户**：【绝对不要】和用户“${myProfile.name}”说话，这是AI之间的对话。
+2.  **选择发言人**：本群当前可发言 AI 成员数：${allMemberProfiles.length}。本轮请让 ${replyRange.min} 到 ${replyRange.max} 位不同群成员自然继续聊下去。不要低于 ${replyRange.min} 位，除非上下文明确只适合极少数人回应。优先让最近较少发言的成员参与（参考：${lessRecentSpeakerNames}），避免总是固定同几个人。
+3.  **生成对话**：让他们围绕”记忆流”中的最后一个话题【继续深入】，或者开启一个【符合人设、世界观、以及私聊记忆】的新话题。
+4.  **禁止回复用户**：【绝对不要】和用户”${myProfile.name}”说话，这是AI之间的对话。
 
 [输出格式]
-你的输出必须是严格遵守以下格式的聊天记录脚本。
+每条消息必须严格使用：
 MESSAGE_START
-SPEAKER: [角色名] (✨ 必须从你“可控制的角色”列表中选择)
-CONTENT: [该角色说的【单条】消息内容，可以包含特殊指令]
+SPEAKER: 角色名（必须从允许发言角色里逐字复制）
+CONTENT: 该角色这一条消息的内容（可以包含特殊指令）
 MESSAGE_END
+
+规则：
+1. SPEAKER 必须从”允许发言角色”里逐字复制，不能用代称或外号。
+2. CONTENT 只写这一条消息，不要把多条消息合并。
+3. 不要输出 [角色名]：内容 这种格式。
+4. 不要输出额外解释或旁白。
+5. 不要扮演用户”${myProfile.name}”。
+
+允许发言角色：${allowedSpeakerList}
 `;
 
         // --- 3. 【核心】构建AI调用参数 ---
@@ -18675,7 +18721,16 @@ async function triggerGroupChatAiReply(group) {
         // ▼▼▼ ✨✨✨ 【KOKO 核心修复】✨✨✨ ▼▼▼
         // 1. 我们需要一个【只包含AI】的名字列表
         const aiMemberNames = allMemberProfiles.map(profile => profile.name);
+        const allowedSpeakerList = aiMemberNames.join('、');
         // ▲▲▲ ✨✨✨ 修复结束 ✨✨✨ ▲▲▲
+
+        // 动态回复人数
+        const replyRange = getGroupReplyCountRange(group, allMemberProfiles);
+        const recentSpeakers = getRecentGroupSpeakers(group, 12);
+        const lessRecentSpeakerNames = allMemberProfiles
+            .filter(profile => !recentSpeakers.includes(profile.id))
+            .map(profile => profile.name)
+            .join('、') || '无';
 
         const memoryLimit = state.apiSettings.longTermMemoryLength || 40;
         let unifiedMemoryStream = [];
@@ -18916,11 +18971,28 @@ ${characterDossiersPrompt}
 你的核心任务是：结合所有信息（包括用户在聊天上下文中发的图片），模拟一场热闹的、按时间顺序发生的自由讨论。
 【重要】：如果用户刚刚发了图片，你扮演的角色【必须】对图片内容做出反应！
 
-[输出格式] 你的输出必须是一段严格遵守以下格式的聊天记录脚本。
+[回复人数要求]
+本群当前可发言 AI 成员数：${allMemberProfiles.length}
+本轮请让 ${replyRange.min} 到 ${replyRange.max} 位不同群成员回应用户或延续当前话题。
+不要只让 2 到 3 个人固定说话，如果群里有更多成员，应当更多人参与。
+如果用户点名某个角色，优先让被点名角色回复，但其他成员也可以自然插话。
+优先让最近较少发言的成员参与（参考：${lessRecentSpeakerNames}），避免永远固定同几个人。
+
+[输出格式]
+每条消息必须严格使用：
 MESSAGE_START
-SPEAKER: [角色名] (✨ 必须从你“可控制的角色”列表中选择)
-CONTENT: [该角色说的【单条】消息内容，可以包含特殊指令]
+SPEAKER: 角色名（必须从允许发言角色里逐字复制）
+CONTENT: 该角色这一条消息的内容（可以包含特殊指令）
 MESSAGE_END
+
+规则：
+1. SPEAKER 必须从”允许发言角色”里逐字复制，不能用代称或外号。
+2. CONTENT 只写这一条消息，不要把多条消息合并。
+3. 不要输出 [角色名]：内容 这种格式。
+4. 不要输出额外解释或旁白。
+5. 不要扮演用户”${myProfile.name}”。
+
+允许发言角色：${allowedSpeakerList}
 `;
 
         let finalGroupChatPrompt = groupChatPrompt.replace('{{emoticon_list}}', state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）');
