@@ -18340,16 +18340,71 @@ if (!isLatestAiRequest(contact.id, requestId)) {
  * (此版本修复了 "contents is required" 错误，并【添加了私聊记忆互通】)
  * @param {object} group - 当前的群聊联系人对象
  */
-function getGroupReplyCountRange(group, allMemberProfiles) {
-    const count = Array.isArray(allMemberProfiles) ? allMemberProfiles.length : 0;
-    if (count <= 0) return { min: 0, max: 0 };
-    if (count === 1) return { min: 1, max: 1 };
-    if (count === 2) return { min: 1, max: 2 };
-    if (count === 3) return { min: 2, max: 3 };
-    if (count === 4) return { min: 2, max: 4 };
-    if (count === 5) return { min: 3, max: 4 };
-    if (count === 6) return { min: 3, max: 5 };
-    return { min: 4, max: Math.min(6, count) };
+function getGroupReplyGuidance(group, allMemberProfiles, latestUserMessage = '') {
+    const memberCount = Array.isArray(allMemberProfiles) ? allMemberProfiles.length : 0;
+    const text = String(latestUserMessage || '').trim();
+
+    let min = 2;
+    let max = 3;
+    let scene = '普通闲聊';
+
+    if (memberCount <= 1) {
+        return {
+            min: memberCount,
+            max: memberCount,
+            scene: '单人回应',
+            guidance: '只有一位可发言成员，让这位成员自然回复即可。'
+        };
+    }
+
+    const mentionedMembers = allMemberProfiles.filter(profile =>
+        profile && profile.name && text.includes(profile.name)
+    );
+
+    if (mentionedMembers.length === 1) {
+        min = 1;
+        max = Math.min(3, memberCount);
+        scene = '点名回应';
+    } else if (mentionedMembers.length >= 2) {
+        min = Math.min(mentionedMembers.length, memberCount);
+        max = Math.min(mentionedMembers.length + 2, memberCount);
+        scene = '多人点名回应';
+    } else if (/大家|你们|所有人|一起|都说|都来|投票|选择|去哪|吃什么|怎么办|意见|计划|安排/.test(text)) {
+        min = Math.min(3, memberCount);
+        max = Math.min(memberCount >= 7 ? 6 : 5, memberCount);
+        scene = '公共话题/征求意见';
+    } else if (/吵|生气|不爽|吃醋|误会|解释|为什么|到底|别吵|冷战|争|抢|崩/.test(text)) {
+        min = Math.min(3, memberCount);
+        max = Math.min(memberCount >= 7 ? 6 : 5, memberCount);
+        scene = '冲突/情绪场景';
+    } else if (/哈哈|笑死|救命|好玩|无语|离谱|起哄|真的假的|八卦/.test(text)) {
+        min = Math.min(3, memberCount);
+        max = Math.min(memberCount >= 7 ? 5 : 4, memberCount);
+        scene = '起哄/玩笑场景';
+    } else if (/我想你|喜欢|难过|累|不开心|害怕|委屈|陪我|抱抱|只想/.test(text)) {
+        min = 1;
+        max = Math.min(3, memberCount);
+        scene = '私密/情绪倾诉';
+    } else {
+        if (memberCount <= 3) {
+            min = 1;
+            max = memberCount;
+        } else if (memberCount <= 5) {
+            min = 2;
+            max = 4;
+        } else {
+            min = 2;
+            max = 4;
+        }
+        scene = '普通闲聊';
+    }
+
+    return {
+        min,
+        max,
+        scene,
+        guidance: `当前场景：${scene}。本轮建议 ${min}-${max} 位不同群成员自然回复。不是必须达到最大人数，但不要长期只让同一两个人说话。`
+    };
 }
 
 function getRecentGroupSpeakers(group, limit = 12) {
@@ -18420,8 +18475,11 @@ async function triggerGroupFreeChat(group) {
         const allowedSpeakerList = aiMemberNames.join('、');
         const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
 
-        // 动态回复人数
-        const replyRange = getGroupReplyCountRange(group, allMemberProfiles);
+        const recentText = (group.history || [])
+            .slice(-8)
+            .map(msg => String(msg?.content || ''))
+            .join('\n');
+        const replyGuidance = getGroupReplyGuidance(group, allMemberProfiles, recentText);
         const recentSpeakers = getRecentGroupSpeakers(group, 12);
         const lessRecentSpeakerNames = allMemberProfiles
             .filter(profile => !recentSpeakers.includes(profile.id))
@@ -18627,9 +18685,21 @@ ${finalMemoryString}
 用户（${myProfile.name}）正在”观察”群聊，TA没有发言。
 你的任务是：
 1.  **分析上下文**：阅读你(System)的背景资料中提供的【统一时序记忆流】（它包含了群聊和私聊），看看大家最后聊了什么。
-2.  **选择发言人**：本群当前可发言 AI 成员数：${allMemberProfiles.length}。本轮请让 ${replyRange.min} 到 ${replyRange.max} 位不同群成员自然继续聊下去。不要低于 ${replyRange.min} 位，除非上下文明确只适合极少数人回应。优先让最近较少发言的成员参与（参考：${lessRecentSpeakerNames}），避免总是固定同几个人。
+2.  **选择发言人**：结合最近群聊氛围，决定谁来接话、谁暂时沉默，让群聊像真实发生的一样自然。
 3.  **生成对话**：让他们围绕”记忆流”中的最后一个话题【继续深入】，或者开启一个【符合人设、世界观、以及私聊记忆】的新话题。
 4.  **禁止回复用户**：【绝对不要】和用户”${myProfile.name}”说话，这是AI之间的对话。
+
+[本轮群聊自由聊天人数要求]
+${replyGuidance.guidance}
+根据当前场景，在建议范围内自然决定回复人数。
+具体规则：
+1. 根据最近群聊氛围决定几个人接话。
+2. 普通冷场可以 2-3 人。
+3. 热闹、起哄、讨论计划时可以 3-5 人。
+4. 大群不要长期只有固定两个人聊天。
+5. 不要为了凑人数让无关角色尬聊。
+最近发言较少的成员可以优先参与，但不是强制。
+最近较少发言成员参考：${lessRecentSpeakerNames}
 
 [输出格式]
 每条消息必须严格使用：
@@ -18701,8 +18771,6 @@ MESSAGE_END
 }
 async function triggerGroupChatAiReply(group) {
     const chatStatusEl = document.getElementById('chat-contact-status');
-    // const originalStatus = chatStatusEl.textContent; // 👈 删掉这行
-    
     state.aiTypingStatus[group.id] = true; // 👈 ✨ (新) 告诉“记录本”：我开工了！
     chatStatusEl.textContent = '群成员正在热烈讨论中...';
 
@@ -18726,7 +18794,9 @@ async function triggerGroupChatAiReply(group) {
         );
 
         if (unmutedAiMembers.length === 0) {
-            chatStatusEl.textContent = originalStatus;
+            if (chatStatusEl && state.activeChatId === group.id) {
+                chatStatusEl.textContent = '在线';
+            }
             return;
         }
 
@@ -18755,8 +18825,10 @@ async function triggerGroupChatAiReply(group) {
         const allowedSpeakerList = aiMemberNames.join('、');
         // ▲▲▲ ✨✨✨ 修复结束 ✨✨✨ ▲▲▲
 
-        // 动态回复人数
-        const replyRange = getGroupReplyCountRange(group, allMemberProfiles);
+        const latestUserMessage = [...(group.history || [])]
+            .reverse()
+            .find(msg => msg.sender === 'user' || msg.sender === 'myProfile')?.content || '';
+        const replyGuidance = getGroupReplyGuidance(group, allMemberProfiles, latestUserMessage);
         const recentSpeakers = getRecentGroupSpeakers(group, 12);
         const lessRecentSpeakerNames = allMemberProfiles
             .filter(profile => !recentSpeakers.includes(profile.id))
@@ -19002,12 +19074,19 @@ ${characterDossiersPrompt}
 你的核心任务是：结合所有信息（包括用户在聊天上下文中发的图片），模拟一场热闹的、按时间顺序发生的自由讨论。
 【重要】：如果用户刚刚发了图片，你扮演的角色【必须】对图片内容做出反应！
 
-[回复人数要求]
-本群当前可发言 AI 成员数：${allMemberProfiles.length}
-本轮请让 ${replyRange.min} 到 ${replyRange.max} 位不同群成员回应用户或延续当前话题。
-不要只让 2 到 3 个人固定说话，如果群里有更多成员，应当更多人参与。
-如果用户点名某个角色，优先让被点名角色回复，但其他成员也可以自然插话。
-优先让最近较少发言的成员参与（参考：${lessRecentSpeakerNames}），避免永远固定同几个人。
+[本轮群聊回复人数要求]
+${replyGuidance.guidance}
+根据当前场景，在建议范围内自然决定回复人数。
+具体规则：
+1. 根据当前场景自然决定谁说话。
+2. 不要每次都让所有人回复。
+3. 不要每次固定只让 2-3 个人回复。
+4. 如果用户点名某个角色，被点名角色必须优先回复，其他人可以少量插话。
+5. 如果是大家都能参与的公共话题，可以让更多成员参与。
+6. 如果是私密情绪、点名问题、两人矛盾，不要硬让无关成员插嘴。
+7. 多轮群聊中要轮换发言角色，避免永远固定同几个人。
+最近发言较少的成员可以优先参与，但不是强制。
+最近较少发言成员参考：${lessRecentSpeakerNames}
 
 [输出格式]
 每条消息必须严格使用：
