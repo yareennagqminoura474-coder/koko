@@ -8798,6 +8798,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                     <button class="save-settings-btn" id="save-contact-settings-btn">保存设置</button>
                     <input type="file" id="import-char-card-input" accept=".json,.png" style="display: none;"> <button class="save-settings-btn" id="export-char-card-btn" style="background-color: #9b59b6; margin-top: 15px;"> <i class="fas fa-image"></i> 导出角色卡 (生成图片) </button>
                     <button class="save-settings-btn" id="clear-chat-history-btn" style="background-color: #e74c3c; margin-top: 15px;">清空聊天记录</button>
+                    <button class="save-settings-btn" id="clean-bad-heart-voices-btn" style="background-color: #607d8b; margin-top: 15px;">清理异常心声</button>
                 </div>
             </div>
 
@@ -22524,6 +22525,31 @@ async function saveLatestHeartVoice(senderProfile, effectiveChatContext, heartVo
         type: 'heart_voice',
         content: normalized
     }, senderProfile.id, effectiveChatContext, false, 'chat');
+}
+
+async function cleanBadHeartVoices() {
+    for (const contact of state.contacts) {
+        if (!contact || contact.isGroup || !Array.isArray(contact.history)) continue;
+
+        const before = contact.history.length;
+
+        contact.history = contact.history.filter(msg => {
+            if (msg.type !== 'heart_voice') return true;
+            return !isBadHeartVoiceContent(msg.content);
+        });
+
+        if (contact.history.length !== before) {
+            await kokoMemory.put('contacts', contact);
+            console.log('[BAD HEART_VOICE CLEANED]', contact.name);
+        }
+    }
+
+    const activeContact = state.contacts.find(item => item.id === state.activeChatId && !item.isGroup);
+    if (activeContact && typeof renderChatMessages === 'function') {
+        renderChatMessages(activeContact);
+    }
+
+    alert('已清理旧的异常心声');
 }
 
 // ===== END 心声辅助函数 =====
@@ -44566,6 +44592,7 @@ document.getElementById('reset-background-btn').addEventListener('click', () => 
 attachGroupSettingsListeners();
 // 保存外观设置按钮
 document.getElementById('save-appearance-btn').addEventListener('click', saveAppearanceSettings);
+document.getElementById('clean-bad-heart-voices-btn')?.addEventListener('click', cleanBadHeartVoices);
 }
 attachEventListeners();
 // --- 紧急修复：重新绑定搜索按钮 ---
