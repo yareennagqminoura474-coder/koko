@@ -8924,6 +8924,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                             <label class="contact-form-label">下次写日记</label>
                             <div id="diary-settings-next" style="font-size: 14px; color: #666;">未开启</div>
                         </div>
+                        <button class="form-button" id="generate-diary-now-btn" style="background-color: var(--theme-secondary); margin-top: 10px;">
+                            立即生成一篇日记
+                        </button>
                         <button class="form-button" id="save-diary-settings-btn">保存设置</button>
                     </div>
                 </div>
@@ -13603,9 +13606,11 @@ async function saveDiarySettingsForContact(contact, settings) {
     await kokoMemory.put('contacts', contact);
 }
 
-async function generateScheduledDiary(contact) {
-    if (!contact || contact.isGroup || contact._isGeneratingScheduledDiary) return;
+async function generateScheduledDiary(contact, options = {}) {
+    if (!contact || contact.isGroup || contact._isGeneratingScheduledDiary) return false;
 
+    const reason = options.reason || 'scheduled';
+    const silent = options.silent !== false;
     contact._isGeneratingScheduledDiary = true;
     try {
         const memoryContext = buildUnifiedMemoryStreamForChat(contact, {
@@ -13655,59 +13660,95 @@ ${memoryContext.formattedMemoryString}
             }
         ];
         const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-        const match = rawResponse.match(/\[diary\]([\s\S]*?)\[\/diary\]/i);
-        const diaryContent = (match ? match[1] : rawResponse).trim();
-        if (!diaryContent) return;
+        const normalizedResponse = String(rawResponse || '');
+        const match = normalizedResponse.match(/\[diary\]([\s\S]*?)\[\/diary\]/i);
+        const diaryContent = (match ? match[1] : normalizedResponse).trim();
+        if (!diaryContent) {
+            throw new Error('AI 返回的日记内容为空。');
+        }
 
+        const generatedAt = Date.now();
         contact.diary = contact.diary || [];
         contact.diary.push({
-            id: `diary_${Date.now()}`,
+            id: `diary_${generatedAt}`,
             content: diaryContent,
             preview: buildDiaryPreview(diaryContent),
             mood: inferDiaryMood(diaryContent),
-            timestamp: Date.now(),
-            source: 'scheduled'
+            timestamp: generatedAt,
+            source: reason === 'manual' ? 'manual' : 'scheduled'
         });
 
         contact.diarySettings = {
             ...getDefaultDiarySettings(),
             ...(contact.diarySettings || {})
         };
-        contact.diarySettings.lastDiaryAt = Date.now();
-        contact.diarySettings.nextDiaryAt = calculateNextDiaryAt(contact.diarySettings, Date.now());
+        contact.diarySettings.lastDiaryAt = generatedAt;
+        contact.diarySettings.nextDiaryAt = calculateNextDiaryAt(contact.diarySettings, generatedAt);
         await kokoMemory.put('contacts', contact);
+        console.log('[ScheduledDiary] generated', {
+            contact: contact.name,
+            reason,
+            diaryId: contact.diary[contact.diary.length - 1]?.id
+        });
+
+        if (currentDiaryViewContactId === contact.id) {
+            renderDiary();
+        }
+
+        if (!silent) {
+            alert(`${contact.name} 已经写好一篇日记啦。`);
+        }
+        return true;
     } catch (error) {
         console.error('定时日记生成失败:', error);
+        if (!silent) {
+            alert(`日记生成失败：${error.message || error.name || '未知错误'}`);
+        }
+        return false;
     } finally {
         contact._isGeneratingScheduledDiary = false;
     }
 }
 
-async function checkScheduledDiaries() {
+async function checkScheduledDiaries(reason = 'timer') {
     const now = Date.now();
+
     for (const contact of state.contacts.filter(item => !item.isGroup)) {
         contact.diarySettings = {
             ...getDefaultDiarySettings(),
             ...(contact.diarySettings || {})
         };
+
         if (!contact.diarySettings.enabled) continue;
-        if (!contact.diarySettings.nextDiaryAt) {
-            contact.diarySettings.nextDiaryAt = calculateNextDiaryAt(contact.diarySettings, now);
+
+        let nextAt = Number(contact.diarySettings.nextDiaryAt) || 0;
+
+        if (!nextAt) {
+            nextAt = calculateNextDiaryAt(contact.diarySettings, now);
+            contact.diarySettings.nextDiaryAt = nextAt;
             await kokoMemory.put('contacts', contact);
-            continue;
         }
-        if (now >= Number(contact.diarySettings.nextDiaryAt)) {
-            await generateScheduledDiary(contact);
+
+        if (nextAt && now >= nextAt) {
+            console.log('[ScheduledDiary] due, generating...', {
+                reason,
+                contact: contact.name,
+                nextAt: new Date(nextAt).toLocaleString()
+            });
+
+            await generateScheduledDiary(contact, { reason });
         }
     }
 }
 
+// 注意：手机浏览器/PWA 在后台或锁屏时可能暂停 JS 定时器。
+// 所以定时日记采用“前台定时器 + 页面恢复/打开聊天/打开日记时补检查”的方式实现。
 function startScheduledDiaryTimer() {
     if (scheduledDiaryTimer) {
         clearInterval(scheduledDiaryTimer);
     }
     scheduledDiaryTimer = setInterval(() => {
-        checkScheduledDiaries();
+        checkScheduledDiaries('timer').catch(error => console.error('定时日记轮询失败:', error));
     }, 60 * 1000);
 }
         // --- 新增：用于替代 confirm() 的自定义确认函数 ---
@@ -16600,7 +16641,9 @@ if (finalBackgroundUrl) {
                 contact.unreadCount = 0;
                 await kokoMemory.put('contacts', contact);
             }
-            await checkScheduledDiaries();
+            checkScheduledDiaries('open-chat').catch(error =>
+                console.error('打开聊天检查定时日记失败:', error)
+            );
         }
 
 // ▼▼▼ 用下面这个【完整修复版】替换旧的 renderChatMessages 函数 ▼▼▼
@@ -37125,14 +37168,18 @@ if (userSettings.qzoneSettings && userSettings.qzoneSettings.autoRefreshEnabled)
                 startAutomationTimer();
             }
             startScheduledDiaryTimer();
-            await checkScheduledDiaries();
+            await checkScheduledDiaries('startup');
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) {
-                    checkScheduledDiaries();
+                    checkScheduledDiaries('visibilitychange').catch(error =>
+                        console.error('页面恢复后检查定时日记失败:', error)
+                    );
                 }
             });
             window.addEventListener('focus', () => {
-                checkScheduledDiaries();
+                checkScheduledDiaries('focus').catch(error =>
+                    console.error('窗口聚焦后检查定时日记失败:', error)
+                );
             });
             showLockScreen();
             // ▲▲▲ 新代码添加结束 ▲▲▲
@@ -43906,6 +43953,9 @@ function showDiaryScreen(contactId = undefined) {
     titleEl.textContent = targetContact ? `${targetContact.name}的日记` : '日记';
     editBtn.style.display = targetContact ? 'block' : 'none';
     renderDiary();
+    checkScheduledDiaries('open-diary').catch(error =>
+        console.error('打开日记页检查定时日记失败:', error)
+    );
     requestAnimationFrame(() => {
         const list = document.getElementById('diary-content-list');
         if (list) list.scrollTop = 0;
@@ -44043,7 +44093,9 @@ function openDiarySettingsModal(contact) {
 }
 
 async function saveCurrentDiarySettings() {
-    const contact = state.contacts.find(item => item.id === state.activeChatId && !item.isGroup);
+    const contact =
+        state.contacts.find(item => item.id === state.activeChatId && !item.isGroup)
+        || state.contacts.find(item => item.id === currentDiaryViewContactId && !item.isGroup);
     if (!contact) return;
 
     await saveDiarySettingsForContact(contact, {
@@ -44054,7 +44106,61 @@ async function saveCurrentDiarySettings() {
     });
 
     closeDiarySettingsModal();
-    await checkScheduledDiaries();
+    await checkScheduledDiaries('save-settings');
+}
+
+async function generateDiaryNowForCurrentContact() {
+    const contact =
+        state.contacts.find(item => item.id === state.activeChatId && !item.isGroup)
+        || state.contacts.find(item => item.id === currentDiaryViewContactId && !item.isGroup);
+
+    if (!contact) {
+        alert('请先进入某个角色的私聊或该角色的日记页。');
+        return;
+    }
+
+    const btn = document.getElementById('generate-diary-now-btn');
+    const oldText = btn ? btn.textContent : '';
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '正在写日记...';
+        }
+
+        const generated = await generateScheduledDiary(contact, {
+            reason: 'manual',
+            silent: false
+        });
+
+        if (!generated) return;
+
+        renderDiary();
+
+        contact.diarySettings = {
+            ...getDefaultDiarySettings(),
+            ...(contact.diarySettings || {})
+        };
+        if (contact.diarySettings.enabled) {
+            const now = Date.now();
+            contact.diarySettings.lastDiaryAt = now;
+            contact.diarySettings.nextDiaryAt = calculateNextDiaryAt({
+                ...contact.diarySettings,
+                lastDiaryAt: now,
+                nextDiaryAt: contact.diarySettings.mode === 'interval' ? null : contact.diarySettings.nextDiaryAt
+            }, now);
+            await kokoMemory.put('contacts', contact);
+            refreshDiarySettingsPreview();
+        }
+    } catch (error) {
+        console.error('立即生成日记失败:', error);
+        alert(`立即生成日记失败：${error.message || error.name || '未知错误'}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = oldText || '立即生成一篇日记';
+        }
+    }
 }
 
 document.getElementById('back-from-diary').addEventListener('click', async (event) => {
@@ -44082,6 +44188,7 @@ document.getElementById('diary-content-list').addEventListener('click', (event) 
 });
 
 document.getElementById('close-diary-settings-modal').addEventListener('click', closeDiarySettingsModal);
+document.getElementById('generate-diary-now-btn')?.addEventListener('click', generateDiaryNowForCurrentContact);
 document.getElementById('save-diary-settings-btn').addEventListener('click', saveCurrentDiarySettings);
 ['diary-settings-enabled', 'diary-settings-mode', 'diary-settings-time', 'diary-settings-interval'].forEach(id => {
     const eventName = id === 'diary-settings-time' || id === 'diary-settings-interval' ? 'input' : 'change';
