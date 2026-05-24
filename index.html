@@ -3305,22 +3305,26 @@
 }
 /* --- 新的心声面板样式 (猫咪主题 - 硬编码颜色版) --- */
 #heart-voice-panel {
-    position: absolute;
-    top: 60px;
+    position: fixed;
+    bottom: calc(82px + env(safe-area-inset-bottom, 0px));
     left: 50%;
     transform: translateX(-50%);
-    width: min(360px, calc(100vw - 32px));
-    max-height: calc(100vh - 120px);
+    width: min(92vw, 380px);
+    max-height: 65vh;
     overflow-y: auto;
-    background-color: #FFFBF5;
-    border-radius: 16px;
-    border: 2px solid #EAD9D5;
-    box-shadow: 4px 4px 0px #EAD9D5;
+    z-index: 99999;
+    background: rgba(255, 250, 248, 0.96);
+    border: 1px solid rgba(240, 220, 216, 0.95);
+    border-radius: 22px;
+    box-shadow: 0 16px 48px rgba(80, 60, 56, 0.22);
+    padding: 14px;
     display: none;
     flex-direction: column;
-    gap: 12px;
-    padding: 18px 20px;
-    z-index: 100;
+    gap: 10px;
+}
+
+#heart-voice-panel[style*="display: flex"] {
+    display: flex !important;
 }
 
 .hv-panel-header {
@@ -8029,46 +8033,6 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 <div class="chat-option-item" id="block-contact-btn-menu"><i class="fas fa-ban fa-fw"></i> <span>拉黑TA</span></div>
 <div class="chat-option-item" id="contact-settings-btn-menu"><i class="fas fa-cog fa-fw"></i> <span>联系人设置</span></div>
                 </div>
-                <div id="heart-voice-panel" style="display: none;">
-    <div class="hv-panel-header">
-        <div>
-            <div class="hv-panel-title">心声记录</div>
-            <div class="hv-panel-subtitle" id="hv-character-name">点击角色头像查看心声</div>
-        </div>
-        <button class="hv-panel-close" id="close-heart-voice-panel" type="button">&times;</button>
-    </div>
-    <div id="hv-empty-state" class="hv-empty" style="display: none;">还没有心声记录</div>
-    <div id="hv-content-wrap">
-        <div class="hv-section-title">最近心声卡片</div>
-        <div class="hv-latest-card">
-            <div class="hv-item">
-                <span class="hv-icon">😊</span>
-                <span class="hv-label">情绪：</span>
-                <span class="hv-value" id="hv-emotion"></span>
-            </div>
-            <div class="hv-item">
-                <span class="hv-icon">💭</span>
-                <span class="hv-label">思绪：</span>
-                <span class="hv-value" id="hv-thoughts"></span>
-            </div>
-            <div class="hv-item">
-                <span class="hv-icon">❤️</span>
-                <span class="hv-label">心率：</span>
-                <span class="hv-value" id="hv-heart-rate"></span>
-            </div>
-            <div class="hv-item">
-                <span class="hv-icon">😶‍🌫️</span>
-                <span class="hv-label">醋意：</span>
-                <span class="hv-value" id="hv-jealousy"></span>
-            </div>
-        </div>
-        <button id="hv-toggle-history-btn" class="hv-toggle-history-btn" type="button">查看全部心声记录</button>
-        <div id="hv-history-section">
-            <div class="hv-section-title">历史心声列表</div>
-            <div id="hv-history-list" class="hv-record-list"></div>
-        </div>
-    </div>
-</div>
                 <div class="chat-messages" id="chat-messages">
                 </div>
                 <div id="emoticon-picker"></div>
@@ -12244,6 +12208,46 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 
     <button class="form-button" id="switch-to-create-npc-btn" style="background-color: #7f8c8d;">方式三：创建一个全新的 NPC</button>
 </div>
+    </div>
+</div>
+<div id="heart-voice-panel" class="heart-voice-panel" style="display: none;">
+    <div class="hv-panel-header">
+        <div>
+            <div class="hv-panel-title">心声记录</div>
+            <div class="hv-panel-subtitle" id="hv-character-name">点击角色头像查看心声</div>
+        </div>
+        <button class="hv-panel-close" id="close-heart-voice-panel" type="button">&times;</button>
+    </div>
+    <div id="hv-empty-state" class="hv-empty" style="display: none;">还没有心声记录</div>
+    <div id="hv-content-wrap">
+        <div class="hv-section-title">最近心声卡片</div>
+        <div class="hv-latest-card">
+            <div class="hv-item">
+                <span class="hv-icon">😊</span>
+                <span class="hv-label">情绪：</span>
+                <span class="hv-value" id="hv-emotion"></span>
+            </div>
+            <div class="hv-item">
+                <span class="hv-icon">💭</span>
+                <span class="hv-label">思绪：</span>
+                <span class="hv-value" id="hv-thoughts"></span>
+            </div>
+            <div class="hv-item">
+                <span class="hv-icon">❤️</span>
+                <span class="hv-label">心率：</span>
+                <span class="hv-value" id="hv-heart-rate"></span>
+            </div>
+            <div class="hv-item">
+                <span class="hv-icon">😶‍🌫️</span>
+                <span class="hv-label">醋意：</span>
+                <span class="hv-value" id="hv-jealousy"></span>
+            </div>
+        </div>
+        <button id="hv-toggle-history-btn" class="hv-toggle-history-btn" type="button">查看全部心声记录</button>
+        <div id="hv-history-section">
+            <div class="hv-section-title">历史心声列表</div>
+            <div id="hv-history-list" class="hv-record-list"></div>
+        </div>
     </div>
 </div>
 <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
@@ -23320,31 +23324,29 @@ function openHeartVoicePanel(characterId, chatContext) {
     const panel = document.getElementById('heart-voice-panel');
     const nameEl = document.getElementById('hv-character-name');
     const toggleBtn = document.getElementById('hv-toggle-history-btn');
-    if (!panel || !nameEl || !toggleBtn || !chatContext || !characterId) return;
+    if (!panel || !nameEl || !toggleBtn || !chatContext || !characterId) {
+        console.warn('[HV PANEL OPEN FAILED]', { panel, nameEl, toggleBtn, chatContext, characterId });
+        return;
+    }
 
     const targetChat = state.contacts.find(item => item.id === chatContext.id) || chatContext;
     const profile = targetChat.isGroup
         ? getProfileInGroupContext(targetChat, characterId)
         : (state.contacts.find(item => item.id === characterId) || targetChat);
     const records = getHeartVoiceRecords(targetChat, characterId);
-    const sourceLabel = targetChat.isGroup ? `当前群聊 · ${targetChat.name}` : '当前私聊';
-
-    console.log('[HV PANEL OPEN]', {
-        characterId,
-        targetChatId: targetChat?.id,
-        isGroup: targetChat?.isGroup,
-        recordsCount: records.length
-    });
 
     nameEl.textContent = profile?.name
-        ? `${profile.name} · ${sourceLabel}`
-        : sourceLabel;
+        ? `${profile.name} · ${targetChat.isGroup ? '当前群聊 · ' + targetChat.name : '当前私聊'}`
+        : '心声记录';
 
     renderHeartVoicePanelRecords(records);
     panel.classList.remove('show-history');
     panel.dataset.characterId = normalizeMessageSenderId(characterId);
     panel.dataset.chatId = targetChat.id || '';
     panel.style.display = 'flex';
+    panel.style.pointerEvents = 'auto';
+
+    console.log('[HV PANEL OPENED]', { characterId, chatId: targetChat.id, recordsCount: records.length });
 }
 
 async function cleanBadHeartVoices() {
