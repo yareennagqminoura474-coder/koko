@@ -8025,6 +8025,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
     <div id="chat-header-badges" class="chat-header-badges"></div>
     <div>
         <i class="fas fa-search action-btn" id="search-chat-btn" title="搜索聊天记录" style="margin-right: 15px; position: relative; z-index: 10000;" onclick="event.stopPropagation(); showChatSearch();"></i>
+        <i class="fas fa-heart action-btn" id="test-heart-voice-btn" title="测试心声入口" style="margin-right: 15px;"></i>
         <i class="fas fa-ellipsis-v action-btn" id="more-chat-options-btn" title="更多操作"></i>
     </div>
 </div>
@@ -17601,10 +17602,12 @@ if (finalBackgroundUrl) {
     const chatContactNameEl = document.getElementById('chat-contact-name');
     chatContactNameEl.textContent = contact.name;
     if (!contact.isGroup) {
+        chatContactNameEl.dataset.action = 'open-heart-voice';
         chatContactNameEl.dataset.heartVoiceCharacterId = contact.id;
         chatContactNameEl.dataset.heartVoiceChatId = contact.id;
         chatContactNameEl.title = '查看心声记录';
     } else {
+        delete chatContactNameEl.dataset.action;
         delete chatContactNameEl.dataset.heartVoiceCharacterId;
         delete chatContactNameEl.dataset.heartVoiceChatId;
         chatContactNameEl.removeAttribute('title');
@@ -18493,10 +18496,10 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
                 ? `data-sender-id="${normalizedSenderId}" data-chat-id="${contact.id || ''}"`
                 : '';
             const heartVoiceAvatarAttrs = heartVoiceCharacterId
-                ? `data-heart-voice-character-id="${heartVoiceCharacterId}" data-heart-voice-chat-id="${contact.id}" title="查看心声记录"`
+                ? `data-action="open-heart-voice" data-heart-voice-character-id="${heartVoiceCharacterId}" data-heart-voice-chat-id="${contact.id}" title="查看心声记录"`
                 : '';
             const heartVoiceAuthorAttrs = heartVoiceCharacterId
-                ? `data-heart-voice-character-id="${heartVoiceCharacterId}" data-heart-voice-chat-id="${contact.id}" title="查看心声记录"`
+                ? `data-action="open-heart-voice" data-heart-voice-character-id="${heartVoiceCharacterId}" data-heart-voice-chat-id="${contact.id}" title="查看心声记录"`
                 : '';
 
             wrapper.innerHTML = `
@@ -18511,22 +18514,6 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
         </div>
         ${replyButtonHTML} ${recallButtonHTML}
     `;
-            const openHeartVoiceFromMessage = (source, event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                if (event.stopImmediatePropagation) event.stopImmediatePropagation();
-                const liveChat = state.contacts.find(c => c.id === contact.id) || contact;
-                console.log('[HV CLICK]', { characterId: heartVoiceCharacterId, chatId: liveChat.id, source });
-                openHeartVoicePanelForCharacter(heartVoiceCharacterId, liveChat.id);
-            };
-            const avatarEl = wrapper.querySelector('.message-avatar');
-            if (avatarEl && heartVoiceCharacterId) {
-                avatarEl.addEventListener('click', (event) => openHeartVoiceFromMessage('avatar', event));
-            }
-            const authorNameEl = wrapper.querySelector('.message-author-name');
-            if (authorNameEl && heartVoiceCharacterId) {
-                authorNameEl.addEventListener('click', (event) => openHeartVoiceFromMessage('name', event));
-            }
             wrapper.addEventListener('click', () => handleMessageSelection(wrapper, message));
             return wrapper;
         }
@@ -23355,8 +23342,11 @@ function openHeartVoicePanelForCharacter(characterId, chatId) {
     console.log('[HV PANEL FOUND]', !!panel);
     const nameEl = document.getElementById('hv-character-name');
     const toggleBtn = document.getElementById('hv-toggle-history-btn');
-    const chat = state.contacts.find(item => item.id === chatId) || null;
-    if (!panel || !nameEl || !toggleBtn || !chat || !characterId || !chatId) {
+    const requestedChatId = chatId || state.activeChatId;
+    const chat = state.contacts.find(item => item.id === requestedChatId)
+        || state.contacts.find(item => item.id === state.activeChatId)
+        || null;
+    if (!panel || !nameEl || !toggleBtn || !chat || !characterId || !requestedChatId) {
         console.warn('[HV OPEN FAILED]', { characterId, chatId, panel, chat });
         return;
     }
@@ -41206,6 +41196,9 @@ document.getElementById('chat-messages').addEventListener('click', async (e) => 
     }
 
     if (clickedAvatar) {
+        if (e.target.closest('[data-action="open-heart-voice"]')) {
+            return;
+        }
         if (editModeState.active) return;
         const avatarWrapper = clickedAvatar.closest('.message-wrapper');
         const senderId = clickedAvatar.dataset.senderId
@@ -43983,7 +43976,7 @@ document.getElementById('map-list').addEventListener('click', async (e) => {
 const heartVoicePanel = document.getElementById('heart-voice-panel');
 const closeHeartVoicePanelBtn = document.getElementById('close-heart-voice-panel');
 const toggleHeartVoiceHistoryBtn = document.getElementById('hv-toggle-history-btn');
-const chatContactNameEl = document.getElementById('chat-contact-name');
+const testHeartVoiceBtn = document.getElementById('test-heart-voice-btn');
 
 if (closeHeartVoicePanelBtn) {
     closeHeartVoicePanelBtn.addEventListener('click', (event) => {
@@ -44001,16 +43994,19 @@ if (toggleHeartVoiceHistoryBtn) {
     });
 }
 
-if (chatContactNameEl) {
-    chatContactNameEl.addEventListener('click', (event) => {
-        const chat = state.contacts.find(item => item.id === state.activeChatId);
-        if (!chat || chat.isGroup) return;
+if (testHeartVoiceBtn) {
+    testHeartVoiceBtn.onclick = (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
-        console.log('[HV CLICK]', { characterId: chat.id, chatId: chat.id, source: 'header' });
+
+        const chat = state.contacts.find(c => c.id === state.activeChatId);
+        if (!chat || chat.isGroup) {
+            alert('请先进入私聊测试心声');
+            return;
+        }
+
         openHeartVoicePanelForCharacter(chat.id, chat.id);
-    });
+    };
 }
 
 // 点击心声面板本身不会关闭它
@@ -44018,9 +44014,13 @@ heartVoicePanel.addEventListener('click', e => e.stopPropagation());
 
 // 点击页面其他地方，关闭心声面板
 document.addEventListener('click', (e) => {
-    if (heartVoicePanel.style.display === 'flex') {
-        closeHeartVoicePanel();
-    }
+    const panel = document.getElementById('heart-voice-panel');
+    if (!panel || panel.style.display !== 'flex') return;
+
+    if (e.target.closest('#heart-voice-panel')) return;
+    if (e.target.closest('[data-action="open-heart-voice"]')) return;
+
+    closeHeartVoicePanel();
 });
 // ▲▲▲ 粘贴到这里结束 ▲▲▲
 // =========== ▲▲▲ 地图功能 - 事件绑定（缺失部分） END ▲▲▲ ========
@@ -45830,6 +45830,24 @@ document.getElementById('clean-bad-heart-voices-btn')?.addEventListener('click',
 const heartVoicePanelNode = document.getElementById('heart-voice-panel');
 if (heartVoicePanelNode && heartVoicePanelNode.parentElement !== document.body) {
     document.body.appendChild(heartVoicePanelNode);
+}
+if (!window.__heartVoiceGlobalClickBound) {
+    document.addEventListener('click', function(event) {
+        const trigger = event.target.closest('[data-action="open-heart-voice"]');
+        if (!trigger) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+
+        const characterId = trigger.dataset.heartVoiceCharacterId;
+        const chatId = trigger.dataset.heartVoiceChatId || state.activeChatId;
+
+        console.log('[HV GLOBAL CLICK]', { characterId, chatId, trigger });
+
+        openHeartVoicePanelForCharacter(characterId, chatId);
+    }, true);
+    window.__heartVoiceGlobalClickBound = true;
 }
 attachEventListeners();
 // --- 紧急修复：重新绑定搜索按钮 ---
