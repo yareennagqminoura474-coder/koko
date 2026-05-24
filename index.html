@@ -12107,10 +12107,11 @@ const dbConfig = {
     stockEvents: { keyPath: 'id' },
     forumCategories: { keyPath: 'id' },
     surveyLibrary: { keyPath: 'id' },
-    themePresets: { keyPath: 'id' }
+    themePresets: { keyPath: 'id' },
+    knowledge: { keyPath: 'id' }
 };
 // ▼▼▼ 把这里的版本号数字加 1 (例如 13 -> 19) ▼▼▼
-const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 25, dbConfig);
+const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 26, dbConfig);
 // ▲▲▲ 版本号修改结束 ▲▲▲
 
     // --------------------------------------------------------------------
@@ -12384,6 +12385,7 @@ function parseLyrics(lrc) {
         // ✨✨✨ 用下面这个完整的代码块，替换掉你原来的 INITIAL_STATE ✨✨✨
         const INITIAL_STATE = {
             contacts: [],
+            knowledge: [],
             worldBooks: [],
             posts: [],
             userPersonaPresets: [],
@@ -12433,6 +12435,8 @@ function parseLyrics(lrc) {
             forumCategories: [],
             aiTypingStatus: {},
             latestAiRequestId: {},
+            activeGenerationId: null,
+            activeGenerationByChat: {},
             debugAiVisible: false,
             // ▼▼▼ 在这里添加新代码 ▼▼▼
             automationSettings: {
@@ -12595,7 +12599,8 @@ async function loadDataFromDB() {
             snoopApiSettings,
             forumCategories,
             emoticonGroups,
-            themePresets
+            themePresets,
+            knowledge
         ] = await Promise.all([
             kokoMemory.getAll('contacts'),
             kokoMemory.getAll('worldBooks'),
@@ -12618,7 +12623,8 @@ async function loadDataFromDB() {
             kokoMemory.get('snoopApiSettings', 'main'),
             kokoMemory.getAll('forumCategories'),
             kokoMemory.getAll('emoticonGroups'),
-            kokoMemory.getAll('themePresets')
+            kokoMemory.getAll('themePresets'),
+            kokoMemory.getAll('knowledge')
         ]);
 
         if (!myProfile) {
@@ -12674,6 +12680,7 @@ async function loadDataFromDB() {
             state.snoopApiSettings = snoopApiSettings ? { ...INITIAL_STATE.snoopApiSettings, ...snoopApiSettings } : { id: 'main', ...INITIAL_STATE.snoopApiSettings };
             state.forumCategories = forumCategories || []; // <-- ✨ 在这里添加新的一行
             state.themePresets = themePresets || [];
+            state.knowledge = (knowledge || []).map((entry, index) => normalizeKnowledgeEntry(entry, index));
                         // ▼▼▼▼▼▼ 把这段新代码粘贴到这里 ▼▼▼▼▼▼
             // 初始化分组逻辑
             if (!emoticonGroups || emoticonGroups.length === 0) {
@@ -12711,20 +12718,51 @@ async function loadDataFromDB() {
             isInitialPostLoad = state.posts.length < 20;
         }
         
-        state.contacts.forEach(contact => {
+        const migratedContacts = [];
+        state.contacts.forEach((contact, contactIndex) => {
+            let contactChanged = false;
             contact.history = contact.history || [];
             contact.diary = contact.diary || [];
             contact.permanent_memories = contact.permanent_memories || [];
             contact.smsHistory = contact.smsHistory || [];
             contact.blockedStatus = contact.blockedStatus || 'none'; 
+            contact.lastRecapTimestamp = Number(contact.lastRecapTimestamp) || 0;
             contact.diarySettings = {
                 ...getDefaultDiarySettings(),
                 ...(contact.diarySettings || {})
             };
-            contact.history.forEach((msg, index) => { 
-                if (!msg.id) msg.id = `msg_${Date.now()}_${index}`; 
-                if (!msg.type) msg.type = 'text';
+            const normalizedHistory = contact.history.map((msg, index) => {
+                const normalized = normalizeMessageRecord(msg, contact, index, 'history');
+                if (
+                    normalized.id !== msg.id ||
+                    normalized.chatId !== msg.chatId ||
+                    normalized.senderId !== msg.senderId ||
+                    normalized.type !== msg.type ||
+                    normalized.subType !== msg.subType ||
+                    JSON.stringify(normalized.perceivers || []) !== JSON.stringify(msg.perceivers || []) ||
+                    normalized.text !== msg.text
+                ) {
+                    contactChanged = true;
+                }
+                return normalized;
             });
+            const normalizedSmsHistory = contact.smsHistory.map((msg, index) => {
+                const normalized = normalizeMessageRecord(msg, contact, index, 'smsHistory');
+                if (
+                    normalized.id !== msg.id ||
+                    normalized.chatId !== msg.chatId ||
+                    normalized.senderId !== msg.senderId ||
+                    normalized.type !== msg.type ||
+                    normalized.subType !== msg.subType ||
+                    JSON.stringify(normalized.perceivers || []) !== JSON.stringify(msg.perceivers || []) ||
+                    normalized.text !== msg.text
+                ) {
+                    contactChanged = true;
+                }
+                return normalized;
+            });
+            contact.history = normalizedHistory;
+            contact.smsHistory = normalizedSmsHistory;
             contact.worldBooks = contact.worldBooks || []; 
             contact.userPersona = contact.userPersona || '';
             contact.thoughtPreset = contact.thoughtPreset || 'deep_roleplay_regex'; 
@@ -12758,7 +12796,16 @@ async function loadDataFromDB() {
             contact.userVoiceProvider = contact.userVoiceProvider || '';
             contact.userVoiceId = contact.userVoiceId || '';
             // ▲▲▲ 粘贴结束 ▲▲▲
+            if (contactChanged) {
+                migratedContacts.push(contact);
+            }
         });
+        if (migratedContacts.length > 0) {
+            await kokoMemory.bulkPut('contacts', migratedContacts);
+        }
+        if (Array.isArray(state.knowledge) && state.knowledge.length > 0) {
+            await kokoMemory.bulkPut('knowledge', state.knowledge);
+        }
         state.transactions = (state.transactions || []).map(tx => ({
             ...tx,
             amount: Number(tx.amount) || 0,
@@ -12880,6 +12927,494 @@ function normalizeRoleId(roleId) {
 function stripHtmlTags(text) {
     if (typeof text !== 'string') return '';
     return text.replace(/<[^>]+>/g, '').trim();
+}
+
+const RECAP_MESSAGE_COUNT_THRESHOLD = 18;
+const RECAP_CHAR_THRESHOLD = 2600;
+const RECAP_BUFFER_COUNT = 6;
+const RECAP_MAX_MESSAGES_PER_RUN = 24;
+const MAX_RECALLED_KNOWLEDGE_ITEMS = 5;
+const KNOWLEDGE_FALLBACK_CHAR_LIMIT = 2200;
+const PRIVATE_VISIBLE_WINDOW_LIMIT = 18;
+const GROUP_VISIBLE_WINDOW_LIMIT = 24;
+
+function uniqueStringArray(values = []) {
+    return [...new Set((values || []).filter(Boolean).map(value => String(value)))];
+}
+
+function normalizeEntityIdForVisibility(entityId) {
+    const normalized = normalizeRoleId(entityId);
+    return normalized === 'user' ? 'user' : normalized;
+}
+
+function normalizeMessageSenderId(senderId) {
+    return normalizeEntityIdForVisibility(senderId || 'user');
+}
+
+function getChatById(chatId) {
+    return (state.contacts || []).find(contact => contact.id === chatId) || null;
+}
+
+function getNormalizedChatParticipantIds(chat) {
+    if (!chat) return [];
+    if (chat.isGroup) {
+        const npcIds = Array.isArray(chat.npcMembers) ? chat.npcMembers.map(npc => npc.id) : [];
+        return uniqueStringArray([...(chat.members || []), ...npcIds].map(normalizeEntityIdForVisibility));
+    }
+    return uniqueStringArray(['user', chat.id].map(normalizeEntityIdForVisibility));
+}
+
+function buildDefaultPerceiversForChat(chat, senderId = 'user', historyArray = 'history') {
+    if (!chat) return uniqueStringArray([normalizeMessageSenderId(senderId)]);
+    if (historyArray === 'smsHistory') {
+        return uniqueStringArray(['user', chat.id].map(normalizeEntityIdForVisibility));
+    }
+    if (senderId === 'system_instruction') {
+        const aiOnlyPerceivers = getNormalizedChatParticipantIds(chat).filter(id => id !== 'user');
+        return aiOnlyPerceivers.length > 0 ? aiOnlyPerceivers : getNormalizedChatParticipantIds(chat);
+    }
+    return getNormalizedChatParticipantIds(chat);
+}
+
+function getMessageTextContent(message = {}) {
+    if (typeof message.text === 'string' && message.text.trim()) {
+        return stripHtmlTags(message.text);
+    }
+    if (typeof message.content === 'string') {
+        return stripHtmlTags(message.content);
+    }
+    if (message.content && typeof message.content.text === 'string') {
+        return stripHtmlTags(message.content.text);
+    }
+    if (message.content && typeof message.content.description === 'string') {
+        return stripHtmlTags(message.content.description);
+    }
+    if (message.content && typeof message.content.name === 'string') {
+        return stripHtmlTags(message.content.name);
+    }
+    if (message.content && typeof message.content.title === 'string') {
+        return stripHtmlTags(message.content.title);
+    }
+    if (message.type === 'image' || message.type === 'uploaded_image') return '[图片]';
+    if (message.type === 'voice') return '[语音]';
+    if (message.type === 'heart_voice') return '[心声]';
+    if (message.type === 'system_notification') return stripHtmlTags(message.content || '');
+    return '';
+}
+
+function normalizeMessageRecord(message, chat, index = 0, historyArray = 'history') {
+    const normalized = { ...(message || {}) };
+    normalized.timestamp = Number(normalized.timestamp) || Date.now();
+    normalized.id = normalized.id || `${historyArray}_${chat?.id || 'chat'}_${normalized.timestamp}_${index}`;
+    normalized.chatId = normalized.chatId || chat?.id || '';
+    normalized.type = normalized.type || 'text';
+    normalized.subType = normalized.subType || null;
+
+    const rawSenderId = normalized.senderId || normalized.sender || 'user';
+    normalized.senderId = normalizeMessageSenderId(rawSenderId);
+    normalized.sender = normalized.sender || normalized.senderId;
+    normalized.perceivers = Array.isArray(normalized.perceivers) && normalized.perceivers.length > 0
+        ? uniqueStringArray(normalized.perceivers.map(normalizeEntityIdForVisibility))
+        : buildDefaultPerceiversForChat(chat, rawSenderId, historyArray);
+
+    if (typeof normalized.text !== 'string' || !normalized.text.trim()) {
+        const textContent = getMessageTextContent(normalized);
+        if (textContent) normalized.text = textContent;
+    }
+
+    if (!normalized.time) {
+        normalized.time = new Date(normalized.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    return normalized;
+}
+
+function normalizeKnowledgeEntry(entry, index = 0) {
+    const normalized = { ...(entry || {}) };
+    normalized.summary = String(normalized.summary || normalized.content || '').trim();
+    normalized.id = normalized.id || `knowledge_${normalized.chatId || 'global'}_${normalized.startTime || normalized.timestamp || Date.now()}_${index}`;
+    normalized.perceivers = uniqueStringArray(
+        (normalized.perceivers || normalized.targetRoleIds || []).map(normalizeEntityIdForVisibility)
+    );
+    normalized.startTime = Number(normalized.startTime || normalized.timestamp || Date.now()) || Date.now();
+    normalized.lastMessageAt = Number(
+        normalized.lastMessageAt || normalized.last_message_at || normalized.endTime || normalized.startTime || Date.now()
+    ) || normalized.startTime;
+    normalized.recallTitle = String(normalized.recallTitle || normalized.title || '').trim();
+    normalized.recallKeywords = uniqueStringArray(
+        Array.isArray(normalized.recallKeywords)
+            ? normalized.recallKeywords
+            : (Array.isArray(normalized.keywords) ? normalized.keywords : [])
+    );
+    normalized.isEternal = normalized.isEternal === true;
+    normalized.chatId = normalized.chatId || normalized.sceneId || '';
+    normalized.sourceType = normalized.sourceType || normalized.sceneType || 'knowledge';
+    return normalized;
+}
+
+function getAllChatMessages(chats = state.contacts) {
+    return (chats || []).flatMap(chat =>
+        (chat.history || []).map((message, index) => normalizeMessageRecord(message, chat, index, 'history'))
+    );
+}
+
+function isDebugOrOocLikeMessage(message = {}) {
+    const subType = String(message.subType || '').toLowerCase();
+    if (subType === 'ooc' || subType === 'date_ooc' || subType === 'system_debug' || subType === 'debug') return true;
+    if (message.sender === 'system_instruction') return true;
+    if (message.type === 'heart_voice') return true;
+    if (message.type === 'system_notification' && shouldIgnoreSystemNotification(String(message.content || ''))) return true;
+    return false;
+}
+
+function getVisibleUnrecappedMessagesForEntity(entityId, messages, chats, limit = PRIVATE_VISIBLE_WINDOW_LIMIT) {
+    const normalizedEntityId = normalizeEntityIdForVisibility(entityId);
+    const chatsById = new Map((chats || []).map(chat => [chat.id, chat]));
+    return (messages || [])
+        .filter(rawMessage => {
+            const chat = chatsById.get(rawMessage.chatId);
+            if (!chat) return false;
+            const message = normalizeMessageRecord(rawMessage, chat, 0, 'history');
+            if (isDebugOrOocLikeMessage(message)) return false;
+            if (!Array.isArray(message.perceivers) || !message.perceivers.includes(normalizedEntityId)) return false;
+            const lastRecapTimestamp = Number(chat.lastRecapTimestamp) || 0;
+            if ((Number(message.timestamp) || 0) <= lastRecapTimestamp) return false;
+            const participantIds = getNormalizedChatParticipantIds(chat);
+            const isEntityInChat = participantIds.includes(normalizedEntityId);
+            const isOwnMessage = normalizeMessageSenderId(message.senderId || message.sender) === normalizedEntityId;
+            return isEntityInChat || isOwnMessage;
+        })
+        .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0))
+        .slice(0, Math.max(0, limit));
+}
+
+function filterKnowledgeForCharacter(knowledge, characterId) {
+    const normalizedCharacterId = normalizeEntityIdForVisibility(characterId);
+    return (knowledge || [])
+        .map((entry, index) => normalizeKnowledgeEntry(entry, index))
+        .filter(entry => entry.summary && entry.perceivers.includes(normalizedCharacterId));
+}
+
+function getUnionKnowledgeForCharacters(knowledge, characterIds) {
+    const deduped = new Map();
+    uniqueStringArray((characterIds || []).map(normalizeEntityIdForVisibility)).forEach(characterId => {
+        filterKnowledgeForCharacter(knowledge, characterId).forEach(entry => {
+            if (!deduped.has(entry.id)) {
+                deduped.set(entry.id, entry);
+            } else {
+                const merged = deduped.get(entry.id);
+                merged.perceivers = uniqueStringArray([...(merged.perceivers || []), ...(entry.perceivers || [])]);
+                deduped.set(entry.id, merged);
+            }
+        });
+    });
+    return [...deduped.values()].sort((left, right) => {
+        if (left.isEternal !== right.isEternal) return left.isEternal ? -1 : 1;
+        return (Number(right.lastMessageAt || right.startTime) || 0) - (Number(left.lastMessageAt || left.startTime) || 0);
+    });
+}
+
+function trimKnowledgeForCharacters(knowledge, characterIds, maxChars = KNOWLEDGE_FALLBACK_CHAR_LIMIT) {
+    const visibleKnowledge = getUnionKnowledgeForCharacters(knowledge, characterIds);
+    const trimmed = [];
+    let usedChars = 0;
+    for (const entry of visibleKnowledge) {
+        const title = entry.recallTitle || '记忆';
+        const nextLineLength = `${title}${entry.summary}`.length + 24;
+        if (trimmed.length > 0 && usedChars + nextLineLength > maxChars) break;
+        trimmed.push(entry);
+        usedChars += nextLineLength;
+    }
+    return trimmed;
+}
+
+function normalizeRecallText(text = '') {
+    return String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function extractRecallTerms(text = '') {
+    return uniqueStringArray(normalizeRecallText(text).match(/[a-z0-9\u4e00-\u9fff]{2,}/g) || []);
+}
+
+function scoreKnowledgeForQuery(entry, queryText, recallTerms) {
+    const normalizedQuery = normalizeRecallText(queryText);
+    if (!normalizedQuery) return entry.isEternal ? 1 : 0;
+
+    let score = entry.isEternal ? 1 : 0;
+    const title = normalizeRecallText(entry.recallTitle || '');
+    const summary = normalizeRecallText(entry.summary || '');
+    if (title && normalizedQuery.includes(title)) score += 8;
+    if (summary && recallTerms.some(term => summary.includes(term))) score += 1;
+
+    (entry.recallKeywords || []).forEach(keyword => {
+        const normalizedKeyword = normalizeRecallText(keyword);
+        if (!normalizedKeyword) return;
+        if (normalizedQuery.includes(normalizedKeyword)) {
+            score += 5;
+            return;
+        }
+        if (recallTerms.some(term => normalizedKeyword.includes(term) || term.includes(normalizedKeyword))) {
+            score += 3;
+        }
+    });
+
+    if (!title && summary && recallTerms.some(term => summary.includes(term))) {
+        score += 1;
+    } else if (title && recallTerms.some(term => title.includes(term) || term.includes(title))) {
+        score += 2;
+    }
+
+    return score;
+}
+
+function recallKnowledgeForCharacters(knowledge, characterIds, queryText, maxItems = MAX_RECALLED_KNOWLEDGE_ITEMS, fallbackChars = KNOWLEDGE_FALLBACK_CHAR_LIMIT) {
+    const recallTerms = extractRecallTerms(queryText);
+    const visibleKnowledge = getUnionKnowledgeForCharacters(knowledge, characterIds)
+        .map(entry => ({ entry, score: scoreKnowledgeForQuery(entry, queryText, recallTerms) }))
+        .sort((left, right) => {
+            if (right.score !== left.score) return right.score - left.score;
+            return (Number(right.entry.lastMessageAt || right.entry.startTime) || 0) - (Number(left.entry.lastMessageAt || left.entry.startTime) || 0);
+        });
+
+    const matched = visibleKnowledge.filter(item => item.score > 0).slice(0, Math.max(0, maxItems)).map(item => item.entry);
+    if (matched.length > 0) return matched;
+    return trimKnowledgeForCharacters(knowledge, characterIds, fallbackChars);
+}
+
+function resolvePromptEntityName(entityId, chat = null, entityNameById = new Map()) {
+    const normalizedId = normalizeEntityIdForVisibility(entityId);
+    if (entityNameById.has(normalizedId)) return entityNameById.get(normalizedId);
+    if (normalizedId === 'user') return state.myProfile?.name || '用户';
+    const profile = getProfileByRoleId(normalizedId, chat && chat.isGroup ? chat : null);
+    return profile?.name || normalizedId || '未知成员';
+}
+
+function formatKnowledgeForPrompt(knowledge, characters = [], users = [], now = Date.now()) {
+    if (!knowledge || knowledge.length === 0) return '(暂无相关长期记忆)';
+
+    const entityNameById = new Map();
+    const characterIdSet = new Set((characters || []).map(character => normalizeEntityIdForVisibility(character.id)));
+    (users || []).forEach(user => entityNameById.set(normalizeEntityIdForVisibility(user.id), user.name || '用户'));
+    (characters || []).forEach(character => entityNameById.set(normalizeEntityIdForVisibility(character.id), character.name || character.id));
+    entityNameById.set('user', state.myProfile?.name || '用户');
+
+    return knowledge.map((entry, index) => {
+        const normalizedEntry = normalizeKnowledgeEntry(entry, index);
+        const visibleIds = (normalizedEntry.perceivers || []).map(id => normalizeEntityIdForVisibility(id));
+        const prioritizedIds = visibleIds.filter(id => characterIdSet.has(id));
+        const idsForLabel = prioritizedIds.length > 0 ? prioritizedIds : visibleIds;
+        const visibleNames = uniqueStringArray(idsForLabel.map(id => entityNameById.get(id) || id));
+        const visibilityLabel = visibleNames.length <= 1
+            ? `仅${visibleNames[0] || '相关角色'}可用`
+            : `可由${visibleNames.join('、')}使用`;
+        const title = normalizedEntry.recallTitle || '记忆';
+        const timeTag = formatHybridTimeForAI(normalizedEntry.startTime || normalizedEntry.lastMessageAt || now);
+        return `- [${visibilityLabel}] ${title} @ ${timeTag}: ${normalizedEntry.summary}`;
+    }).join('\n');
+}
+
+function buildPermanentKnowledgeEntriesForProfile(profile) {
+    if (!profile || !Array.isArray(profile.permanent_memories)) return [];
+    return profile.permanent_memories.map((memory, index) => normalizeKnowledgeEntry({
+        id: memory.id || `perm_${profile.id}_${index}`,
+        summary: memory.content || memory.summary || '',
+        perceivers: [profile.id],
+        startTime: Number(memory.timestamp) || Date.now(),
+        lastMessageAt: Number(memory.timestamp) || Date.now(),
+        recallTitle: memory.recallTitle || memory.title || '',
+        recallKeywords: memory.recallKeywords || memory.keywords || [],
+        isEternal: true,
+        chatId: profile.id,
+        sourceType: 'permanent_memory'
+    }, index)).filter(entry => entry.summary);
+}
+
+function buildKnowledgeRecallQueryFromMessages(messages = [], chat = null) {
+    return (messages || [])
+        .map(message => describeMessageForUnifiedMemory(message, { group: chat && chat.isGroup ? chat : null }))
+        .filter(Boolean)
+        .map(item => `${item.authorName}: ${item.content}`)
+        .join('\n');
+}
+
+function buildVisibleWindowUnionForCharacters(characterIds, chats = state.contacts, limitPerEntity = 8) {
+    const allMessages = getAllChatMessages(chats);
+    const deduped = new Map();
+    uniqueStringArray((characterIds || []).map(normalizeEntityIdForVisibility)).forEach(characterId => {
+        getVisibleUnrecappedMessagesForEntity(characterId, allMessages, chats, limitPerEntity).forEach(message => {
+            const key = message.id || `${message.chatId}_${message.timestamp}_${message.senderId}`;
+            const existing = deduped.get(key);
+            if (existing) {
+                existing.visibleTo = uniqueStringArray([...(existing.visibleTo || []), characterId]);
+            } else {
+                deduped.set(key, { ...message, visibleTo: [characterId] });
+            }
+        });
+    });
+    return [...deduped.values()]
+        .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0))
+        .slice(0, GROUP_VISIBLE_WINDOW_LIMIT)
+        .sort((left, right) => (Number(left.timestamp) || 0) - (Number(right.timestamp) || 0));
+}
+
+function formatVisibleMessagesForPrompt(messages, options = {}) {
+    if (!messages || messages.length === 0) return '(暂无未总结的可见消息)';
+
+    const chats = options.chats || state.contacts || [];
+    const chatsById = new Map(chats.map(chat => [chat.id, chat]));
+    const entityNameById = new Map();
+    const characterIdSet = new Set((options.characters || []).map(character => normalizeEntityIdForVisibility(character.id)));
+    (options.users || []).forEach(user => entityNameById.set(normalizeEntityIdForVisibility(user.id), user.name || '用户'));
+    (options.characters || []).forEach(character => entityNameById.set(normalizeEntityIdForVisibility(character.id), character.name || character.id));
+    entityNameById.set('user', state.myProfile?.name || '用户');
+
+    return messages.map((message, index) => {
+        const chat = chatsById.get(message.chatId);
+        const described = describeMessageForUnifiedMemory(message, { group: chat && chat.isGroup ? chat : null });
+        const content = described?.content || getMessageTextContent(message);
+        if (!content) return null;
+
+        const visibleIds = (message.visibleTo || message.perceivers || []).map(id => normalizeEntityIdForVisibility(id));
+        const prioritizedIds = visibleIds.filter(id => characterIdSet.has(id));
+        const idsForLabel = prioritizedIds.length > 0 ? prioritizedIds : visibleIds;
+        const visibleNames = uniqueStringArray(idsForLabel.map(id => entityNameById.get(id) || id));
+        const visibilityLabel = visibleNames.length <= 1
+            ? `仅${visibleNames[0] || '相关角色'}可见`
+            : `可由${visibleNames.join('、')}看见`;
+        const sceneLabel = chat
+            ? `${chat.isGroup ? '群聊' : '私聊'}-${chat.name}`
+            : (message.chatId || '聊天');
+        const speakerName = described?.authorName || resolvePromptEntityName(message.senderId || message.sender, chat, entityNameById);
+        return `- [${visibilityLabel}] [${sceneLabel}] ${speakerName}: ${content}`;
+    }).filter(Boolean).join('\n');
+}
+
+function buildRecapTranscript(chat, messages) {
+    return (messages || [])
+        .map(message => describeMessageForUnifiedMemory(message, { group: chat && chat.isGroup ? chat : null }))
+        .filter(Boolean)
+        .map(item => `[${item.rawType === 'text' || item.rawType === 'html' || item.rawType === 'video_call_text' ? '对白' : '事件'}] ${item.authorName}: ${item.content}`)
+        .join('\n');
+}
+
+function extractJsonObjectFromText(text = '') {
+    const fencedMatch = String(text || '').match(/```json\s*([\s\S]*?)```/i);
+    const jsonCandidate = fencedMatch ? fencedMatch[1] : String(text || '');
+    const objectMatch = jsonCandidate.match(/\{[\s\S]*\}/);
+    if (!objectMatch) {
+        throw new Error('总结结果里没有找到有效的 JSON 对象。');
+    }
+    return JSON.parse(objectMatch[0]);
+}
+
+async function maybeRecapChatKnowledge(chat, options = {}) {
+    if (!chat || !Array.isArray(chat.history) || chat._isRecapping) return false;
+
+    chat.lastRecapTimestamp = Number(chat.lastRecapTimestamp) || 0;
+    chat.history = (chat.history || []).map((message, index) => normalizeMessageRecord(message, chat, index, 'history'));
+
+    const bufferCount = options.bufferCount || RECAP_BUFFER_COUNT;
+    const maxMessagesPerRun = options.maxMessagesPerRun || RECAP_MAX_MESSAGES_PER_RUN;
+    const eligibleMessages = chat.history
+        .filter(message => !isDebugOrOocLikeMessage(message))
+        .filter(message => (Number(message.timestamp) || 0) > chat.lastRecapTimestamp)
+        .sort((left, right) => (Number(left.timestamp) || 0) - (Number(right.timestamp) || 0));
+
+    const candidateCount = Math.max(0, eligibleMessages.length - bufferCount);
+    if (candidateCount <= 0) return false;
+
+    const messagesToSummarize = eligibleMessages.slice(0, Math.min(candidateCount, maxMessagesPerRun));
+    const totalChars = messagesToSummarize.reduce((sum, message) => sum + (getMessageTextContent(message).length || 0), 0);
+    if (messagesToSummarize.length < RECAP_MESSAGE_COUNT_THRESHOLD && totalChars < RECAP_CHAR_THRESHOLD) {
+        return false;
+    }
+
+    const recapTranscript = buildRecapTranscript(chat, messagesToSummarize);
+    if (!recapTranscript.trim()) return false;
+
+    const perceivers = getNormalizedChatParticipantIds(chat);
+    const chatTypeLabel = chat.isGroup ? '群聊' : '私聊';
+    const firstTimestamp = Number(messagesToSummarize[0]?.timestamp) || Date.now();
+    const lastTimestamp = Number(messagesToSummarize[messagesToSummarize.length - 1]?.timestamp) || firstTimestamp;
+
+    chat._isRecapping = true;
+    try {
+        const requestMessages = [
+            {
+                role: 'system',
+                content: `你是一个严谨的剧情整理器。请从给定聊天片段里提炼 0-6 条“长期可记住的事实”。请严格输出 JSON，不要输出解释、Markdown 或代码块。每条 fact 都要平实概括发生了什么，区分对白与动作/环境变化。不要写 OOC，不要写调试信息，不要捏造没发生的心情。输出格式必须是 {"newFacts":[{"summary":"...","last_message_at":123,"perceivers":["知道这件事的人"],"title":"召回标题","keywords":["关键词1","关键词2","关键词3"]}]}`
+            },
+            {
+                role: 'user',
+                content: `
+[聊天类型]
+${chatTypeLabel}
+
+[聊天名称]
+${chat.name}
+
+[这段聊天的固定可见人]
+${perceivers.join('、')}
+
+[待总结片段]
+${recapTranscript}
+
+[输出要求]
+1. 只输出合法 JSON。
+2. newFacts 可以为空数组。
+3. last_message_at 必须引用片段中最后涉及到该事实的消息时间戳。
+4. perceivers 请沿用这段聊天的固定可见人，不要新增陌生人。
+5. title 控制在 4-12 个字，keywords 给 2-4 个。
+`.trim()
+            }
+        ];
+
+        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+        const parsed = extractJsonObjectFromText(rawResponse);
+        const rawFacts = Array.isArray(parsed?.newFacts) ? parsed.newFacts : [];
+        if (rawFacts.length === 0) {
+            return false;
+        }
+
+        const knowledgeEntries = rawFacts.map((fact, index) => normalizeKnowledgeEntry({
+            id: `knowledge_${chat.id}_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+            chatId: chat.id,
+            summary: fact.summary,
+            perceivers,
+            startTime: firstTimestamp,
+            lastMessageAt: Number(fact.last_message_at) || lastTimestamp,
+            recallTitle: fact.title || fact.recallTitle || '',
+            recallKeywords: fact.keywords || fact.recallKeywords || [],
+            isEternal: fact.isEternal === true,
+            sourceType: chat.isGroup ? 'group_recap' : 'private_recap'
+        }, index)).filter(entry => entry.summary);
+
+        if (knowledgeEntries.length === 0) {
+            return false;
+        }
+
+        state.knowledge = [...(state.knowledge || []), ...knowledgeEntries].sort(
+            (left, right) => (Number(left.startTime) || 0) - (Number(right.startTime) || 0)
+        );
+        await kokoMemory.bulkPut('knowledge', knowledgeEntries);
+
+        const nextRecapTimestamp = Math.min(
+            Math.max(...knowledgeEntries.map(entry => Number(entry.lastMessageAt) || lastTimestamp)),
+            lastTimestamp
+        );
+        if (!nextRecapTimestamp) {
+            return false;
+        }
+
+        chat.lastRecapTimestamp = nextRecapTimestamp;
+        await kokoMemory.put('contacts', chat);
+        return true;
+    } catch (error) {
+        console.error('[Knowledge Recap] failed:', error);
+        return false;
+    } finally {
+        chat._isRecapping = false;
+    }
 }
 
 function ensureContactRelationshipSettings(contact) {
@@ -13408,13 +13943,21 @@ function createAiRequestId(chatId) {
     if (!state.latestAiRequestId) {
         state.latestAiRequestId = {};
     }
+    if (!state.activeGenerationByChat) {
+        state.activeGenerationByChat = {};
+    }
     const requestId = `${chatId}_${Date.now()}_${Math.random()}`;
     state.latestAiRequestId[chatId] = requestId;
+    state.activeGenerationByChat[chatId] = requestId;
+    state.activeGenerationId = requestId;
     return requestId;
 }
 
 function isLatestAiRequest(chatId, requestId) {
-    return !!chatId && !!requestId && state.latestAiRequestId?.[chatId] === requestId && state.activeChatId === chatId;
+    return !!chatId
+        && !!requestId
+        && state.latestAiRequestId?.[chatId] === requestId
+        && state.activeGenerationByChat?.[chatId] === requestId;
 }
 
 function normalizeSpeakerName(name) {
@@ -17822,7 +18365,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     }
 
     // 4. 创建完整的消息对象 (使用 effectiveMode 修复ID前缀)
-    const fullMessage = {
+    let fullMessage = {
         id: `${effectiveMode}_${Date.now()}_${Math.random()}`, // ID 前缀区分
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         timestamp: Date.now(),
@@ -17830,6 +18373,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
         ...messageData,
         forceAvatar: forceShowAvatar // 是否强制显示头像 (用于自动回复)
     };
+    fullMessage = normalizeMessageRecord(fullMessage, contact, contact[historyArray].length, historyArray);
     // 5. 将消息添加到正确的历史记录数组
     contact[historyArray].push(fullMessage);
 
@@ -18490,332 +19034,41 @@ function getRecentGroupSpeakers(group, limit = 12) {
 async function triggerGroupFreeChat(group) {
     if (!group || !group.isGroup) return;
 
-    console.log("群聊：用户未发言，正在启动独立的自由聊天函数(V7 - 记忆互通版)...");
-    
+    console.log("群聊：用户未发言，正在启动独立的自由聊天函数(可见性记忆版)...");
     const chatStatusEl = document.getElementById('chat-contact-status');
     state.aiTypingStatus[group.id] = true;
-    if(chatStatusEl && state.activeChatId === group.id) {
+    if (chatStatusEl && state.activeChatId === group.id) {
         chatStatusEl.textContent = '群成员正在热烈讨论中...';
     }
+    const requestId = createAiRequestId(group.id);
 
     try {
-        // --- 1. 构建所有上下文信息 ---
-        
-        const myProfile = state.myProfile;
-        
-        // 1a. 身份查找器
-        const getProfileInGroup = (id) => {
-            if (id === 'myProfile' || id === 'user') return myProfile;
-            let profile = state.contacts.find(c => c.id === id);
-            if (profile) return profile;
-            if (group.npcMembers) {
-                profile = group.npcMembers.find(npc => npc.id === id);
-                if (profile) return profile;
-            }
-            return null; 
-        };
-
-        // 1b. 找出所有“未禁言”的AI成员
-        const unmutedAiMembers = group.members.filter(memberId =>
-            memberId !== 'myProfile' && !(group.mutedMembers || []).includes(memberId)
-        );
-        if (unmutedAiMembers.length === 0) {
-             throw new Error("群里没有可以发言的AI成员。");
+        const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContext(group, 'free');
+        if (allMemberProfiles.length === 0) {
+            throw new Error("群里没有可以发言的AI成员。");
         }
 
-        // 1c. 构建世界书
-        let worldBookContextString = '(本次对话无世界书)';
-        const worldBookIds = group.worldBooks || [];
-        if (worldBookIds.length > 0) {
-            worldBookContextString = worldBookIds.map(bookId => {
-                const book = state.worldBooks.find(b => b.id === bookId);
-                return book ? `\n[世界书条目: ${book.name}]\n${book.content}` : '';
-            }).join('\n\n');
-        }
-        
-        // 1d. 构建所有AI成员的档案
-        const allMemberProfiles = unmutedAiMembers.map(id => getProfileInGroup(id)).filter(Boolean);
-        const aiMemberNames = allMemberProfiles.map(profile => profile.name);
-        const allowedSpeakerList = aiMemberNames.join('、');
-        const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
-
-        const recentText = (group.history || [])
-            .slice(-8)
-            .map(msg => String(msg?.content || ''))
-            .join('\n');
-        const replyGuidance = getGroupReplyGuidance(group, allMemberProfiles, recentText);
-        const recentSpeakers = getRecentGroupSpeakers(group, 12);
-        const lessRecentSpeakerNames = allMemberProfiles
-            .filter(profile => !recentSpeakers.includes(profile.id))
-            .map(profile => profile.name)
-            .join('、') || '无';
-        
-        // 1e. 【核心V7：构建完整的统一时序记忆流】
-        const memoryLimit = state.apiSettings.longTermMemoryLength || 40;
-        let unifiedMemoryStream = [];
-        
-        // 步骤1: 收集【群聊】历史
-        group.history.forEach(msg => {
-            if (msg.sender === 'system_instruction') return;
-            const authorProfile = getProfileInGroup(msg.sender); 
-            if (!authorProfile) return; 
-            
-            let content = '';
-            let memoryType = `群聊[${group.name}]`;
-
-            // (使用你之前版本里的完整 switch 逻辑)
-            switch (msg.type) {
-                case 'text':
-                case 'html':
-                    content = msg.content.replace(/<[^>]+>/g, '');
-                    if (msg.quote) {
-                        const quoteText = `[回复“${msg.quote.senderName}”说的“${msg.quote.content.substring(0, 20)}...”] `;
-                        content = quoteText + content;
-                    }
-                    break;
-                case 'uploaded_image':
-                case 'image':
-                    content = msg.isEmoticon ? `[sticker:${msg.emoticonName}]` : `(发送了一张图片或表情)`;
-                    break;
-                case 'picture_description':
-                    content = `(发送了一张图片，描述是：“${msg.content.description}”)`;
-                    break;
-                case 'voice':
-                    content = `(发送了一段语音，内容是：“${msg.content.text}”)`;
-                    break;
-                case 'red_packet':
-                    const blessing = msg.content.blessing || "恭喜发财";
-                    content = msg.content.count ? `(发了一个群红包：“${blessing}”)` : `(发了一个私聊红包：“${blessing}”)`;
-                    break;
-                case 'transfer':
-                    const amount = msg.content.amount;
-                    if (msg.content.recipientId) {
-                        const recipient = getProfileInGroup(msg.content.recipientId);
-                        const recipientName = recipient ? recipient.name : '一位成员';
-                        content = `(向 ${recipientName} 转账 ${amount}元)`;
-                    } else {
-                        content = `(发了一个转账 ${amount}元)`;
-                    }
-                    break;
-                case 'location_share':
-                    content = `(分享了位置: ${msg.content.name})`;
-                    break;
-                case 'game_wheel':
-                    const wheel = msg.content;
-                    const userName = (msg.sender === 'user' || msg.sender === 'myProfile') ? myProfile.name : authorProfile.name;
-                    const optionsText = wheel.options.map(opt => opt.text).join('，');
-                    if (!wheel.results.user) { content = `[SYSTEM: ${userName} 发起了一个转盘游戏“${wheel.name}”。选项：【${optionsText}】。]`; } 
-                    else if (wheel.results.user && !wheel.results.contact) { content = `[SYSTEM: 在游戏“${wheel.name}”中，${userName} 的结果是“${wheel.results.user}”。]`; } 
-                    else { content = `[SYSTEM: 游戏“${wheel.name}”已结束。]`; }
-                    break;
-                case 'recall_ai':
-                    content = `(撤回了一条消息，内容是：“${msg.content}”)`;
-                    break;
-                case 'video_call_text':
-                    memoryType = '视频通话中';
-                    content = msg.content;
-                    break;
-                case 'system_notification':
-                    content = `(系统消息：${msg.content})`;
-                    memoryType = '系统';
-                    break;
-                case 'music_share':
-                    content = `(分享了音乐: 《${msg.content.title}》 - ${msg.content.artist})`;
-                    break;
-                case 'post_share':
-                    const post = state.posts.find(p => p.id === msg.content.postId);
-                    content = post ? `(分享了一个帖子, 内容是: "${post.content.substring(0, 30)}...")` : `(分享了一个已删除的帖子)`;
-                    break;
-                case 'product_share':
-                    content = `(分享了商品: "${msg.content.productDetails.name}")`;
-                    break;
-                case 'chat_history_share':
-                    content = `(转发了一份 ${msg.content.sourceChatName} 的聊天记录)`;
-                    break;
-            }
-
-            if (content) {
-                unifiedMemoryStream.push({
-                    timestamp: msg.timestamp,
-                    type: memoryType,
-                    author: authorProfile.name,
-                    content: content
-                });
-            }
-        });
-        
-        // 步骤2: 【条件性】收集AI成员与您的【私聊】历史 (这就是你说的“互通”！)
-        if (group.memoryShared) {
-            unmutedAiMembers.forEach(memberId => {
-                // 必须从 state.contacts (主联系人列表) 里找私聊对象
-                const contact = state.contacts.find(c => c.id === memberId);
-                if (contact && contact.history && contact.history.length > 0) {
-                    contact.history.slice(-30).forEach(msg => { // 抓取最近30条私聊
-                        // (只抓取最简单的文本消息用于互通，防止刷屏)
-                        if (msg.type === 'text' && msg.sender !== 'system_instruction') {
-                            const authorProfile = (msg.sender === 'user') ? myProfile : contact;
-                            unifiedMemoryStream.push({
-                                timestamp: msg.timestamp,
-                                type: `私聊[${contact.name}]`, // 明确标记为“私聊”
-                                author: authorProfile.name,
-                                content: msg.content
-                            });
-                        }
-                    });
-                }
-            });
-        }
-
-        // 步骤3: 排序并格式化
-        unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
-        
-        const finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
-            const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
-            const timeTag = (group && group.isTimeAware === true) ? formatHybridTimeForAI(mem.timestamp) : '';
-            return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
-        }).join('\n') || "(还没有任何记忆)";
-
-        // 1g. 构建角色档案（包含私聊参考，因为V7现在有私聊记忆了）
-        let characterDossiersPrompt = allMemberProfiles.map(profile => {
-                // (从 triggerGroupChatAiReply 复制过来的逻辑)
-                let recentChatHistory = '(最近没有与用户的私聊记录)';
-                if (group.memoryShared) {
-                    const contactProfile = state.contacts.find(c => c.id === profile.id);
-                    if (contactProfile && contactProfile.history && contactProfile.history.length > 0) {
-                        recentChatHistory = contactProfile.history
-                            .filter(msg => msg.type === 'text' && msg.sender !== 'system_instruction')
-                            .slice(-30)
-                            .map(msg => `    ${msg.sender === 'user' ? myProfile.name : profile.name}: ${msg.content}`)
-                            .join('\n');
-                    }
-                }
-                
-                return `
-- 角色名: ${profile.name}
-  - 核心人设: ${profile.persona.replace(/\n/g, ' ')}
-  ${group.memoryShared ? `
-  - [与用户“${myProfile.name}”的近期私聊参考 (重要)]
-    \`\`\`
-${recentChatHistory}
-    \`\`\`
-  ` : ''}
-`;
-            }).join('');
-
-        // --- 2. 【核心拆分：V6】 (这部分保持不变) ---
-
-        // (Part A: 这是 systemInstruction，只包含背景)
-        const freeChatSystemPrompt = `
-[SYSTEM] 你是一个顶级的群聊模拟器和剧本导演。
-
-[群聊背景与成员列表]
-- 群聊名称: ${group.name}
-- 用户(观察者): ${myProfile.name} (人设: ${userPersonaInGroup})
-
-[你可控制的角色]
-你【只能】扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
-
-[你禁止控制的角色]
-你【绝对禁止】扮演用户 “${myProfile.name}”。
-
-[背景资料：世界书]
----
-${worldBookContextString}
----
-
-[背景资料：角色档案]
-${group.memoryShared ? '下方是本次群聊所有AI角色的详细档案，包含他们与你的私聊参考。' : '下方是本次群聊所有AI角色的基础档案。'}
---- 角色档案区 ---
-${characterDossiersPrompt}
---- 档案区结束 ---
-
-[背景资料：统一时序记忆流]
-这是群里和私聊中最近发生的对话，是你的上下文参考。
----
-${finalMemoryString}
----
-
-[特殊指令]
-你可以使用 [sticker:表情名], [voice:内容], [picture:描述] 等指令。
-[可用表情包列表]
-{{emoticon_list}}
-`;
-        
-        const finalSystemPrompt = freeChatSystemPrompt.replace('{{emoticon_list}}', state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）');
-
-        // (Part B: 这是 contents，只包含任务)
-        const freeChatUserTaskPrompt = `
-[！！！核心任务！！！]
-用户（${myProfile.name}）正在”观察”群聊，TA没有发言。
-你的任务是：
-1.  **分析上下文**：阅读你(System)的背景资料中提供的【统一时序记忆流】（它包含了群聊和私聊），看看大家最后聊了什么。
-2.  **选择发言人**：结合最近群聊氛围，决定谁来接话、谁暂时沉默，让群聊像真实发生的一样自然。
-3.  **生成对话**：让他们围绕”记忆流”中的最后一个话题【继续深入】，或者开启一个【符合人设、世界观、以及私聊记忆】的新话题。
-4.  **禁止回复用户**：【绝对不要】和用户”${myProfile.name}”说话，这是AI之间的对话。
-
-[本轮群聊自由聊天人数要求]
-${replyGuidance.guidance}
-根据当前场景，在建议范围内自然决定回复人数。
-具体规则：
-1. 根据最近群聊氛围决定几个人接话。
-2. 普通冷场可以 2-3 人。
-3. 热闹、起哄、讨论计划时可以 3-5 人。
-4. 大群不要长期只有固定两个人聊天。
-5. 不要为了凑人数让无关角色尬聊。
-最近发言较少的成员可以优先参与，但不是强制。
-最近较少发言成员参考：${lessRecentSpeakerNames}
-
-[输出格式]
-每条消息必须严格使用：
-MESSAGE_START
-SPEAKER: 角色名（必须从允许发言角色里逐字复制）
-CONTENT: 该角色这一条消息的内容（可以包含特殊指令）
-MESSAGE_END
-
-规则：
-1. SPEAKER 必须从”允许发言角色”里逐字复制，不能用代称或外号。
-2. CONTENT 只写这一条消息，不要把多条消息合并。
-3. 不要输出 [角色名]：内容 这种格式。
-4. 不要输出额外解释或旁白。
-5. 不要扮演用户”${myProfile.name}”。
-
-允许发言角色：${allowedSpeakerList}
-`;
-
-        // --- 3. 【核心】构建AI调用参数 ---
-        const requestMessages = [
-            { role: 'system', content: finalSystemPrompt },
-            { role: 'user', content: freeChatUserTaskPrompt } 
-        ];
-
-        // --- 4. 【核心】调用 generateAiResponse 的“后门” ---
-        const rawResponse = await generateAiResponse(
-            null,                   
-            [],                     
-            null,                   
-            false,                  
-            'chat',                 
-            requestMessages         
-        );
-        
-        // --- 5. (不变) 解析并显示AI的回复 ---
-        const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
-        const messageMatches = Array.from(rawResponse.matchAll(messageRegex));
-
-        if (messageMatches.length === 0) {
+        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+        if (!rawResponse || !String(rawResponse).trim()) {
             throw new Error("AI未能生成有效的自由聊天内容。");
         }
+        if (!isLatestAiRequest(group.id, requestId)) {
+            console.warn('[GROUP FREE RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+            return;
+        }
 
-        for (const match of messageMatches) {
-            const speakerName = match[1].trim();
-            let content = match[2].trim();
-            
-            const speakerProfile = allMemberProfiles.find(p => p.name === speakerName);
-            
-            if (speakerProfile && content) {
-                await sleep(800 + Math.random() * 700);
-                await processAndDisplayAiResponse(content, speakerProfile, group, 'chat', { skipHeartVoiceFallback: true });
+        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
+        if (parsedMessages.length === 0) {
+            throw new Error("AI未能生成有效的群聊内容。");
+        }
+
+        for (const { speaker, content } of parsedMessages) {
+            if (!isLatestAiRequest(group.id, requestId)) {
+                console.warn('[GROUP FREE MESSAGE SKIPPED] stale generation', { chatId: group.id, requestId });
+                return;
             }
+            await sleep(800 + Math.random() * 700);
+            await processAndDisplayAiResponse(content, speaker, group, 'chat', { skipHeartVoiceFallback: true });
         }
 
     } catch (e) {
@@ -18826,7 +19079,6 @@ MESSAGE_END
             content: `AI自由聊天失败: ${e.message}`
         }, 'system', group, false, 'chat');
     } finally {
-        // --- 6. (不变) 结束“正在输入”状态 ---
         state.aiTypingStatus[group.id] = false; 
         if (chatStatusEl && state.activeChatId === group.id) {
             chatStatusEl.textContent = '在线';
@@ -18837,448 +19089,46 @@ async function triggerGroupChatAiReply(group) {
     const chatStatusEl = document.getElementById('chat-contact-status');
     state.aiTypingStatus[group.id] = true; // 👈 ✨ (新) 告诉“记录本”：我开工了！
     chatStatusEl.textContent = '群成员正在热烈讨论中...';
+    const requestId = createAiRequestId(group.id);
 
     try {
-        // --- ✨ 修正点 #1：在这里创建一个“全能”的身份查找器 ---
-        const myProfile = state.myProfile;
-        const getProfileInGroup = (id) => {
-            if (id === 'myProfile' || id === 'user') return myProfile;
-            let profile = state.contacts.find(c => c.id === id);
-            if (profile) return profile;
-            if (group.npcMembers) {
-                profile = group.npcMembers.find(npc => npc.id === id);
-                if (profile) return profile;
-            }
-            return null; // 真的找不到了
-        };
-        // --- 修正结束 ---
-
-        const unmutedAiMembers = group.members.filter(memberId =>
-            memberId !== 'myProfile' && !(group.mutedMembers || []).includes(memberId)
-        );
-
-        if (unmutedAiMembers.length === 0) {
+        const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContext(group, 'reply');
+        if (allMemberProfiles.length === 0) {
             if (chatStatusEl && state.activeChatId === group.id) {
                 chatStatusEl.textContent = '在线';
             }
             return;
         }
 
-        let worldBookContextString = '(本次对话无世界书)';
-        const worldBookIds = group.worldBooks || [];
-        if (worldBookIds.length > 0) {
-            worldBookContextString = worldBookIds.map(bookId => {
-                const book = state.worldBooks.find(b => b.id === bookId);
-                return book ? `\n[世界书条目: ${book.name}]\n${book.content}` : '';
-            }).join('\n\n');
+        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+        if (!rawResponse || !String(rawResponse).trim()) {
+            throw new Error("AI 未能生成有效的群聊内容。");
+        }
+        if (!isLatestAiRequest(group.id, requestId)) {
+            console.warn('[GROUP REPLY RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+            return;
         }
 
-        // --- ✨ 修正点 #2：使用新的查找器来获取所有成员档案 ---
-        const allMemberProfiles = unmutedAiMembers.map(id => getProfileInGroup(id)).filter(Boolean);
-
-        // --- ✨ 修正点 #3：使用新的查找器来获取所有成员名字 ---
-        const allMemberNames = group.members.map(id => {
-            const profile = getProfileInGroup(id); //  使用新查找器
-            return profile ? profile.name : '';
-        }).filter(Boolean);
-
-        const userPersonaInGroup = group.userPersona || myProfile.signature || '(用户未设置特定人设)';
-        // ▼▼▼ ✨✨✨ 【KOKO 核心修复】✨✨✨ ▼▼▼
-        // 1. 我们需要一个【只包含AI】的名字列表
-        const aiMemberNames = allMemberProfiles.map(profile => profile.name);
-        const allowedSpeakerList = aiMemberNames.join('、');
-        // ▲▲▲ ✨✨✨ 修复结束 ✨✨✨ ▲▲▲
-
-        const latestUserMessage = [...(group.history || [])]
-            .reverse()
-            .find(msg => msg.sender === 'user' || msg.sender === 'myProfile')?.content || '';
-        const replyGuidance = getGroupReplyGuidance(group, allMemberProfiles, latestUserMessage);
-        const recentSpeakers = getRecentGroupSpeakers(group, 12);
-        const lessRecentSpeakerNames = allMemberProfiles
-            .filter(profile => !recentSpeakers.includes(profile.id))
-            .map(profile => profile.name)
-            .join('、') || '无';
-
-        const memoryLimit = state.apiSettings.longTermMemoryLength || 40;
-        let unifiedMemoryStream = [];
-
-        // --- ✨ 修正点 #4：使用新的查找器来构建记忆流 ---
-        group.history.forEach(msg => {
-            if (msg.sender === 'system_instruction') return;
-            const authorProfile = getProfileInGroup(msg.sender); //  使用新查找器
-            if (!authorProfile) return; // 找不到发言人（幽灵消息），跳过
-
-            let content = '';
-            switch (msg.type) {
-                case 'text':
-                    content = msg.content;
-                    break;
-                case 'uploaded_image':
-                case 'image':
-                    content = `(发送了一张图片或表情)`;
-                    break;
-                case 'picture_description':
-                    content = `(发送了一张图片，描述是：“${msg.content.description}”)`;
-                    break;
-                case 'voice':
-                    content = `(发送了一段语音，内容是：“${msg.content.text}”)`;
-                    break;
-                case 'red_packet':
-                    const blessing = msg.content.blessing || "恭喜发财";
-                    content = `(发了一个红包：“${blessing}”)`;
-                    break;
-                case 'transfer':
-                    // ✨ 修正点 #4b：在构建转账记忆时，也必须使用新查找器
-                    const recipient = getProfileInGroup(msg.content.recipientId); //  使用新查找器
-                    const recipientName = recipient ? recipient.name : '一位成员';
-                    content = `(向 ${recipientName} 转账 ${msg.content.amount}元)`;
-                    break;
-                    case 'post_share':
-                                const post = state.posts.find(p => p.id === msg.content.postId);
-                                if (post) {
-                                    // 1. 提取图片信息
-                                    let imgInfo = "";
-                                    if (post.images && post.images.length > 0) {
-                                        // ✨ 核心修复：优先读取 description (识图结果)，没有则读取 content (AI模拟图描述)
-                                        const descList = post.images.map((img, i) => {
-                                            const desc = img.description || img.content || "一张图片";
-                                            return `(图${i+1}: ${desc})`;
-                                        }).join(" ");
-                                        imgInfo = ` ${imgInfo} [配图内容: ${descList}]`;
-                                    } else if (post.image) {
-                                        // 兼容旧数据
-                                        imgInfo = ` [配图内容: 图片]`; 
-                                    }
-
-                                    // 2. 组合给 AI 看的文本
-                                    // 清理一下换行符，防止格式乱掉
-                                    const cleanContent = post.content.replace(/\n/g, ' ').substring(0, 80); 
-                                    content = `[分享了一个帖子] 作者: "${post.author.name}" | 内容: "${cleanContent}..."${imgInfo}`;
-                                } else {
-                                    content = `[分享了一个已删除的帖子]`;
-                                }
-                                break;
-                case 'system_notification':
-                    content = `(系统消息：${msg.content})`;
-                    break;
-                // ▼▼▼ 把这个新代码块粘贴到 switch (msg.type) { ... } 内部 ▼▼▼
-
-case 'chat_history_share': {
-    const data = msg.content;
-
-    // 辅助函数，把消息转成文字预览
-    const getPreviewText = (msg) => {
-        switch(msg.type) {
-            case 'text': case 'html': return msg.content.replace(/<[^>]+>/g, '');
-            case 'voice': return `[语音] ${msg.content.text}`;
-            case 'image': case 'uploaded_image': return `[图片]${msg.isEmoticon ? msg.emoticonName : ''}`;
-            case 'picture_description': return `[图片] ${msg.content.description}`;
-            case 'red_packet': return `[红包] ${msg.content.blessing}`;
-            case 'transfer': return `[转账] ¥${msg.content.amount}`;
-            case 'music_share': return `[音乐] ${msg.content.title}`;
-            case 'location_share': return `[位置] ${msg.content.name}`;
-            case 'post_share': return `[分享的帖子]`;
-            case 'product_share': return `[分享的商品] ${msg.content.productDetails.name}`;
-            default: return `[${msg.type} 消息]`;
+        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
+        if (parsedMessages.length === 0) {
+            throw new Error("AI 未能生成有效的群聊内容。");
         }
-    };
 
-    // ✨ 核心修改：使用群聊的口吻
-    let historyText = `(一份来自 ${data.sourceChatName} 的聊天记录被转发到群里，内容如下：\n`;
-
-    data.messages.forEach(m => {
-        // 我们需要从 data.participants 里查找名字
-        const senderName = data.participants[m.sender]?.name || '未知';
-        const contentPreview = getPreviewText(m);
-        historyText += `  ${senderName}: ${contentPreview}\n`;
-    });
-
-    historyText += `)`; // 用括号包起来，告诉AI这是"事件描述"
-    content = historyText; // 把“翻译”好的文本存入 content
-    break;
-}
-
-// ▲▲▲ 粘贴到这里结束 ▲▲▲    
-                // (此处可以添加更多你支持的类型...)
+        for (const { speaker, content } of parsedMessages) {
+            if (!isLatestAiRequest(group.id, requestId)) {
+                console.warn('[GROUP REPLY MESSAGE SKIPPED] stale generation', { chatId: group.id, requestId });
+                return;
             }
-            if (content) {
-                unifiedMemoryStream.push({
-                    timestamp: msg.timestamp,
-                    type: `群聊[${group.name}]`,
-                    author: authorProfile.name,
-                    content: content
-                });
-            }
-        });
-
-        // 步骤2: (保持不变) 【条件性】收集AI成员与您的私聊历史
-        if (group.memoryShared) {
-            unmutedAiMembers.forEach(member => {
-                const contact = state.contacts.find(c => c.id === member.id); // 私聊只存在于state.contacts
-                if (contact && contact.history && contact.history.length > 0) {
-                    contact.history.slice(-30).forEach(msg => {
-                        if (msg.type !== 'text' || msg.sender === 'system_instruction') return;
-                        const authorProfile = (msg.sender === 'user') ? myProfile : contact;
-                        unifiedMemoryStream.push({
-                            timestamp: msg.timestamp,
-                            type: `私聊[${contact.name}]`,
-                            author: authorProfile.name,
-                            content: msg.content
-                        });
-                    });
-                }
-            });
-        }
-
-        // 步骤3: (保持不变) 排序并截取，形成最终的线性记忆字符串
-        unifiedMemoryStream.sort((a, b) => a.timestamp - b.timestamp);
-// (这是新代码)
-        const finalMemoryString = unifiedMemoryStream.slice(-memoryLimit).map(mem => {
-            const authorTag = (mem.author === myProfile.name) ? "(你)" : "";
-
-            // ✨ 核心修改：在这里加入判断！ ✨
-            // 1. 检查群聊 "group" 对象的 "isTimeAware" 是否为 true
-            const showTimeTags = group && group.isTimeAware === true;
-
-            // 2. 只有在开关打开时才生成时间标签
-            const timeTag = showTimeTags ? formatHybridTimeForAI(mem.timestamp) : '';
-            
-            // 3. 拼接字符串
-            return `${timeTag ? timeTag + ' ' : ''}[${mem.type}] ${mem.author}${authorTag}: ${mem.content}`;
-        }).join('\n') || "(还没有任何记忆)";
-
-        // 步骤4: (保持不变) 【条件性】构建角色档案
-        let characterDossiersPrompt = '';
-        if (group.memoryShared) {
-            characterDossiersPrompt = allMemberProfiles.map(profile => {
-                let recentChatHistory = '(最近没有与用户的私聊记录)';
-                // 私聊历史只存在于“真实联系人”中
-                const contactProfile = state.contacts.find(c => c.id === profile.id);
-                if (contactProfile && contactProfile.history && contactProfile.history.length > 0) {
-                    recentChatHistory = contactProfile.history
-                        .filter(msg => msg.type === 'text' && msg.sender !== 'system_instruction')
-                        .slice(-40)
-                        .map(msg => `    ${msg.sender === 'user' ? myProfile.name : profile.name}: ${msg.content}`)
-                        .join('\n');
-                }
-                return `
-- 角色名: ${profile.name}
-  - 核心人设: ${profile.persona.replace(/\n/g, ' ')}
-  - [与用户“${myProfile.name}”的近期私聊参考 (重要)]
-    \`\`\`
-${recentChatHistory}
-    \`\`\`
-`;
-            }).join('');
-        } else {
-            characterDossiersPrompt = allMemberProfiles.map(profile => {
-                return `
-- 角色名: ${profile.name}
-  - 核心人设: ${profile.persona.replace(/\n/g, ' ')}
-`;
-            }).join('');
-        }
-
-        // 步骤5: (保持不变) 构建“剧本” (System Prompt)
-        const groupChatPrompt = `
-[SYSTEM] 你是一个顶级的群聊模拟器和剧本导演。
-
-[群聊背景与成员列表]
-- 群聊名称: ${group.name}
-- 所有群成员: ${allMemberNames.join('、 ')}
-- 用户(话题发起者): ${myProfile.name}
-  - 用户人设/签名: ${userPersonaInGroup}
-
-// ▼▼▼ ✨✨✨ 【KOKO 核心修复】✨✨✨ ▼▼▼
-[导演规则]
-1.  **你可控制的角色**: 你【只能】扮演和控制以下列表中的角色：【${aiMemberNames.join('、 ')}】。
-2.  **你禁止控制的角色**: 你【绝对禁止】扮演用户 “${myProfile.name}”。
-// ▲▲▲ ✨✨✨ 修复结束 ✨✨✨ ▲▲▲
-
-[第三份信息：世界书背景知识 (全局设定)]
----
-${worldBookContextString}
----
-
-[第四份信息：统一时序记忆流 (全局背景)]
-这是与本次群聊相关的所有事件的【完整时间线】。这是你判断【当前对话进展】的最高优先级信息源。
-【重要】在记忆流中，形如 (发送了一张图片) 或 (发了一个红包) 的、被圆括号包裹的条目，代表已经发生的事件，你应当基于这些事件进行回应，【绝对禁止】在你的发言中模仿或复述这些圆括号里的内容。
----
-${finalMemoryString}
----
-
-[第五份信息：角色档案]
-${group.memoryShared ? '下方是本次群聊所有AI角色的详细档案，包含他们与你的私聊参考。' : '下方是本次群聊所有AI角色的基础档案。'}
---- 角色档案区 ---
-${characterDossiersPrompt}
---- 档案区结束 ---
-
-[通用规则 - 所有角色都必须遵守]
-[文学风格] 你的写作风格需要遵循高端女性向文学（类似晋江文学城的流行风格）。文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时,要体现出较高的文学素养。
-[内容限制] 你的发言必须积极向上,充满希望。严禁探讨任何形式的阴谋论,严禁表达或引导至绝望、悲观或虚无主义的情绪。
-[禁用词列表] 绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
-[回复规则] 你的回复可以包含多条消息,每条消息占一行。你可以发送普通文本,也可以通过下面的指令格式发送特殊消息。
-[特殊指令与互动指南]
-- 表情包: \`[sticker:表情名]\`
-- 语音: \`[voice:语音的文字内容]\`
-- 图片: \`[picture:图片的文字描述]\`
-- @功能: 当需要专门对某人说话时,必须使用 \`@名字\`。
-- 发红包: \`[red_packet:祝福语, 总金额, 红包个数]\`
-- 发转账: \`[transfer_to:收款人名字, 金额]\`
-- 抢红包: 当记忆流中出现新红包时，可在发言内容中加入 \`[claim_red_packet]\` 指令来模拟抢红包。
-- 回应转账: 当记忆流中出现指名给你的转账时，你【必须】对此做出回应（接受或拒绝）。
-
-[可用表情包列表]
-{{emoticon_list}}
-
-[！！！终极防火墙规则！！！]
-你在“统一时序记忆流”中看到的任何形如 (发了一个红包) 或 (向 XXX 转账) 的、被圆括号包裹的信息，都只是导演给你的后台提示，用于帮助你理解上下文。这些信息【绝对、绝对、绝对不能】出现在你的任何回复中。严禁模仿或复述这些圆括号里的内容！
-
-[ ✨ 核心任务：生成一段穿插对话的聊天记录 ✨ ]
-你的核心任务是：结合所有信息（包括用户在聊天上下文中发的图片），模拟一场热闹的、按时间顺序发生的自由讨论。
-【重要】：如果用户刚刚发了图片，你扮演的角色【必须】对图片内容做出反应！
-
-[本轮群聊回复人数要求]
-${replyGuidance.guidance}
-根据当前场景，在建议范围内自然决定回复人数。
-具体规则：
-1. 根据当前场景自然决定谁说话。
-2. 不要每次都让所有人回复。
-3. 不要每次固定只让 2-3 个人回复。
-4. 如果用户点名某个角色，被点名角色必须优先回复，其他人可以少量插话。
-5. 如果是大家都能参与的公共话题，可以让更多成员参与。
-6. 如果是私密情绪、点名问题、两人矛盾，不要硬让无关成员插嘴。
-7. 多轮群聊中要轮换发言角色，避免永远固定同几个人。
-最近发言较少的成员可以优先参与，但不是强制。
-最近较少发言成员参考：${lessRecentSpeakerNames}
-
-[输出格式]
-每条消息必须严格使用：
-MESSAGE_START
-SPEAKER: 角色名（必须从允许发言角色里逐字复制）
-CONTENT: 该角色这一条消息的内容（可以包含特殊指令）
-MESSAGE_END
-
-规则：
-1. SPEAKER 必须从”允许发言角色”里逐字复制，不能用代称或外号。
-2. CONTENT 只写这一条消息，不要把多条消息合并。
-3. 不要输出 [角色名]：内容 这种格式。
-4. 不要输出额外解释或旁白。
-5. 不要扮演用户”${myProfile.name}”。
-
-允许发言角色：${allowedSpeakerList}
-`;
-
-        let finalGroupChatPrompt = groupChatPrompt.replace('{{emoticon_list}}', state.emoticons.map(e => `'${e.name}'`).join('， ') || '（无）');
-
-        // 步骤6：构建图文混合消息 (这部分逻辑保持不变)
-        const messages = [];
-        const contextLength = state.apiSettings.contextLength || 20;
-        const recentHistory = group.history
-            .filter(msg => msg.sender !== 'system_instruction' && msg.type !== 'system_notification')
-            .slice(-contextLength); 
-
-        let currentUserMessageParts = [];
-        
-// ============================================================
-        // ▼▼▼ 请直接替换 triggerGroupChatAiReply 函数里的这个 for 循环 ▼▼▼
-        // ============================================================
-        for (const msg of recentHistory) {
-            // 1. 判断角色：用户发的 -> 'user'，AI发的 -> 'assistant'
-            const role = (msg.sender === 'user' || msg.sender === 'myProfile') ? 'user' : 'assistant';
-
-            if (role === 'user') {
-                let textContent = null;
-
-                // --- Case 1: 上传的图片 (Vision API 用) ---
-                if (msg.type === 'uploaded_image') {
-                    currentUserMessageParts.push({
-                        type: 'image_url',
-                        image_url: { url: msg.content.base64 }
-                    });
-                } 
-                // --- Case 2: 普通文本 ---
-                else if (msg.type === 'text') {
-                    textContent = msg.content;
-                }
-                // --- Case 3: 表情包 (这是你之前缺的！导致空回的原因) ---
-                else if (msg.type === 'image') {
-                    const emoName = msg.emoticonName || '表情包';
-                    textContent = `(发送了一个表情包: ${emoName})`;
-                }
-                // --- Case 4: 语音消息 ---
-                else if (msg.type === 'voice') {
-                    textContent = `(发送了一条语音: ${msg.content.text || '语音内容'})`;
-                }
-                // --- Case 5: 红包 ---
-                else if (msg.type === 'red_packet') {
-                    textContent = `(发了一个红包: ${msg.content.blessing})`;
-                }
-                // --- Case 6: 引用/分享类 (简单描述) ---
-                else if (msg.type === 'post_share' || msg.type === 'product_share') {
-                    textContent = `(分享了一个链接)`;
-                }
-
-                // 如果解析出了文本内容，就加进去
-                if (textContent) {
-                    currentUserMessageParts.push({ type: 'text', text: textContent });
-                }
-
-            } else {
-                // --- 处理 AI 的历史消息 ---
-                if (currentUserMessageParts.length > 0) {
-                    messages.push({ role: 'user', content: currentUserMessageParts });
-                    currentUserMessageParts = [];
-                }
-                if (msg.type === 'text' || msg.type === 'html') {
-                    messages.push({ role: 'assistant', content: msg.content });
-                }
-            }
-        }
-        // ============================================================
-        if (currentUserMessageParts.length > 0) {
-            messages.push({ role: 'user', content: currentUserMessageParts });
-        }
-
-        const finalRequestMessages = [
-            { role: 'system', content: finalGroupChatPrompt },
-            ...messages
-        ];
-
-        const rawResponse = await generateAiResponse(
-            null,
-            [],
-            null,
-            false,
-            'chat',
-            finalRequestMessages
-        );
-        
-        // --- ✨ 修正点 #5：使用新的查找器来解析AI回复 ---
-        const messageRegex = /MESSAGE_START\s*SPEAKER:\s*(.*?)\s*CONTENT:\s*([\s\S]*?)\s*MESSAGE_END/g;
-        const messageMatches = Array.from(rawResponse.matchAll(messageRegex));
-
-        for (const match of messageMatches) {
-            const speakerName = match[1].trim();
-            let content = match[2].trim();
-            
-            // 关键：在群聊的所有成员中（包括NPC）查找这个名字
-            const speakerProfile = (group.members.map(id => getProfileInGroup(id)))
-                                      .find(p => p && p.name === speakerName);
-            
-            // 如果找到了匹配的、且未被禁言的成员，就显示他们的发言
-            if (speakerProfile && content && !(group.mutedMembers || []).includes(speakerProfile.id)) {
-                await sleep(800 + Math.random() * 700);
-                try {
-                    await processAndDisplayAiResponse(content, speakerProfile, group, 'chat', { skipHeartVoiceFallback: true });
-                } catch (renderError) {
-                    console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker: speakerProfile });
-                    await createAndAddMessage({
-                        type: 'text',
-                        sender: speakerProfile.id,
-                        content: String(content || '').trim()
-                    }, speakerProfile.id, group, false, 'chat');
-                }
+            await sleep(800 + Math.random() * 700);
+            try {
+                await processAndDisplayAiResponse(content, speaker, group, 'chat', { skipHeartVoiceFallback: true });
+            } catch (renderError) {
+                console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
+                await createAndAddMessage({
+                    type: 'text',
+                    sender: speaker.id,
+                    content: String(content || '').trim()
+                }, speaker.id, group, false, 'chat');
             }
         }
     } catch (e) {
@@ -22843,7 +22693,13 @@ if (!heartVoiceContent && shouldEnsureHeartVoice) {
                 effectiveChatContext.permanent_memories.push({
                     id: `mem_${Date.now()}`,
                     content: memoryContent,
-                    timestamp: Date.now()
+                    summary: memoryContent,
+                    perceivers: [effectiveChatContext.id],
+                    startTime: Date.now(),
+                    timestamp: Date.now(),
+                    recallTitle: '',
+                    recallKeywords: [],
+                    isEternal: true
                 });
 
                 // 4. 保存到数据库
@@ -23773,7 +23629,13 @@ case 'takeout': {
                                     effectiveChatContext.permanent_memories.push({
                                         id: `mem_${Date.now()}`,
                                         content: memoryContent,
-                                        timestamp: Date.now()
+                                        summary: memoryContent,
+                                        perceivers: [effectiveChatContext.id],
+                                        startTime: Date.now(),
+                                        timestamp: Date.now(),
+                                        recallTitle: '',
+                                        recallKeywords: [],
+                                        isEternal: true
                                     });
                                     
                                     await kokoMemory.put('contacts', effectiveChatContext);
@@ -43585,52 +43447,108 @@ function buildPrivateChatOpenAiMessages(contact, history = []) {
     return messages;
 }
 
-function buildPrivateChatRequestMessages(contact, mode = 'reply') {
-    ensureContactRelationshipSettings(contact);
+async function buildPrivateChatRequestMessages(contact, mode = 'reply') {
+    const liveContact = ensureContactRelationshipSettings(state.contacts.find(item => item.id === contact?.id) || contact);
+    if (!liveContact) {
+        return [
+            { role: 'system', content: '你是一个角色扮演助手。' },
+            { role: 'user', content: '请自然继续聊天。' }
+        ];
+    }
+
+    await maybeRecapChatKnowledge(liveContact);
+    const refreshedContact = ensureContactRelationshipSettings(state.contacts.find(item => item.id === liveContact.id) || liveContact);
     const myProfile = state.myProfile;
-    const isNarrativeMode = !!contact.isNarrativeMode;
-    const memoryContext = buildUnifiedMemoryStreamForChat(contact, {
-        memoryLimit: Math.max(60, Number(state.apiSettings.longTermMemoryLength) || 60)
-    });
-    const addressingPrompt = buildAddressingPromptForPrivateChat(contact);
-    const worldBookContextString = (contact.worldBooks || []).map(bookId => {
+    const isNarrativeMode = !!refreshedContact.isNarrativeMode;
+    const addressingPrompt = buildAddressingPromptForPrivateChat(refreshedContact);
+    const worldBookContextString = (refreshedContact.worldBooks || []).map(bookId => {
         const book = state.worldBooks.find(item => item.id === bookId);
         return book ? `--- (世界书: ${book.name}) ---\n${book.content}` : '';
     }).filter(Boolean).join('\n\n') || '(本次对话无世界书)';
-    const userPersona = contact.userPersona || myProfile.signature || '(用户未设置特定人设)';
-    const preset = state.thoughtPresets.find(item => item.id === contact?.thoughtPreset);
+    const userPersona = refreshedContact.userPersona || myProfile.signature || '(用户未设置特定人设)';
+    const preset = state.thoughtPresets.find(item => item.id === refreshedContact?.thoughtPreset);
     const thoughtPresetContent = preset ? preset.prompt : '(无特殊思维准则)';
-    const allowedGroups = contact.allowedEmoticonGroups || ['default'];
+    const allowedGroups = refreshedContact.allowedEmoticonGroups || ['default'];
     const aiAllowedEmoticons = state.emoticons.filter(item => allowedGroups.includes(item.groupId));
     const emoticonListString = aiAllowedEmoticons.map(item => `'${item.name}'`).join('， ') || '（无可用表情）';
     const musicListString = state.musicLibrary.map(song => `'${song.title} - ${song.artist}'`).join('\\n- ');
-    const dynamicInstructions = (contact.history || [])
+    const dynamicInstructions = (refreshedContact.history || [])
         .filter(message => message.sender === 'system_instruction')
         .map(message => message.content)
         .join('\n');
 
+    const currentChatMessages = (refreshedContact.history || [])
+        .filter(message => message.sender !== 'system_instruction')
+        .slice(-6);
+    const recallQuery = buildKnowledgeRecallQueryFromMessages(currentChatMessages, refreshedContact);
+    const recalledKnowledge = recallKnowledgeForCharacters(
+        state.knowledge || [],
+        [refreshedContact.id],
+        recallQuery,
+        MAX_RECALLED_KNOWLEDGE_ITEMS,
+        KNOWLEDGE_FALLBACK_CHAR_LIMIT
+    );
+    const permanentKnowledge = buildPermanentKnowledgeEntriesForProfile(refreshedContact);
+    const visibleWindowMessages = getVisibleUnrecappedMessagesForEntity(
+        refreshedContact.id,
+        getAllChatMessages(state.contacts),
+        state.contacts,
+        PRIVATE_VISIBLE_WINDOW_LIMIT
+    ).sort((left, right) => (Number(left.timestamp) || 0) - (Number(right.timestamp) || 0));
+
+    const longTermKnowledgeString = formatKnowledgeForPrompt(recalledKnowledge, [refreshedContact], [myProfile], Date.now());
+    const permanentKnowledgeString = formatKnowledgeForPrompt(permanentKnowledge, [refreshedContact], [myProfile], Date.now());
+    const visibleWindowString = formatVisibleMessagesForPrompt(visibleWindowMessages, {
+        chats: state.contacts,
+        characters: [refreshedContact],
+        users: [myProfile]
+    });
+
+    const lastHeartVoice = (refreshedContact.history || []).slice().reverse().find(message => message.type === 'heart_voice');
+    let lastHeartVoiceString = '(无最新心声记录)';
+    if (lastHeartVoice) {
+        try {
+            lastHeartVoiceString = JSON.stringify(lastHeartVoice.content).replace(/(\r\n|\n|\r)/gm, '');
+        } catch (error) {
+            lastHeartVoiceString = '(无最新心声记录)';
+        }
+    }
+
     let baseSystemPrompt = (isNarrativeMode ? NARRATIVE_BASE_PROMPT : NORMAL_BASE_PROMPT)
         .replace('{{thought_preset_content}}', thoughtPresetContent)
-        .replace('{{memory_stream}}', memoryContext.formattedMemoryString)
+        .replace('{{memory_stream}}', visibleWindowString)
         .replace('{{emoticon_list}}', emoticonListString)
         .replace('{{music_library_list}}', musicListString ? `- ${musicListString}` : '（曲库为空）');
 
     let finalSystemPrompt = `
-[记忆核心 / 长期记忆]
-${memoryContext.formattedPermanentMemories}
+[记忆核心 / 永久记忆]
+${permanentKnowledgeString}
+
+[按可见性召回到的相关长期记忆]
+${longTermKnowledgeString}
+
+[按可见性读取的未总结最近消息]
+${visibleWindowString}
 
 [最近心声]
-${memoryContext.latestHeartVoiceString}
+${lastHeartVoiceString}
 
 ${baseSystemPrompt}
 
 [关系与称呼设定]
 ${addressingPrompt}
 
+[可见性规则]
+1. 你只能使用上面明确对你“可用/可见”的消息和记忆。
+2. 你能自然想起自己看过的群聊内容，但不能读取其他角色和用户的私聊秘密。
+3. 如果某条信息不是你 perceivers 里包含你的可见内容，它就不属于你的认知。
+4. 当前 messages 数组里的最新用户消息优先级最高，先回应这一轮，再自然延展。
+5. 不要复用上一轮已经说过的话，不要把旧轮次回复混进本轮。
+
 [额外背景资料：角色档案]
 ---
-- 你的角色: ${contact.name}
-  - 你的核心人设: ${(contact.persona || '').replace(/\n/g, ' ')}
+- 你的角色: ${refreshedContact.name}
+  - 你的核心人设: ${(refreshedContact.persona || '').replace(/\n/g, ' ')}
 - 你的对话伙伴: ${myProfile.name}
   - 伙伴的人设: ${userPersona.replace(/\n/g, ' ')}
 ---
@@ -43644,30 +43562,24 @@ ${worldBookContextString}
 ${mode === 'free'
     ? (isNarrativeMode
         ? `1. 用户（${myProfile.name}）正在”观察”你，TA 没有发言。
-2. 阅读统一时序记忆流，像真实的人一样顺着上下文自然延续。
+2. 参考上面的“可见消息窗口”和“长期记忆”，顺着你真正知道的上下文自然延续。
 3. 主动生成一段新的叙事内容，可以是动作、心理、对白，或它们的组合。
-4. 继续当前最自然的话题，不要机械复述记录，不要强行输出日记。
-5. 普通聊天不要输出 [diary]，日记只在定时日记任务里生成。`
+4. 继续当前最自然的话题，不要机械总结来源，不要强行输出日记。`
         : `1. 用户（${myProfile.name}）正在”观察”你，TA 没有发言。
-2. 阅读统一时序记忆流，理解你们刚刚聊过什么，也理解相关群聊里发生了什么。
-3. 主动给用户发送 1-3 条新的消息，可以自然延续话题，也可以轻轻开启新话题。
-4. 可以自然提到”刚刚群里””他们刚才”，但不要像机器人一样总结来源。
-5. 普通聊天不要输出 [diary]，日记只在定时日记任务里生成。`)
+2. 参考上面的可见消息窗口，像真实的人一样接着刚发生过的事继续聊。
+3. 可以自然提到你刚在群里看见的内容，但前提是那条内容对你可见。
+4. 主动给用户发送 1-3 条新的消息，保持自然，不要像机器人复盘日志。`)
     : `1. 你正在私聊中回复用户的最新消息。
-2. 最新用户消息优先级最高，先回应这一轮，再自然延展。
-3. 统一时序记忆流里包含相关群聊、论坛、短信和系统事件，你可以自然记得其中发生过的事。
-4. 群聊里的其他成员发言、动作、关系变化也属于上下文，不要只记得你自己说过的话。
-5. 普通聊天不要输出 [diary]，日记只在定时日记任务里生成。`}
+2. 先回应当前轮，再结合“你可见的未总结消息”和“你可用的长期记忆”自然延展。
+3. 如果你刚在群里看到了相关内容，可以自然接上；如果没看见，就不要假装知道。
+4. 普通聊天不要输出 [diary]，日记只在定时日记任务里生成。`}
 
 [心声生成规则]
 1. 你本轮回复最后必须输出一段 [heart_voice]...[/heart_voice]。
 2. heart_voice 必须和“用户最新一条消息”以及“你本轮实际说出口的话”直接相关。
-3. 不要写泛泛模板。
-4. 不要复述旧记忆。
-5. 不要写与本轮无关的情绪。
-6. heart_voice 是角色没说出口的真实想法，长度 15 到 45 字。
-7. 普通聊天不要输出 [diary]。
-8. 建议使用 JSON，方便系统稳定解析：
+3. 不要写泛泛模板，不要复述旧记忆，不要写与本轮无关的情绪。
+4. heart_voice 是角色没说出口的真实想法，长度 15 到 45 字。
+5. 建议使用 JSON，方便系统稳定解析：
 [heart_voice]{"emotion":"开心/低落/在意/不爽/平静/紧张","thoughts":"这里写本轮具体心声","heartRate":"平稳/偏快/很快","jealousy":"无/有一点/明显"}[/heart_voice]
 `.trim();
 
@@ -43684,8 +43596,231 @@ ${mode === 'free'
 
     return [
         { role: 'system', content: finalSystemPrompt },
-        ...buildPrivateChatOpenAiMessages(contact, contact.history || [])
+        ...buildPrivateChatOpenAiMessages(refreshedContact, refreshedContact.history || [])
     ];
+}
+
+function getActiveGroupAiProfiles(group) {
+    if (!group || !group.isGroup) return [];
+    return (group.members || [])
+        .filter(memberId => normalizeEntityIdForVisibility(memberId) !== 'user')
+        .filter(memberId => !(group.mutedMembers || []).includes(memberId))
+        .map(memberId => getProfileInGroupContext(group, memberId))
+        .filter(Boolean);
+}
+
+function buildGroupChatOpenAiMessages(group, history = []) {
+    const recentHistory = (history || [])
+        .filter(message => message.sender !== 'system_instruction' && message.type !== 'system_notification')
+        .slice(-(state.apiSettings.contextLength || 20));
+    const allMemberProfiles = getActiveGroupAiProfiles(group);
+    const messages = [];
+    let currentUserMessageParts = [];
+
+    for (const message of recentHistory) {
+        if (!message || message.type === 'heart_voice') continue;
+
+        const role = normalizeEntityIdForVisibility(message.senderId || message.sender) === 'user' ? 'user' : 'assistant';
+        if (role === 'user') {
+            if (message.type === 'uploaded_image' && message.content?.base64 && !message.isEmoticon) {
+                currentUserMessageParts.push({
+                    type: 'image_url',
+                    image_url: { url: message.content.base64 }
+                });
+            }
+
+            const described = describeMessageForUnifiedMemory(message, { group });
+            if (described?.content) {
+                currentUserMessageParts.push({ type: 'text', text: described.content });
+            }
+            continue;
+        }
+
+        if (currentUserMessageParts.length > 0) {
+            messages.push({ role: 'user', content: currentUserMessageParts });
+            currentUserMessageParts = [];
+        }
+
+        const speakerId = normalizeEntityIdForVisibility(message.senderId || message.sender);
+        const speakerProfile = allMemberProfiles.find(profile => normalizeEntityIdForVisibility(profile.id) === speakerId);
+        let assistantContent = null;
+        if (message.type === 'text' || message.type === 'html' || message.type === 'video_call_text') {
+            assistantContent = stripHtmlTags(message.content || '');
+        } else {
+            assistantContent = describeMessageForUnifiedMemory(message, { group })?.content || null;
+        }
+
+        if (assistantContent) {
+            const prefix = speakerProfile ? `[${speakerProfile.name}] ` : '';
+            messages.push({ role: 'assistant', content: `${prefix}${assistantContent}` });
+        }
+    }
+
+    if (currentUserMessageParts.length > 0) {
+        messages.push({ role: 'user', content: currentUserMessageParts });
+    }
+
+    if (messages.length === 0) {
+        messages.push({
+            role: 'user',
+            content: [{ type: 'text', text: '请根据群聊当前上下文自然继续。' }]
+        });
+    }
+
+    return { messages, allMemberProfiles };
+}
+
+async function buildGroupChatRequestContext(group, mode = 'reply') {
+    const liveGroup = state.contacts.find(item => item.id === group?.id) || group;
+    if (!liveGroup) {
+        return {
+            requestMessages: [
+                { role: 'system', content: '你是一个群聊角色扮演助手。' },
+                { role: 'user', content: '请自然继续群聊。' }
+            ],
+            allMemberProfiles: []
+        };
+    }
+
+    await maybeRecapChatKnowledge(liveGroup);
+    const refreshedGroup = state.contacts.find(item => item.id === liveGroup.id) || liveGroup;
+    const myProfile = state.myProfile;
+    const allMemberProfiles = getActiveGroupAiProfiles(refreshedGroup);
+    const aiMemberNames = allMemberProfiles.map(profile => profile.name);
+    const allowedSpeakerList = aiMemberNames.join('、');
+    const allMemberNames = (refreshedGroup.members || [])
+        .map(memberId => getProfileInGroupContext(refreshedGroup, memberId))
+        .filter(Boolean)
+        .map(profile => profile.name);
+    const userPersonaInGroup = refreshedGroup.userPersona || myProfile.signature || '(用户未设置特定人设)';
+    const worldBookContextString = (refreshedGroup.worldBooks || []).map(bookId => {
+        const book = state.worldBooks.find(item => item.id === bookId);
+        return book ? `--- (世界书: ${book.name}) ---\n${book.content}` : '';
+    }).filter(Boolean).join('\n\n') || '(本次对话无世界书)';
+    const addressingPrompt = await buildAddressingPromptForGroupChat(refreshedGroup);
+    const recentQueryMessages = (refreshedGroup.history || [])
+        .filter(message => message.sender !== 'system_instruction')
+        .slice(-6);
+    const recallQuery = buildKnowledgeRecallQueryFromMessages(recentQueryMessages, refreshedGroup);
+    const recalledKnowledge = recallKnowledgeForCharacters(
+        state.knowledge || [],
+        allMemberProfiles.map(profile => profile.id),
+        recallQuery,
+        MAX_RECALLED_KNOWLEDGE_ITEMS,
+        KNOWLEDGE_FALLBACK_CHAR_LIMIT
+    );
+    const permanentKnowledge = allMemberProfiles.flatMap(profile => {
+        const storedProfile = state.contacts.find(item => item.id === profile.id) || profile;
+        return buildPermanentKnowledgeEntriesForProfile(storedProfile);
+    });
+    const visibleWindowMessages = buildVisibleWindowUnionForCharacters(
+        allMemberProfiles.map(profile => profile.id),
+        state.contacts,
+        8
+    );
+    const { messages: recentOpenAiMessages } = buildGroupChatOpenAiMessages(refreshedGroup, refreshedGroup.history || []);
+    const latestUserMessage = [...(refreshedGroup.history || [])]
+        .reverse()
+        .find(message => normalizeEntityIdForVisibility(message.senderId || message.sender) === 'user');
+    const latestUserText = latestUserMessage ? (getMessageTextContent(latestUserMessage) || '') : '';
+    const replyGuidance = getGroupReplyGuidance(refreshedGroup, allMemberProfiles, latestUserText);
+    const recentSpeakers = getRecentGroupSpeakers(refreshedGroup, 12);
+    const lessRecentSpeakerNames = allMemberProfiles
+        .filter(profile => !recentSpeakers.includes(profile.id))
+        .map(profile => profile.name)
+        .join('、') || '无';
+    const emoticonListString = state.emoticons.map(item => `'${item.name}'`).join('， ') || '（无）';
+    const longTermKnowledgeString = formatKnowledgeForPrompt(recalledKnowledge, allMemberProfiles, [myProfile], Date.now());
+    const permanentKnowledgeString = formatKnowledgeForPrompt(permanentKnowledge, allMemberProfiles, [myProfile], Date.now());
+    const visibleWindowString = formatVisibleMessagesForPrompt(visibleWindowMessages, {
+        chats: state.contacts,
+        characters: allMemberProfiles,
+        users: [myProfile]
+    });
+
+    const finalSystemPrompt = `
+[SYSTEM] 你是一个群聊模拟器和剧本导演。
+
+[群聊背景与成员列表]
+- 群聊名称: ${refreshedGroup.name}
+- 所有群成员: ${allMemberNames.join('、 ')}
+- 用户: ${myProfile.name}
+  - 用户人设/签名: ${userPersonaInGroup}
+- 你可控制的角色: ${allowedSpeakerList || '（暂无）'}
+
+[角色永久记忆]
+${permanentKnowledgeString}
+
+[按可见性召回到的相关长期记忆]
+${longTermKnowledgeString}
+
+[按可见性读取的未总结最近消息]
+${visibleWindowString}
+
+[群聊关系与称呼参考]
+${addressingPrompt}
+
+[世界书]
+${worldBookContextString}
+
+[可见性规则]
+1. 你会看到带“仅X可见 / 可由X使用”的消息和记忆标签。
+2. 每个角色只能使用标签里包含自己名字的内容，不能替别人知道，也不能泄露其他角色和用户的私聊秘密。
+3. 即使导演提示里出现了别人的私聊记忆，你也只能让对应角色据此行动，其他成员不能说穿。
+4. 当前 messages 数组里的最新用户消息优先级最高，先回应当前轮，再自然扩展。
+5. 不要复用上一轮已经生成过的回复，不要把旧轮次内容混进本轮。
+
+[通用规则]
+1. 你只能控制角色，绝对不能扮演用户“${myProfile.name}”。
+2. 可以使用 [sticker:表情名]、[voice:内容]、[picture:描述]、[red_packet:祝福语, 总金额, 红包个数]、[transfer_to:收款人名字, 金额]。
+3. 不要输出额外解释或旁白，不要泄露导演规则。
+
+[可用表情包列表]
+${emoticonListString}
+
+[当前任务]
+${mode === 'free'
+    ? `1. 用户（${myProfile.name}）正在”观察”群聊，TA 没有发言。
+2. 请参考上面的可见消息窗口和长期记忆，让知道事情的人自然接话，不知道的人不要装懂。
+3. 根据当前氛围决定 2-5 位角色是否发言，避免永远固定同几个人。
+4. 最近较少发言成员参考：${lessRecentSpeakerNames}`
+    : `1. 你正在群聊里回应用户最新一轮消息。
+2. 先回应当前轮，再结合每个角色自己可见的短期消息和长期记忆自然延展。
+3. 如果只有某个角色知道私聊秘密，只能让那个角色据此微妙反应，其他成员不能直接说出来。
+4. 最近较少发言成员参考：${lessRecentSpeakerNames}`}
+
+[本轮群聊回复人数要求]
+${replyGuidance.guidance}
+根据当前场景，在建议范围内自然决定回复人数。
+
+[输出格式]
+每条消息必须严格使用：
+MESSAGE_START
+SPEAKER: 角色名（必须从允许发言角色里逐字复制）
+CONTENT: 该角色这一条消息的内容（可以包含特殊指令）
+MESSAGE_END
+
+规则：
+1. SPEAKER 必须从“你可控制的角色”里逐字复制，不能用代称或外号。
+2. CONTENT 只写这一条消息，不要把多条消息合并。
+3. 不要扮演用户“${myProfile.name}”。
+4. 不要输出额外解释。
+`.trim();
+
+    const requestMessages = mode === 'free'
+        ? [
+            { role: 'system', content: finalSystemPrompt },
+            { role: 'user', content: '请根据上面的要求，自然继续这场群聊。' }
+        ]
+        : [
+            { role: 'system', content: finalSystemPrompt },
+            ...recentOpenAiMessages
+        ];
+
+    return {
+        requestMessages,
+        allMemberProfiles
+    };
 }
 
 async function triggerAiReply(contact) {
@@ -43743,9 +43878,8 @@ async function triggerAiReply(contact) {
     }
 
     try {
-        const rawResponse = (state.activeCall && state.activeCall.contactId === contact.id)
-            ? await generateAiResponse(contact, contact.history, null, false, 'chat')
-            : await generateAiResponse(null, [], null, false, 'chat', buildPrivateChatRequestMessages(contact, 'reply'));
+        const requestMessages = await buildPrivateChatRequestMessages(contact, 'reply');
+        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
 
         console.log('[AI RAW RESPONSE]', rawResponse);
         console.log('[PRIVATE RAW RESPONSE]', rawResponse);
@@ -43792,7 +43926,8 @@ async function triggerPrivateFreeChat(contact) {
     const requestId = createAiRequestId(contact.id);
 
     try {
-        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', buildPrivateChatRequestMessages(contact, 'free'));
+        const requestMessages = await buildPrivateChatRequestMessages(contact, 'free');
+        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
         console.log('[AI RAW RESPONSE]', rawResponse);
         console.log('[PRIVATE RAW RESPONSE]', rawResponse);
 
