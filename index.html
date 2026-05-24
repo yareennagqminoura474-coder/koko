@@ -14472,6 +14472,26 @@ function getGroupParseFallbackSpeaker(allMemberProfiles) {
     return fallbackSpeaker || profiles[0];
 }
 
+function splitGroupBubbleContents(content = '') {
+    return String(content || '')
+        .replace(/\r/g, '\n')
+        .split(/\n+/)
+        .map(line => line.trim())
+        .filter(line => line && !/^(SPEAKER|CONTENT|HEART_VOICE)\s*[:：]/i.test(line));
+}
+
+function pushParsedGroupMessages(results, speaker, content, heartVoice = null) {
+    if (!speaker) return;
+    const parts = splitGroupBubbleContents(content);
+    parts.forEach((part, index) => {
+        results.push({
+            speaker,
+            content: part,
+            heartVoice: index === 0 ? heartVoice : null
+        });
+    });
+}
+
 function parseGroupAiMessages(rawResponse, allMemberProfiles) {
     const text = String(rawResponse || '').trim();
     const results = [];
@@ -14484,7 +14504,7 @@ function parseGroupAiMessages(rawResponse, allMemberProfiles) {
         const content = match[2].trim();
         const speaker = resolveSpeakerProfile(speakerName, allMemberProfiles);
         if (speaker && content) {
-            results.push({ speaker, content, heartVoice: null });
+            pushParsedGroupMessages(results, speaker, content, null);
         } else {
             if (!speaker) {
                 console.warn('[UNKNOWN SPEAKER]', speakerName, text);
@@ -14506,7 +14526,7 @@ function parseGroupAiMessages(rawResponse, allMemberProfiles) {
         const speaker = resolveSpeakerProfile(speakerName, allMemberProfiles);
         const heartVoice = heartVoiceRaw ? normalizeHeartVoiceContent(heartVoiceRaw) : null;
         if (speaker && content) {
-            results.push({ speaker, content, heartVoice });
+            pushParsedGroupMessages(results, speaker, content, heartVoice);
         } else {
             if (!speaker) {
                 console.warn('[UNKNOWN SPEAKER]', speakerName, text);
@@ -14522,7 +14542,7 @@ function parseGroupAiMessages(rawResponse, allMemberProfiles) {
         const content = match[2].trim();
         const speaker = resolveSpeakerProfile(speakerName, allMemberProfiles);
         if (speaker && content) {
-            results.push({ speaker, content, heartVoice: null });
+            pushParsedGroupMessages(results, speaker, content, null);
         } else {
             if (!speaker) {
                 console.warn('[UNKNOWN SPEAKER]', speakerName, text);
@@ -14532,25 +14552,7 @@ function parseGroupAiMessages(rawResponse, allMemberProfiles) {
     }
     if (results.length > 0) return results;
 
-    const fallbackSpeaker = getGroupParseFallbackSpeaker(allMemberProfiles);
-    const cleanedText = text
-        .replace(/MESSAGE_START|MESSAGE_END/gi, '')
-        .replace(/^\s*SPEAKER:\s*[^\n\r]*$/gim, '')
-        .replace(/^\s*HEART_VOICE\s*[:：][\s\S]*$/gim, '')
-        .replace(/^\s*CONTENT:\s*/gim, '')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim() || text;
-    if (!fallbackSpeaker) {
-        console.warn('[GROUP FALLBACK FAILED] no speaker available', text);
-    }
-    if (fallbackSpeaker && cleanedText) {
-        console.warn('[GROUP FALLBACK DISPLAY RAW]', cleanedText);
-        results.push({
-            speaker: fallbackSpeaker,
-            content: cleanedText,
-            heartVoice: null
-        });
-    }
+    console.warn('[GROUP PARSE FAILED]', text);
 
     return results;
 }
@@ -18482,6 +18484,21 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
         </div>
         ${replyButtonHTML} ${recallButtonHTML}
     `;
+            const avatarEl = wrapper.querySelector('.message-avatar');
+            if (avatarEl && heartVoiceCharacterId) {
+                avatarEl.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                    const liveChat = state.contacts.find(c => c.id === contact.id) || contact;
+                    console.log('[AVATAR CLICK OPEN HV]', {
+                        senderId: normalizedSenderId,
+                        chatId: liveChat.id,
+                        isGroup: !!liveChat.isGroup
+                    });
+                    openHeartVoicePanel(heartVoiceCharacterId, liveChat);
+                });
+            }
             wrapper.addEventListener('click', () => handleMessageSelection(wrapper, message));
             return wrapper;
         }
@@ -19652,7 +19669,12 @@ async function triggerGroupFreeChat(group) {
 
         const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
         if (parsedMessages.length === 0) {
-            throw new Error("AI未能生成有效的群聊内容。");
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: '群聊格式解析失败'
+            }, 'system', group, false, 'chat');
+            return;
         }
 
         for (const { speaker, content, heartVoice } of parsedMessages) {
@@ -19710,7 +19732,12 @@ async function triggerGroupChatAiReply(group) {
 
         const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
         if (parsedMessages.length === 0) {
-            throw new Error("AI 未能生成有效的群聊内容。");
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: '群聊格式解析失败'
+            }, 'system', group, false, 'chat');
+            return;
         }
 
         for (const { speaker, content, heartVoice } of parsedMessages) {
@@ -43898,7 +43925,6 @@ document.getElementById('map-list').addEventListener('click', async (e) => {
 const heartVoicePanel = document.getElementById('heart-voice-panel');
 const closeHeartVoicePanelBtn = document.getElementById('close-heart-voice-panel');
 const toggleHeartVoiceHistoryBtn = document.getElementById('hv-toggle-history-btn');
-const headerContactAvatarEl = document.getElementById('header-contact-avatar');
 
 if (closeHeartVoicePanelBtn) {
     closeHeartVoicePanelBtn.addEventListener('click', (event) => {
@@ -43913,15 +43939,6 @@ if (toggleHeartVoiceHistoryBtn) {
         const shouldShowHistory = !heartVoicePanel.classList.contains('show-history');
         heartVoicePanel.classList.toggle('show-history', shouldShowHistory);
         toggleHeartVoiceHistoryBtn.textContent = shouldShowHistory ? '收起心声记录' : '查看全部心声记录';
-    });
-}
-
-if (headerContactAvatarEl) {
-    headerContactAvatarEl.addEventListener('click', (event) => {
-        const contact = state.contacts.find(item => item.id === state.activeChatId);
-        if (!contact || contact.isGroup) return;
-        event.stopPropagation();
-        openHeartVoicePanel(contact.id, contact);
     });
 }
 
@@ -44774,13 +44791,15 @@ MESSAGE_END
 
 规则：
 1. SPEAKER 必须从“你可控制的角色”里逐字复制，不能用代称或外号。
-2. CONTENT 只写这一条消息，不要把多条消息合并。
-3. 正常情况下整轮要输出多条 MESSAGE_START / MESSAGE_END，不要只给一条总结式回复。
-4. HEART_VOICE 必须是单行 JSON；如果这一条没有合适心声，可以省略这一行。
-5. HEART_VOICE 的 thoughts 必须严格对应这个 SPEAKER 本条 CONTENT 的真实内心，长度 15 到 45 字。
-6. HEART_VOICE 不能写泛泛模板，不能复述旧记忆，不能和本轮说出口的话脱节。
-7. 不要扮演用户“${myProfile.name}”。
-8. 不要输出额外解释。
+2. 一个 MESSAGE_START 只能代表一个聊天气泡。
+3. CONTENT 只能写这一条消息，不允许写多段、不允许包含其他角色发言、不允许写剧本段落、旁白段落或总结段落。
+4. 如果同一个角色想连续说两句，也必须拆成两个 MESSAGE_START / MESSAGE_END 块。
+5. 正常情况下整轮要输出多条 MESSAGE_START / MESSAGE_END，不要只给一条总结式回复。
+6. HEART_VOICE 必须是单行 JSON；如果这一条没有合适心声，可以省略这一行。
+7. HEART_VOICE 的 thoughts 必须严格对应这个 SPEAKER 本条 CONTENT 的真实内心，长度 15 到 45 字。
+8. HEART_VOICE 不能写泛泛模板，不能复述旧记忆，不能和本轮说出口的话脱节。
+9. 不要扮演用户“${myProfile.name}”。
+10. 不要输出额外解释。
 `.trim();
 
     const requestMessages = mode === 'free'
