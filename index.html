@@ -13855,11 +13855,19 @@ async function openCharacterProfileFromSenderId(senderId, currentChat) {
     const resolvedChat = state.contacts.find(contact => contact.id === currentChat?.id) || currentChat;
     const profile = resolveMessageSenderProfile(normalizedSenderId, resolvedChat);
     if (!profile || !resolvedChat) {
-        alert('未找到该角色资料');
+        alert('未找到该角色资料或心声记录');
         return null;
     }
 
-    openHeartVoicePanel(profile.id || normalizedSenderId, resolvedChat);
+    const heartVoiceCharacterId = resolvedChat.isGroup
+        ? (profile.id || normalizedSenderId)
+        : resolvedChat.id;
+    console.log('[AVATAR CLICK OPEN HV]', {
+        senderId: normalizedSenderId,
+        chatId: resolvedChat.id,
+        isGroup: !!resolvedChat.isGroup
+    });
+    openHeartVoicePanel(heartVoiceCharacterId, resolvedChat);
     return profile;
 }
 
@@ -17734,7 +17742,9 @@ if (finalBackgroundUrl) {
                 messagesToRender = allMessagesInPage;
             } else {
                 // 如果是普通聊天模式，就和之前一样，把通话记录隐藏起来
-                messagesToRender = allMessagesInPage.filter(msg => msg.type !== 'video_call_text');
+                messagesToRender = allMessagesInPage.filter(msg =>
+                    msg.type !== 'video_call_text' && msg.type !== 'heart_voice'
+                );
             }
 
             const existingLoadMoreBtn = document.getElementById('load-more-messages');
@@ -23036,13 +23046,27 @@ function findLatestHeartVoiceRelatedMessageId(chatContext, senderId, sinceTimest
     return relatedMessage?.id || null;
 }
 
+function getHeartVoiceSenderId(message, chatContext) {
+    if (!message) return '';
+    let senderId = normalizeMessageSenderId(
+        message.senderId || message.sender || message.characterId || ''
+    );
+    if (!chatContext?.isGroup && senderId === 'contact') {
+        senderId = normalizeMessageSenderId(chatContext.id);
+    }
+    return senderId;
+}
+
 async function saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVoiceContent, options = {}) {
     if (!senderProfile || !effectiveChatContext || !heartVoiceContent) return;
     if (senderProfile.id === 'myProfile' || senderProfile.id === 'user') return;
     if (senderProfile.id === 'system') return;
 
     const normalized = normalizeHeartVoiceContent(heartVoiceContent);
-    if (!normalized || !normalized.thoughts) return;
+    if (!normalized || !normalized.thoughts) {
+        console.warn('[HV SKIPPED EMPTY]', { senderProfile, effectiveChatContext, heartVoiceContent });
+        return;
+    }
     if (isBadHeartVoiceContent(normalized)) {
         console.warn('[BAD HEART_VOICE REPLACED]', normalized);
         const fallback = buildFallbackHeartVoicePayload(
@@ -23056,16 +23080,47 @@ async function saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVo
         normalized.jealousy = fallback.jealousy;
     }
 
-    await createAndAddMessage({
+    const liveChat = state.contacts.find(contact => contact.id === effectiveChatContext.id) || effectiveChatContext;
+    if (!Array.isArray(liveChat.history)) {
+        liveChat.history = [];
+    }
+
+    const heartVoiceRecord = {
+        id: `heart_voice_${Date.now()}_${Math.random()}`,
         type: 'heart_voice',
-        senderId: senderProfile.id,
         subType: 'heart_voice_record',
+        sender: senderProfile.id,
+        senderId: senderProfile.id,
+        characterId: senderProfile.id,
+        chatId: liveChat.id,
+        relatedChatId: liveChat.id,
+        relatedMessageId: options.relatedMessageId || findLatestHeartVoiceRelatedMessageId(liveChat, senderProfile.id, options.sinceTimestamp),
         content: normalized,
+        text: normalized.thoughts,
+        timestamp: Date.now(),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        source: liveChat.isGroup ? 'group' : 'private',
         perceivers: uniqueStringArray(['user', senderProfile.id].map(normalizeEntityIdForVisibility)),
-        relatedChatId: effectiveChatContext.id,
-        relatedMessageId: options.relatedMessageId || findLatestHeartVoiceRelatedMessageId(effectiveChatContext, senderProfile.id, options.sinceTimestamp),
-        source: effectiveChatContext.isGroup ? 'group' : 'private'
-    }, senderProfile.id, effectiveChatContext, false, 'chat');
+    };
+
+    liveChat.history.push(heartVoiceRecord);
+    await kokoMemory.put('contacts', liveChat);
+
+    const openedPanel = document.getElementById('heart-voice-panel');
+    if (openedPanel && openedPanel.style.display === 'flex') {
+        const openedCharacterId = openedPanel.dataset.characterId;
+        const openedChatId = openedPanel.dataset.chatId;
+        if (openedCharacterId && openedChatId === liveChat.id) {
+            renderHeartVoicePanelRecords(getHeartVoiceRecords(liveChat, openedCharacterId));
+        }
+    }
+
+    console.log('[HV SAVED]', {
+        chatId: liveChat.id,
+        senderId: senderProfile.id,
+        total: liveChat.history.filter(message => message.type === 'heart_voice').length,
+        latest: normalized
+    });
 }
 
 async function saveLatestHeartVoice(senderProfile, effectiveChatContext, heartVoiceContent, options = {}) {
@@ -23078,6 +23133,13 @@ async function ensureHeartVoiceForPrivateReply(rawText, visibleText, contact, or
     if (!heartVoice) {
         heartVoice = buildFallbackHeartVoicePayload(visibleText || rawText, contact, originContext);
     }
+    console.log('[HV PRIVATE ENSURE]', {
+        contactId: contact?.id,
+        chatId: originContext?.id,
+        rawHasHeartVoice: /\[(heart_voice|心声)\]/i.test(String(rawText || '')),
+        visibleText,
+        heartVoice
+    });
     await saveHeartVoiceRecord(contact, originContext, heartVoice, {
         sinceTimestamp: roundStartedAt
     });
@@ -23090,6 +23152,13 @@ async function ensureHeartVoiceForGroupMessage(content, speaker, group, messageS
     if (!heartVoice) {
         heartVoice = buildFallbackHeartVoicePayload(content, speaker, group);
     }
+    console.log('[HV GROUP ENSURE]', {
+        groupId: group?.id,
+        speakerId: speaker?.id,
+        content,
+        parsedHeartVoice,
+        heartVoice
+    });
     await saveHeartVoiceRecord(speaker, group, heartVoice, {
         sinceTimestamp: messageStartedAt
     });
@@ -23097,12 +23166,22 @@ async function ensureHeartVoiceForGroupMessage(content, speaker, group, messageS
 }
 
 function getHeartVoiceRecords(chatContext, characterId) {
-    if (!chatContext || !Array.isArray(chatContext.history) || !characterId) return [];
-    return (chatContext.history || [])
+    if (!chatContext || !Array.isArray(chatContext.history) || !characterId) {
+        console.log('[HV READ]', {
+            chatId: chatContext?.id,
+            characterId,
+            totalHeartVoices: (chatContext?.history || []).filter(message => message.type === 'heart_voice').length,
+            matchedRecords: 0
+        });
+        return [];
+    }
+
+    const normalizedCharacterId = normalizeMessageSenderId(characterId);
+    const records = (chatContext.history || [])
         .filter(message =>
             message
             && message.type === 'heart_voice'
-            && normalizeMessageSenderId(message.senderId || message.sender) === normalizeMessageSenderId(characterId)
+            && getHeartVoiceSenderId(message, chatContext) === normalizedCharacterId
         )
         .map(message => ({
             ...message,
@@ -23116,6 +23195,27 @@ function getHeartVoiceRecords(chatContext, characterId) {
         }))
         .filter(message => message.content?.thoughts)
         .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0));
+
+    const totalHeartVoices = (chatContext.history || []).filter(message => message.type === 'heart_voice').length;
+    console.log('[HV READ]', {
+        chatId: chatContext?.id,
+        characterId,
+        totalHeartVoices,
+        matchedRecords: records.length
+    });
+    if (records.length === 0 && totalHeartVoices > 0) {
+        console.warn('[HV READ NO MATCH]', {
+            characterId,
+            allHeartVoices: (chatContext.history || [])
+                .filter(message => message.type === 'heart_voice')
+                .map(message => ({
+                    sender: message.sender,
+                    senderId: message.senderId,
+                    content: message.content
+                }))
+        });
+    }
+    return records;
 }
 
 function formatHeartVoiceRecordTime(timestamp) {
@@ -23201,6 +23301,13 @@ function openHeartVoicePanel(characterId, chatContext) {
         : (state.contacts.find(item => item.id === characterId) || targetChat);
     const records = getHeartVoiceRecords(targetChat, characterId);
     const sourceLabel = targetChat.isGroup ? `当前群聊 · ${targetChat.name}` : '当前私聊';
+
+    console.log('[HV PANEL OPEN]', {
+        characterId,
+        targetChatId: targetChat?.id,
+        isGroup: targetChat?.isGroup,
+        recordsCount: records.length
+    });
 
     nameEl.textContent = profile?.name
         ? `${profile.name} · ${sourceLabel}`
@@ -41019,7 +41126,10 @@ document.getElementById('chat-messages').addEventListener('click', async (e) => 
         const senderId = clickedAvatar.dataset.senderId
             || avatarWrapper?.dataset.senderId
             || avatarWrapper?.querySelector('.message-avatar')?.dataset.senderId;
-        if (!senderId) return;
+        if (!senderId) {
+            alert('未找到该角色资料或心声记录');
+            return;
+        }
         e.stopPropagation();
         if (chatAvatarClickTimer) {
             clearTimeout(chatAvatarClickTimer);
