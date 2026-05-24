@@ -12216,6 +12216,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
     </div>
 </div>
+</div>
 <div id="heart-voice-panel" class="heart-voice-panel" style="display: none;">
     <div class="hv-panel-header">
         <div>
@@ -45825,6 +45826,10 @@ attachGroupSettingsListeners();
 // 保存外观设置按钮
 document.getElementById('save-appearance-btn').addEventListener('click', saveAppearanceSettings);
 document.getElementById('clean-bad-heart-voices-btn')?.addEventListener('click', cleanBadHeartVoices);
+}
+const heartVoicePanelNode = document.getElementById('heart-voice-panel');
+if (heartVoicePanelNode && heartVoicePanelNode.parentElement !== document.body) {
+    document.body.appendChild(heartVoicePanelNode);
 }
 attachEventListeners();
 // --- 紧急修复：重新绑定搜索按钮 ---
