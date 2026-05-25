@@ -12607,10 +12607,11 @@ const dbConfig = {
     forumCategories: { keyPath: 'id' },
     surveyLibrary: { keyPath: 'id' },
     themePresets: { keyPath: 'id' },
-    knowledge: { keyPath: 'id' }
+    knowledge: { keyPath: 'id' },
+    character_states: { keyPath: 'id' }
 };
 // ▼▼▼ 把这里的版本号数字加 1 (例如 13 -> 19) ▼▼▼
-const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 26, dbConfig);
+const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 27, dbConfig);
 // ▲▲▲ 版本号修改结束 ▲▲▲
 
     // --------------------------------------------------------------------
@@ -12884,6 +12885,7 @@ function parseLyrics(lrc) {
         // ✨✨✨ 用下面这个完整的代码块，替换掉你原来的 INITIAL_STATE ✨✨✨
         const INITIAL_STATE = {
             contacts: [],
+            characterStates: [],
             knowledge: [],
             worldBooks: [],
             posts: [],
@@ -13107,7 +13109,8 @@ async function loadDataFromDB() {
             forumCategories,
             emoticonGroups,
             themePresets,
-            knowledge
+            knowledge,
+            characterStates
         ] = await Promise.all([
             kokoMemory.getAll('contacts'),
             kokoMemory.getAll('worldBooks'),
@@ -13131,7 +13134,8 @@ async function loadDataFromDB() {
             kokoMemory.getAll('forumCategories'),
             kokoMemory.getAll('emoticonGroups'),
             kokoMemory.getAll('themePresets'),
-            kokoMemory.getAll('knowledge')
+            kokoMemory.getAll('knowledge'),
+            kokoMemory.getAll('character_states')
         ]);
 
         if (!myProfile) {
@@ -13188,6 +13192,7 @@ async function loadDataFromDB() {
             state.forumCategories = forumCategories || []; // <-- ✨ 在这里添加新的一行
             state.themePresets = themePresets || [];
             state.knowledge = (knowledge || []).map((entry, index) => normalizeKnowledgeEntry(entry, index));
+            state.characterStates = characterStates || [];
                         // ▼▼▼▼▼▼ 把这段新代码粘贴到这里 ▼▼▼▼▼▼
             // 初始化分组逻辑
             if (!emoticonGroups || emoticonGroups.length === 0) {
@@ -13225,6 +13230,9 @@ async function loadDataFromDB() {
             isInitialPostLoad = state.posts.length < 20;
         }
         
+        state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
+        window.state = state;
+
         const migratedContacts = [];
         state.contacts.forEach((contact, contactIndex) => {
             let contactChanged = false;
@@ -14324,6 +14332,32 @@ function buildUnifiedMemoryStreamForChat(chatTarget, options = {}) {
         const activeMemberIds = (group.members || []).filter(memberId =>
             memberId !== 'myProfile' && !(group.mutedMembers || []).includes(memberId)
         );
+        const groupHeartVoiceRecords = [];
+        const groupMemberIds = [
+            ...(chatTarget.members || []),
+            ...((chatTarget.npcMembers || []).map(npc => npc.id))
+        ];
+
+        for (const memberId of groupMemberIds) {
+            const records = getHeartVoiceRecords(chatTarget, memberId);
+            if (records.length > 0) {
+                groupHeartVoiceRecords.push({
+                    memberId,
+                    record: records[0]
+                });
+            }
+        }
+
+        if (groupHeartVoiceRecords.length > 0) {
+            latestHeartVoiceString = groupHeartVoiceRecords
+                .slice(0, 5)
+                .map(item => {
+                    const profile = getProfileInGroupContext(chatTarget, item.memberId) || state.contacts.find(c => c.id === item.memberId);
+                    const name = profile?.name || item.memberId;
+                    return `${name}: ${JSON.stringify(item.record.content).replace(/(\r\n|\n|\r)/gm, '')}`;
+                })
+                .join('\n');
+        }
 
         group.history
             .filter(message => message?.type !== 'heart_voice')
@@ -14373,9 +14407,10 @@ function buildUnifiedMemoryStreamForChat(chatTarget, options = {}) {
     } else {
         const contact = chatTarget;
         const privateTargetRoleIds = [contact.id];
-        const latestHeartVoice = [...(contact.history || [])].reverse().find(message => message?.type === 'heart_voice');
+        const latestHeartVoiceRecords = getHeartVoiceRecords(contact, contact.id);
 
-        if (latestHeartVoice?.content) {
+        if (latestHeartVoiceRecords.length > 0) {
+            const latestHeartVoice = latestHeartVoiceRecords[0];
             try {
                 latestHeartVoiceString = JSON.stringify(latestHeartVoice.content).replace(/(\r\n|\n|\r)/gm, '');
             } catch (error) {
@@ -19089,7 +19124,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
         decision: heartVoiceDecision
     });
 
-    if (heartVoiceDecision.shouldCreate) {
+    if (heartVoiceDecision.shouldCreate && state.suppressLegacyHeartVoiceCommit !== true) {
         await createHeartVoiceForCommittedMessage(fullMessage, contact, heartVoiceDecision);
     }
 
@@ -19603,16 +19638,10 @@ ${worldBookContextString}
 3. 继续当前最自然的话题，不要机械复述记录，不要强行输出日记。
 4. 不要输出 [diary]。
 
-[心声生成规则]
-1. 你本轮回复最后必须输出一段 [heart_voice]...[/heart_voice]。
-2. heart_voice 必须和“用户最新一条消息”以及“你本轮实际说出口的话”直接相关。
-3. 不要写泛泛模板。
-4. 不要复述旧记忆。
-5. 不要写与本轮无关的情绪。
-6. heart_voice 是角色没说出口的真实想法，长度 15 到 45 字。
-7. 普通聊天不要输出 [diary]。
-8. 建议使用 JSON：
-[heart_voice]{"emotion":"开心/低落/在意/不爽/平静/紧张","thoughts":"这里写本轮具体心声","heartRate":"平稳/偏快/很快","jealousy":"无/有一点/明显"}[/heart_voice]
+[Echoes 式输出规则]
+你必须只输出 JSON，不要输出 JSON 以外的任何文字：
+{"responses":[{"characterId":"${contact.id}","text":"角色说出口的话"}],"states":[{"characterId":"${contact.id}","mood":"当前情绪","affection":"当前关系/好感状态","clothing":"日常","action":"当前动作或状态","innerThoughts":"第一人称心理独白，15-60字，必须是角色没说出口的真实想法"}]}
+responses 负责聊天气泡；states 只用于心声面板。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
 `.trim() : `
 [！！！核心任务！！！]
 用户（${myProfile.name}）正在”观察”你，TA没有发言。
@@ -19623,16 +19652,10 @@ ${worldBookContextString}
 4. 可以自然提到”刚刚群里””他们刚才”，但不要像机器人一样总结来源。
 5. 不要输出 [diary]。
 
-[心声生成规则]
-1. 你本轮回复最后必须输出一段 [heart_voice]...[/heart_voice]。
-2. heart_voice 必须和“用户最新一条消息”以及“你本轮实际说出口的话”直接相关。
-3. 不要写泛泛模板。
-4. 不要复述旧记忆。
-5. 不要写与本轮无关的情绪。
-6. heart_voice 是角色没说出口的真实想法，长度 15 到 45 字。
-7. 普通聊天不要输出 [diary]。
-8. 建议使用 JSON：
-[heart_voice]{"emotion":"开心/低落/在意/不爽/平静/紧张","thoughts":"这里写本轮具体心声","heartRate":"平稳/偏快/很快","jealousy":"无/有一点/明显"}[/heart_voice]
+[Echoes 式输出规则]
+你必须只输出 JSON，不要输出 JSON 以外的任何文字：
+{"responses":[{"characterId":"${contact.id}","text":"角色说出口的话"}],"states":[{"characterId":"${contact.id}","mood":"当前情绪","affection":"当前关系/好感状态","clothing":"日常","action":"当前动作或状态","innerThoughts":"第一人称心理独白，15-60字，必须是角色没说出口的真实想法"}]}
+responses 负责聊天气泡；states 只用于心声面板。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
 `.trim();
         
         const requestMessages = [
@@ -19811,6 +19834,10 @@ async function triggerGroupFreeChat(group) {
             return;
         }
 
+        if (await handleEchoesStyleAiResult(rawResponse, group, allMemberProfiles[0] || null)) {
+            return;
+        }
+
         const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
         if (parsedMessages.length === 0) {
             await createAndAddMessage({
@@ -19871,6 +19898,10 @@ async function triggerGroupChatAiReply(group) {
         }
         if (!isLatestAiRequest(group.id, requestId)) {
             console.warn('[GROUP REPLY RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+            return;
+        }
+
+        if (await handleEchoesStyleAiResult(rawResponse, group, allMemberProfiles[0] || null)) {
             return;
         }
 
@@ -20129,8 +20160,8 @@ const NORMAL_BASE_PROMPT = `
 [可用表情包列表]
 {{emoticon_list}}
 
-[！！！绝对核心规则：关于心声！！！]
-在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行，使用 \`[heart_voice]...[/heart_voice]\` 标签生成一段角色的实时内心状态。这个状态必须包含以下四个方面，并严格按照【单行JSON格式】书写，JSON对象内部【绝不能包含任何换行符】。格式示例: {"emotion": "(情绪)", "thoughts": "(思绪)", "heartRate": "(心率)", "jealousy": "(醋意指数)"}
+[Echoes 角色状态规则]
+不要输出 [heart_voice] 标签。角色没说出口的心声必须写入最终 JSON 的 states[].innerThoughts。
 
 [普通聊天中的日记规则]
 普通聊天不要主动输出 \`[diary]\`。只有在用户明确要求写日记，或系统任务明确要求单独生成日记时，才允许输出 \`[diary]\`。
@@ -20144,7 +20175,6 @@ const NORMAL_BASE_PROMPT = `
 [sticker:开心]
 [status:准备出门]
 [qzone]久违的阳光！准备去公园抓光影啦 ✨ [picture:阳光洒在窗台上的照片][/qzone]
-[heart_voice]{"emotion": "期待", "thoughts": "不知道她会不会同意我的邀请，心跳得好快。", "heartRate": "110 bpm", "jealousy": ""}[/heart_voice]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
 以下是你和用户最近按【时间顺序】发生的所有互动记录，可能包含[私聊]、[群聊]、[论坛]、[短信]和[系统事件]。这是你决策和回应的【最高优先级】信息源。在回复前，你必须仔细阅读并理解所有记录。
@@ -20220,8 +20250,8 @@ const NARRATIVE_BASE_PROMPT = `
 - 格式: \`[status: 新状态]\` (例如: [status:害羞], [status:睡觉中], [status:忙碌], [status:在想你])
 - 规则: 不要一直挂着“在线”。如果描写了“去洗澡”，必须改为“洗澡中”；如果描写了“困了”，改为“睡觉中”。
 
-[！！！绝对核心规则：关于心声！！！]
-在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行，使用 \`[heart_voice]...[/heart_voice]\` 标签生成一段角色的实时内心状态。这个状态必须包含以下四个方面，并严格按照【单行JSON格式】书写，JSON对象内部【绝不能包含任何换行符】。格式示例: {"emotion": "(情绪)", "thoughts": "(思绪)", "heartRate": "(心率)", "jealousy": "(醋意指数)"}
+[Echoes 角色状态规则]
+不要输出 [heart_voice] 标签。角色没说出口的心声必须写入最终 JSON 的 states[].innerThoughts。
 
 [普通聊天中的日记规则]
 普通叙事聊天不要主动输出 \`[diary]\`。只有在用户明确要求写日记，或系统任务明确要求单独生成日记时，才允许输出 \`[diary]\`。
@@ -20229,7 +20259,6 @@ const NARRATIVE_BASE_PROMPT = `
 [示例回复格式]
 *他走到窗边，看着外面的雨滴。* “下雨了呢。” *他转过身，对你露出一丝微笑。* {不知道你喜不喜欢下雨天。} “你晚饭想吃什么？” *他轻轻地问，手指无意识地敲打着窗台。*
 [status:有点饿了]
-[heart_voice]{"emotion": "期待", "thoughts": "不知道她会不会同意我的邀请，心跳得好快。", "heartRate": "110 bpm", "jealousy": ""}[/heart_voice]
 
 ${PRIVATE_UNIFIED_MEMORY_RULES}
 
@@ -23100,6 +23129,274 @@ function buildFallbackHeartVoicePayload(visibleText, contact, originContext) {
     };
 }
 
+function inferHeartRateFromMood(mood = '') {
+    return inferHeartVoiceHeartRate('', mood);
+}
+
+function inferJealousyFromThought(thought = '') {
+    return inferHeartVoiceJealousy(thought);
+}
+
+function buildFallbackInnerThought(rawText, senderProfile, chatContext) {
+    const payload = buildFallbackHeartVoicePayload(rawText, senderProfile, chatContext);
+    return payload.thoughts || '我没有直接说出来，但心里还是因为这一轮对话起了波动。';
+}
+
+function parseEchoesStyleAiResult(rawText) {
+    const cleaned = String(rawText || '')
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/```$/i, '')
+        .trim();
+
+    try {
+        const parsed = JSON.parse(cleaned);
+        return {
+            responses: Array.isArray(parsed.responses) ? parsed.responses : [],
+            states: Array.isArray(parsed.states) ? parsed.states : []
+        };
+    } catch (error) {
+        console.warn('[ECHOES_STYLE_PARSE_FAILED]', error, rawText);
+        return null;
+    }
+}
+
+function normalizeEchoesResponseCharacterId(response, chat, fallbackSenderProfile = null) {
+    const raw = String(
+        response?.characterId ||
+        response?.senderId ||
+        response?.id ||
+        response?.name ||
+        ''
+    ).trim();
+
+    const normalizedRaw = normalizeMessageSenderId(raw);
+
+    if (!chat?.isGroup) {
+        const chatId = normalizeMessageSenderId(chat?.id);
+        const fallbackId = normalizeMessageSenderId(fallbackSenderProfile?.id);
+
+        if (!normalizedRaw || normalizedRaw === 'contact') return chatId;
+        if (normalizedRaw === chatId) return chatId;
+        if (fallbackId && normalizedRaw === fallbackId) return fallbackId;
+
+        const chatName = String(chat?.name || '').trim();
+        const fallbackName = String(fallbackSenderProfile?.name || '').trim();
+
+        if (raw && (raw === chatName || raw === fallbackName)) return chatId;
+
+        if (!isCurrentUserSenderId(normalizedRaw)) return chatId;
+
+        return '';
+    }
+
+    const memberIds = [
+        ...(chat.members || []),
+        ...((chat.npcMembers || []).map(npc => npc.id))
+    ].map(normalizeMessageSenderId);
+
+    if (memberIds.includes(normalizedRaw)) return normalizedRaw;
+
+    const groupProfiles = [
+        ...(chat.members || []).map(id => state.contacts.find(c => normalizeMessageSenderId(c.id) === normalizeMessageSenderId(id))).filter(Boolean),
+        ...(chat.npcMembers || [])
+    ];
+
+    const matchedByName = groupProfiles.find(profile => {
+        const names = [
+            profile.id,
+            profile.name,
+            profile.nickname,
+            profile.remark,
+            profile.alias
+        ].filter(Boolean).map(value => String(value).trim());
+
+        return names.includes(raw);
+    });
+
+    if (matchedByName?.id) return normalizeMessageSenderId(matchedByName.id);
+
+    if (fallbackSenderProfile?.id) {
+        const fallbackId = normalizeMessageSenderId(fallbackSenderProfile.id);
+        if (memberIds.includes(fallbackId)) return fallbackId;
+    }
+
+    console.warn('[ECHOES CHARACTER ID UNMATCHED]', {
+        raw,
+        normalizedRaw,
+        chatId: chat?.id,
+        chatName: chat?.name,
+        memberIds,
+        groupProfiles: groupProfiles.map(p => ({ id: p.id, name: p.name }))
+    });
+
+    return '';
+}
+
+async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile = null) {
+    if (!Array.isArray(responses) || !chat) return [];
+    const rendered = [];
+    const previousSuppressLegacy = state.suppressLegacyHeartVoiceCommit === true;
+    state.suppressLegacyHeartVoiceCommit = true;
+
+    try {
+        for (const response of responses) {
+            const text = String(response?.text || response?.content || '').trim();
+            if (!text) continue;
+
+            const characterId = normalizeEchoesResponseCharacterId(response, chat, fallbackSenderProfile);
+            if (!characterId || isCurrentUserSenderId(characterId)) continue;
+
+            const speaker = chat.isGroup
+                ? getHeartVoiceSenderProfile(characterId, chat)
+                : (state.contacts.find(item => normalizeMessageSenderId(item.id) === characterId) || fallbackSenderProfile || chat);
+            if (!speaker || !speaker.id) continue;
+
+            const message = await createAndAddMessage({
+                type: 'text',
+                sender: speaker.id,
+                content: text
+            }, speaker.id, chat, true, 'chat');
+            if (message) rendered.push(message);
+        }
+    } finally {
+        state.suppressLegacyHeartVoiceCommit = previousSuppressLegacy;
+    }
+
+    return rendered;
+}
+
+async function saveCharacterStateRecords(states, chat, fallbackSenderProfile = null) {
+    if (!Array.isArray(states) || !chat) return [];
+
+    state.characterStates = state.characterStates || [];
+
+    const saved = [];
+    for (const item of states) {
+        if (!item) continue;
+
+        const characterId = normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile);
+
+        if (!characterId) {
+            console.warn('[ECHOES STATE SKIP] cannot_normalize_character_id', {
+                item,
+                chatId: chat?.id,
+                chatName: chat?.name
+            });
+            continue;
+        }
+
+        if (isCurrentUserSenderId(characterId)) {
+            console.warn('[ECHOES STATE SKIP] current_user', { item, characterId });
+            continue;
+        }
+
+        const innerThoughts = String(item.innerThoughts || item.thoughts || '').trim();
+
+        if (!innerThoughts) {
+            console.warn('[ECHOES STATE SKIP] empty_innerThoughts', { item, characterId });
+            continue;
+        }
+
+        const record = {
+            id: `state_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            characterId,
+            chatId: chat.id,
+            source: chat.isGroup ? 'group' : 'private',
+            timestamp: Date.now(),
+            mood: item.mood || item.emotion || '平静',
+            affection: item.affection || '',
+            clothing: item.clothing || '',
+            action: item.action || '',
+            innerThoughts
+        };
+
+        state.characterStates.push(record);
+        saved.push(record);
+    }
+
+    if (saved.length > 0) {
+        await Promise.all(saved.map(record => kokoMemory.put('character_states', record)));
+        window.state = state;
+        console.log('[ECHOES_STATE_SAVED]', saved);
+    } else {
+        console.warn('[ECHOES_STATE_EMPTY_AFTER_NORMALIZE]', {
+            chatId: chat?.id,
+            chatName: chat?.name,
+            rawStates: states
+        });
+    }
+
+    return saved;
+}
+
+function buildFallbackStatesForEchoesResponses(responses, chat, fallbackSenderProfile, rawText = '') {
+    if (!chat) return [];
+    const seen = new Set();
+    const states = [];
+
+    const addState = (characterId, text) => {
+        const normalizedId = normalizeMessageSenderId(characterId);
+        if (!normalizedId || isCurrentUserSenderId(normalizedId) || seen.has(normalizedId)) return;
+        seen.add(normalizedId);
+        const speaker = getHeartVoiceSenderProfile(normalizedId, chat) || fallbackSenderProfile || chat;
+        states.push({
+            characterId: normalizedId,
+            mood: speaker?.status || '平静',
+            affection: '',
+            clothing: '',
+            action: '',
+            innerThoughts: buildFallbackInnerThought(text || rawText, speaker, chat)
+        });
+    };
+
+    (responses || []).forEach(response => {
+        const characterId = normalizeEchoesResponseCharacterId(response, chat, fallbackSenderProfile);
+        addState(characterId, response?.text || response?.content || rawText);
+    });
+
+    if (!states.length && fallbackSenderProfile && !chat.isGroup) {
+        addState(fallbackSenderProfile.id || chat.id, rawText);
+    }
+
+    return states;
+}
+
+function refreshHeartVoicePanelIfOpen(chat) {
+    const panel = document.getElementById('heart-voice-panel');
+    if (!panel || panel.style.display !== 'flex' || !chat) return;
+
+    const openedCharacterId = panel.dataset.characterId;
+    const openedChatId = panel.dataset.chatId;
+    if (!openedCharacterId || openedChatId !== chat.id) return;
+
+    renderHeartVoicePanelRecords(getHeartVoiceRecords(chat, openedCharacterId));
+}
+
+async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null) {
+    const parsed = parseEchoesStyleAiResult(rawResponse);
+    if (!parsed) return false;
+
+    const renderedMessages = await renderEchoesStyleResponses(parsed.responses, chat, fallbackSenderProfile);
+    const explicitStateIds = new Set((parsed.states || [])
+        .filter(item => String(item?.innerThoughts || item?.thoughts || '').trim())
+        .map(item => normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile))
+        .filter(Boolean));
+    const fallbackStates = buildFallbackStatesForEchoesResponses(parsed.responses, chat, fallbackSenderProfile, rawResponse)
+        .filter(item => !explicitStateIds.has(normalizeMessageSenderId(item.characterId)));
+    await saveCharacterStateRecords([...(parsed.states || []), ...fallbackStates], chat, fallbackSenderProfile);
+    refreshHeartVoicePanelIfOpen(chat);
+
+    console.log('[ECHOES_STYLE_HANDLED]', {
+        chatId: chat?.id,
+        responses: parsed.responses.length,
+        renderedMessages: renderedMessages.length,
+        states: (parsed.states || []).length,
+        fallbackStates: fallbackStates.length
+    });
+    return true;
+}
+
 function inferHeartVoiceEmotion(text) {
     const t = String(text || '');
     if (/开心|高兴|松了口气|放心|期待|喜欢|想靠近/.test(t)) return '开心';
@@ -23685,18 +23982,42 @@ async function ensureHeartVoiceForGroupMessage(content, speaker, group, messageS
 }
 
 function getHeartVoiceRecords(chatContext, characterId) {
-    if (!chatContext || !Array.isArray(chatContext.history) || !characterId) {
+    const chatId = typeof chatContext === 'string' ? chatContext : chatContext?.id;
+    const normalizedCharacterId = normalizeMessageSenderId(characterId);
+    if (!chatId || !normalizedCharacterId) {
         console.log('[HV READ]', {
-            chatId: chatContext?.id,
+            chatId,
             characterId,
-            totalHeartVoices: (chatContext?.history || []).filter(message => message.type === 'heart_voice').length,
+            totalCharacterStates: state.characterStates?.length || 0,
             matchedRecords: 0
         });
         return [];
     }
 
-    const normalizedCharacterId = normalizeMessageSenderId(characterId);
-    const records = (chatContext.history || [])
+    const stateRecords = (state.characterStates || [])
+        .filter(item =>
+            item
+            && item.chatId === chatId
+            && normalizeMessageSenderId(item.characterId) === normalizedCharacterId
+        )
+        .map(item => ({
+            id: item.id,
+            type: 'heart_voice_state',
+            sender: item.characterId,
+            senderId: item.characterId,
+            timestamp: item.timestamp,
+            source: item.source,
+            content: {
+                emotion: item.mood || '平静',
+                thoughts: item.innerThoughts || '',
+                heartRate: inferHeartRateFromMood(item.mood),
+                jealousy: inferJealousyFromThought(item.innerThoughts)
+            },
+            rawState: item
+        }))
+        .filter(item => item.content.thoughts);
+
+    const legacyRecords = (chatContext?.history || [])
         .filter(message =>
             message
             && message.type === 'heart_voice'
@@ -23710,31 +24031,23 @@ function getHeartVoiceRecords(chatContext, characterId) {
                 heartRate: '平稳',
                 jealousy: '无'
             },
-            source: message.source || (chatContext.isGroup ? 'group' : 'private')
+            source: message.source || (chatContext?.isGroup ? 'group' : 'private'),
+            legacy: true
         }))
-        .filter(message => message.content?.thoughts)
+        .filter(message => message.content?.thoughts);
+
+    const records = [...stateRecords, ...legacyRecords]
         .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0));
 
-    const totalHeartVoices = (chatContext.history || []).filter(message => message.type === 'heart_voice').length;
     console.log('[HV READ]', {
-        chatId: chatContext?.id,
-        characterId,
-        totalHeartVoices,
+        chatId,
+        characterId: normalizedCharacterId,
+        totalCharacterStates: state.characterStates?.length || 0,
+        matchedStateRecords: stateRecords.length,
+        matchedLegacyRecords: legacyRecords.length,
         matchedRecords: records.length
     });
-    if (records.length === 0 && totalHeartVoices > 0) {
-        console.warn('[HV READ NO MATCH]', {
-            characterId,
-            allHeartVoices: (chatContext.history || [])
-                .filter(message => message.type === 'heart_voice')
-                .map(message => ({
-                    sender: message.sender,
-                    senderId: message.senderId,
-                    characterId: message.characterId,
-                    content: message.content
-                }))
-        });
-    }
+
     return records;
 }
 
@@ -23922,7 +24235,8 @@ window.__debugHeartVoice = function() {
         return;
     }
 
-    const allHv = (chat.history || []).filter(m => m && m.type === 'heart_voice');
+    const allHv = (state.characterStates || []).filter(m => m && m.chatId === chat.id);
+    const legacyHv = (chat.history || []).filter(m => m && m.type === 'heart_voice');
 
     const possibleIds = [];
     if (!chat.isGroup) {
@@ -23943,21 +24257,23 @@ window.__debugHeartVoice = function() {
         chatName: chat.name,
         isGroup: chat.isGroup,
         totalHistory: (chat.history || []).length,
-        totalHeartVoice: allHv.length,
-        allHeartVoices: allHv.map(m => ({
+        totalCharacterStates: allHv.length,
+        totalLegacyHeartVoice: legacyHv.length,
+        allCharacterStates: allHv.map(m => ({
             id: m.id,
-            sender: m.sender,
-            senderId: m.senderId,
             characterId: m.characterId,
-            relatedMessageId: m.relatedMessageId,
-            content: m.content,
-            text: m.text,
+            mood: m.mood,
+            affection: m.affection,
+            clothing: m.clothing,
+            action: m.action,
+            innerThoughts: m.innerThoughts,
             timestamp: m.timestamp
         })),
+        legacyHeartVoices: legacyHv,
         matchByPossibleIds: detail
     });
 
-    alert(`心声总数：${allHv.length}，详情看控制台 [HV DEBUG]`);
+    alert(`心声状态总数：${allHv.length}，旧心声总数：${legacyHv.length}，详情看控制台 [HV DEBUG]`);
 };
 
 window.__showLatestHeartVoice = function() {
@@ -23967,12 +24283,18 @@ window.__showLatestHeartVoice = function() {
         return;
     }
 
-    const allHv = (chat.history || [])
-        .filter(m => m && m.type === 'heart_voice')
+    const possibleIds = !chat.isGroup
+        ? [chat.id]
+        : [
+            ...(chat.members || []),
+            ...(chat.npcMembers || []).map(npc => npc.id)
+        ];
+    const allHv = possibleIds
+        .flatMap(id => getHeartVoiceRecords(chat, id))
         .sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
 
     if (!allHv.length) {
-        alert('当前聊天 history 里没有任何 heart_voice，说明没有保存成功。请看控制台有没有 [HV SAVE SKIP] 或 [HV STATUS SAVE FAILED]');
+        alert('当前聊天没有任何 character state / heart_voice，说明没有保存成功。请看控制台有没有 [ECHOES_STATE_SAVED]');
         return;
     }
 
@@ -23982,6 +24304,36 @@ window.__showLatestHeartVoice = function() {
     console.log('[HV SHOW LATEST]', { latest, characterId, chat });
 
     openHeartVoicePanelForCharacter(characterId, chat.id);
+};
+
+window.__debugCharacterStates = function() {
+    const chat = state.contacts.find(c => c.id === state.activeChatId);
+    if (!chat) {
+        alert('没有当前聊天');
+        return;
+    }
+
+    const records = (state.characterStates || []).filter(item => item.chatId === chat.id);
+
+    console.log('[CHARACTER STATES DEBUG]', {
+        chatId: chat.id,
+        chatName: chat.name,
+        isGroup: chat.isGroup,
+        total: records.length,
+        records,
+        clickableIds: chat.isGroup
+            ? [
+                ...(chat.members || []),
+                ...((chat.npcMembers || []).map(npc => npc.id))
+              ]
+            : [chat.id],
+        matchCheck: records.map(record => ({
+            recordCharacterId: record.characterId,
+            matchedByPanelRead: getHeartVoiceRecords(chat, record.characterId).length
+        }))
+    });
+
+    alert(`当前聊天 characterStates 数量：${records.length}，详情看控制台 [CHARACTER STATES DEBUG]`);
 };
 
 async function cleanBadHeartVoices() {
@@ -24012,6 +24364,11 @@ async function cleanBadHeartVoices() {
 // ===== END 心声辅助函数 =====
 
 async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat') {
+    if (contextMode === 'chat' && (originContext || senderProfile)) {
+        const handledEchoesStyle = await handleEchoesStyleAiResult(rawText, originContext || senderProfile, senderProfile);
+        if (handledEchoesStyle) return;
+    }
+
     const roundStartedAt = Date.now();
     const isPrivateChat =
         contextMode === 'chat'
@@ -24048,6 +24405,16 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
             originContext,
             roundStartedAt
         );
+
+        await saveCharacterStateRecords([{
+            characterId: senderProfile.id,
+            mood: senderProfile.status || '平静',
+            affection: '',
+            clothing: '',
+            action: '',
+            innerThoughts: buildFallbackInnerThought(visibleText || rawText, senderProfile, originContext)
+        }], originContext, senderProfile);
+        refreshHeartVoicePanelIfOpen(originContext);
     }
 }
 
@@ -45193,9 +45560,9 @@ async function buildPrivateChatRequestMessages(contact, mode = 'reply') {
         users: [myProfile]
     });
 
-    const lastHeartVoice = (refreshedContact.history || []).slice().reverse().find(message => message.type === 'heart_voice');
+    const lastHeartVoice = getHeartVoiceRecords(refreshedContact, refreshedContact.id)[0];
     let lastHeartVoiceString = '(无最新心声记录)';
-    if (lastHeartVoice) {
+    if (lastHeartVoice?.content) {
         try {
             lastHeartVoiceString = JSON.stringify(lastHeartVoice.content).replace(/(\r\n|\n|\r)/gm, '');
         } catch (error) {
@@ -45263,13 +45630,34 @@ ${mode === 'free'
 3. 如果你刚在群里看到了相关内容，可以自然接上；如果没看见，就不要假装知道。
 4. 普通聊天不要输出 [diary]，日记只在定时日记任务里生成。`}
 
-[心声生成规则]
-1. 你本轮回复最后必须输出一段 [heart_voice]...[/heart_voice]。
-2. heart_voice 必须和“用户最新一条消息”以及“你本轮实际说出口的话”直接相关。
-3. 不要写泛泛模板，不要复述旧记忆，不要写与本轮无关的情绪。
-4. heart_voice 是角色没说出口的真实想法，长度 15 到 45 字。
-5. 建议使用 JSON，方便系统稳定解析：
-[heart_voice]{"emotion":"开心/低落/在意/不爽/平静/紧张","thoughts":"这里写本轮具体心声","heartRate":"平稳/偏快/很快","jealousy":"无/有一点/明显"}[/heart_voice]
+[Echoes 式输出规则]
+你必须只输出 JSON，不要输出 JSON 以外的任何文字。格式如下：
+{
+  "responses": [
+    {
+      "characterId": "${refreshedContact.id}",
+      "text": "角色说出口的话"
+    }
+  ],
+  "states": [
+    {
+      "characterId": "${refreshedContact.id}",
+      "mood": "当前情绪",
+      "affection": "当前对用户的关系/好感状态",
+      "clothing": "当前穿着，没有明确就写日常",
+      "action": "当前动作或状态",
+      "innerThoughts": "第一人称心理独白，15-60字，必须是角色没说出口的真实想法"
+    }
+  ]
+}
+
+规则：
+1. responses 负责显示聊天气泡。
+2. states 不显示成气泡，只用于心声面板和角色状态。
+3. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
+4. 不要泛泛模板，不要复述旧记忆，不要写成总结报告。
+5. 不要输出 [heart_voice]、[status]、[memory]、HEART_VOICE 或其他标签。
+6. 如果角色只想沉默，也必须在 states 里记录这一轮心声；responses 可以为空数组。
 `.trim();
 
     if (dynamicInstructions) {
@@ -45381,6 +45769,7 @@ async function buildGroupChatRequestContext(group, mode = 'reply') {
     const allMemberProfiles = getActiveGroupAiProfiles(refreshedGroup);
     const aiMemberNames = allMemberProfiles.map(profile => profile.name);
     const allowedSpeakerList = aiMemberNames.join('、');
+    const allowedSpeakerIdList = allMemberProfiles.map(profile => `${profile.name}: ${profile.id}`).join('\n') || '（暂无）';
     const allMemberNames = (refreshedGroup.members || [])
         .map(memberId => getProfileInGroupContext(refreshedGroup, memberId))
         .filter(Boolean)
@@ -45440,6 +45829,8 @@ async function buildGroupChatRequestContext(group, mode = 'reply') {
 - 用户: ${myProfile.name}
   - 用户人设/签名: ${userPersonaInGroup}
 - 你可控制的角色: ${allowedSpeakerList || '（暂无）'}
+- 角色 id 对照表:
+${allowedSpeakerIdList}
 
 [角色永久记忆]
 ${permanentKnowledgeString}
@@ -45497,25 +45888,37 @@ ${replyGuidance.guidance}
 6. 不要总结式回复，不要客服味，要像真实微信群一样自然接话。
 7. 只要不是明确冷场，就不要长期只让一个角色单独回复。
 
-[输出格式]
-每条消息必须严格使用：
-MESSAGE_START
-SPEAKER: 角色名（必须从允许发言角色里逐字复制）
-CONTENT: 该角色这一条消息的内容（可以包含特殊指令）
-HEART_VOICE: {"emotion":"...","thoughts":"...","heartRate":"...","jealousy":"..."}
-MESSAGE_END
+[Echoes 式输出格式]
+你必须只输出 JSON，不要输出 JSON 以外的任何文字。格式如下：
+{
+  "responses": [
+    {
+      "characterId": "角色id",
+      "text": "该角色说出口的话"
+    }
+  ],
+  "states": [
+    {
+      "characterId": "角色id",
+      "mood": "当前情绪",
+      "affection": "当前关系/好感状态",
+      "clothing": "当前穿着，没有明确就写日常",
+      "action": "当前动作或状态",
+      "innerThoughts": "该角色自己的第一人称心声，15-60字"
+    }
+  ]
+}
 
 规则：
-1. SPEAKER 必须从“你可控制的角色”里逐字复制，不能用代称或外号。
-2. 一个 MESSAGE_START 只能代表一个聊天气泡。
-3. CONTENT 只能写这一条消息，不允许写多段、不允许包含其他角色发言、不允许写剧本段落、旁白段落或总结段落。
-4. 如果同一个角色想连续说两句，也必须拆成两个 MESSAGE_START / MESSAGE_END 块。
-5. 正常情况下整轮要输出多条 MESSAGE_START / MESSAGE_END，不要只给一条总结式回复。
-6. HEART_VOICE 必须是单行 JSON；如果这一条没有合适心声，可以省略这一行。
-7. HEART_VOICE 的 thoughts 必须严格对应这个 SPEAKER 本条 CONTENT 的真实内心，长度 15 到 45 字。
-8. HEART_VOICE 不能写泛泛模板，不能复述旧记忆，不能和本轮说出口的话脱节。
+1. characterId 必须使用对应角色的真实 id，不要用角色名、代称或外号。
+2. responses 里的每个对象会显示成一个独立聊天气泡。
+3. states 不显示成气泡，只用于心声面板和角色状态。
+4. 每个发言角色都必须有一条 state。
+5. states 里的 innerThoughts 必须严格属于对应 characterId，不能让 A 写 B 的心理。
+6. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
+7. 不要泛泛模板，不要复述旧记忆，不要写总结报告。
+8. 不要输出 MESSAGE_START、SPEAKER、CONTENT、HEART_VOICE、[heart_voice]、[status] 或其他标签。
 9. 不要扮演用户“${myProfile.name}”。
-10. 不要输出额外解释。
 `.trim();
 
     const requestMessages = mode === 'free'
