@@ -2954,6 +2954,14 @@
 .message-wrapper.ai-html-message .message-timestamp {
     display: none !important; /* 彻底隐藏头像、名字和时间戳 */
 }
+.message-wrapper.show-state-author-name .message-author-name,
+.message-wrapper.ai-html-message.show-state-author-name .message-author-name {
+    display: block !important;
+    cursor: pointer;
+    color: #6c8f68;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
 /* --- 新增：热搜话题描述框样式 --- */
 #trending-topic-description-container {
     background-color: #e8f5e9; /* 一个淡淡的背景色 */
@@ -18011,16 +18019,62 @@ if (message.isRecalled === true) {
 
             const wrapper = document.createElement('div');
             wrapper.className = `message-wrapper ${message.sender === 'user' ? 'sent' : 'received'}`;
-            const shouldKeepAvatarClickable =
-                message.sender !== 'user'
-                && message.sender !== 'myProfile'
-                && message.sender !== 'system'
-                && message.sender !== 'system_instruction'
-                && message.type !== 'heart_voice'
-                && message.type !== 'system_notification'
-                && !contact.isAvatarHidden;
+            const normalizedMessageSenderForState = normalizeMessageSenderId(
+                message.senderId ||
+                message.sender ||
+                ''
+            );
+            let resolvedStateCharacterId = normalizedMessageSenderForState;
+
+            if (!contact.isGroup && !isCurrentUserSenderId(resolvedStateCharacterId)) {
+                resolvedStateCharacterId = normalizeMessageSenderId(contact.id);
+            }
+
+            const isVisibleAiMessageForState =
+                message.type !== 'heart_voice' &&
+                message.type !== 'system_notification' &&
+                message.sender !== 'user' &&
+                message.sender !== 'myProfile' &&
+                message.sender !== 'system' &&
+                message.sender !== 'system_instruction';
+            const stateBubbleClickExcludedTypes = new Set([
+                'red_packet',
+                'transfer',
+                'picture',
+                'image',
+                'uploaded_image',
+                'picture_description',
+                'music',
+                'music_share',
+                'location',
+                'location_share',
+                'game_wheel',
+                'voice',
+                'gift',
+                'takeout',
+                'post_share',
+                'product_share',
+                'chat_history_share',
+                'cp_share',
+                'recall_ai'
+            ]);
+            if (isVisibleAiMessageForState) {
+                isFirstInSequence = true;
+                wrapper.classList.add('is-first-in-sequence');
+                wrapper.classList.add('echoes-state-clickable-message');
+                if (!stateBubbleClickExcludedTypes.has(message.type)) {
+                    wrapper.dataset.echoesStateClickable = 'true';
+                }
+            }
+            wrapper.dataset.messageId = message.id || '';
+            wrapper.dataset.senderId = resolvedStateCharacterId || '';
+            wrapper.dataset.sender = resolvedStateCharacterId || '';
+            wrapper.dataset.chatId = contact.id || '';
             // ✨ 这是修改后的正确代码 ✨
-if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender === contact.id)) {
+if (isVisibleAiMessageForState && contact.isAvatarHidden) {
+    wrapper.classList.add('contact-avatar-hidden');
+    wrapper.classList.add('show-state-author-name');
+} else if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender === contact.id)) {
     wrapper.classList.add('contact-avatar-hidden');
 
             }
@@ -18031,10 +18085,12 @@ if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender ==
                 wrapper.classList.add('ai-html-message');
                 // 我们也借用这个已有的类来移除消息体的左边距
                 wrapper.classList.add('contact-avatar-hidden'); 
+                if (isVisibleAiMessageForState) {
+                    wrapper.classList.add('show-state-author-name');
+                }
             }
             // ▲▲▲ 修复结束 ▲▲▲
             // ▲▲▲ 新代码粘贴结束 ▲▲▲
-            wrapper.dataset.messageId = message.id; 
             if (isFirstInSequence) {
                 wrapper.classList.add('is-first-in-sequence');
                 wrapper.style.marginTop = '10px';
@@ -18540,9 +18596,9 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
 }
 // ▲▲▲ 修改结束 ▲▲▲
 
-            const resolvedSenderIdForState = getHeartVoiceSenderId(message, contact)
+            let normalizedSenderId = resolvedStateCharacterId
+                || getHeartVoiceSenderId(message, contact)
                 || normalizeMessageSenderId(message.senderId || message.sender || '');
-            let normalizedSenderId = resolvedSenderIdForState;
             const normalizedContactIdForState = normalizeMessageSenderId(contact.id || '');
             // Legacy compatibility: old private messages used sender = 'contact'
             if (!contact.isGroup && normalizedSenderId === 'contact') {
@@ -18555,24 +18611,20 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
                 }
             }
             normalizedSenderId = normalizeMessageSenderId(normalizedSenderId);
+            resolvedStateCharacterId = normalizedSenderId;
             wrapper.dataset.messageId = message.id || '';
-            wrapper.dataset.senderId = normalizedSenderId;
-            wrapper.dataset.sender = normalizedSenderId;
+            wrapper.dataset.senderId = resolvedStateCharacterId || '';
+            wrapper.dataset.sender = resolvedStateCharacterId || '';
             wrapper.dataset.chatId = contact.id || '';
             wrapper.dataset.messageType = message.type || 'text';
 
-            const heartVoiceCharacterId =
-                message.sender !== 'user'
-                && message.sender !== 'myProfile'
-                && message.sender !== 'system'
-                && message.sender !== 'system_instruction'
+            const heartVoiceCharacterId = isVisibleAiMessageForState
                 ? (contact.isGroup
-                    ? (normalizedSenderId && normalizedSenderId !== 'contact' && normalizedSenderId !== normalizedContactIdForState ? normalizedSenderId : '')
-                    : contact.id)
+                    ? (resolvedStateCharacterId && resolvedStateCharacterId !== 'contact' && resolvedStateCharacterId !== normalizedContactIdForState ? resolvedStateCharacterId : '')
+                    : normalizeMessageSenderId(contact.id))
                 : '';
-            const avatarHeartVoiceCharacterId = heartVoiceCharacterId || (!contact.isGroup ? normalizedSenderId : '');
-            const avatarDataAttrs = normalizedSenderId
-                ? `data-sender-id="${normalizedSenderId}" data-chat-id="${contact.id || ''}"`
+            const avatarDataAttrs = resolvedStateCharacterId
+                ? `data-sender-id="${resolvedStateCharacterId}" data-chat-id="${contact.id || ''}"`
                 : '';
             const heartVoiceAvatarAttrs = heartVoiceCharacterId
                 ? `data-heart-voice-character-id="${heartVoiceCharacterId}" data-heart-voice-chat-id="${contact.id}" title="查看状态"`
@@ -18594,22 +18646,25 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
         ${replyButtonHTML} ${recallButtonHTML}
     `;
             const avatarEl = wrapper.querySelector('.message-avatar');
-            const authorNameEl = wrapper.querySelector('.message-author-name[data-heart-voice-character-id]');
+            const authorNameEl = wrapper.querySelector('.message-author-name');
             if (avatarEl) {
-                avatarEl.dataset.senderId = normalizedSenderId;
-                avatarEl.dataset.heartVoiceCharacterId = avatarHeartVoiceCharacterId;
-                if (shouldKeepAvatarClickable) {
+                avatarEl.dataset.senderId = resolvedStateCharacterId || '';
+                avatarEl.dataset.heartVoiceCharacterId = resolvedStateCharacterId || '';
+                avatarEl.dataset.chatId = contact.id || '';
+                if (isVisibleAiMessageForState && !contact.isAvatarHidden) {
                     avatarEl.style.setProperty('display', 'block', 'important');
                     avatarEl.style.setProperty('visibility', 'visible', 'important');
                 }
             }
-            if (authorNameEl) {
-                authorNameEl.dataset.heartVoiceCharacterId = heartVoiceCharacterId;
-                authorNameEl.dataset.senderId = normalizedSenderId;
+            if (authorNameEl && isVisibleAiMessageForState) {
+                authorNameEl.dataset.heartVoiceCharacterId = resolvedStateCharacterId || '';
+                authorNameEl.dataset.senderId = resolvedStateCharacterId || '';
+                authorNameEl.dataset.chatId = contact.id || '';
+                authorNameEl.classList.add('echoes-state-author-trigger');
             }
 
             wrapper.addEventListener('click', (event) => {
-                if (event.target.closest('.message-avatar, .message-author-name[data-heart-voice-character-id]')) return;
+                if (event.target.closest('.message-avatar, .message-author-name[data-heart-voice-character-id], .echoes-state-author-trigger')) return;
                 handleMessageSelection(wrapper, message);
             });
             return wrapper;
@@ -25208,7 +25263,10 @@ async function openEchoesStatePanel(chatId, characterId, options = {}) {
 }
 
 async function openEchoesHeartVoicePanel(chatId, characterId, options = {}) {
-    return openEchoesStatePanel(chatId, characterId, options);
+    return openEchoesStatePanel(chatId || state.activeChatId, characterId, {
+        createFallbackIfEmpty: true,
+        ...options
+    });
 }
 
 function openHeartVoicePanelForCharacter(characterId, chatId) {
@@ -25226,14 +25284,24 @@ window.openEchoesStatePanel = openEchoesStatePanel;
 window.state = state;
 
 function setupEchoesStateAvatarClick() {
-    if (window.__echoesStateAvatarClickBound) return;
+    if (window.__echoesStateAvatarClickBound) {
+        document.removeEventListener('click', handleEchoesStateAvatarClick, true);
+    }
+
     document.addEventListener('click', handleEchoesStateAvatarClick, true);
+
     window.__echoesStateAvatarClickBound = true;
+    window.__echoesHvAvatarClickBound = true;
+    window.__echoesHeartVoiceAvatarClickBound = true;
 }
 
 async function handleEchoesStateAvatarClick(event) {
     const trigger = event.target.closest(
-        '#chat-messages .message-avatar, #chat-messages .message-avatar img, #chat-messages .message-author-name[data-heart-voice-character-id]'
+        '#chat-messages .message-avatar, ' +
+        '#chat-messages .message-avatar img, ' +
+        '#chat-messages .message-author-name[data-heart-voice-character-id], ' +
+        '#chat-messages .echoes-state-author-trigger, ' +
+        '#chat-messages .message-wrapper[data-echoes-state-clickable="true"] .message'
     );
 
     if (!trigger) return;
@@ -25281,12 +25349,21 @@ async function handleEchoesStateAvatarClick(event) {
         chatId: chat.id,
         isGroup: chat.isGroup,
         characterId,
-        senderId: wrapper?.dataset.senderId
+        senderId: wrapper?.dataset.senderId,
+        triggerClass: trigger.className
     });
 
     await openEchoesStatePanel(chat.id, characterId, {
         createFallbackIfEmpty: true
     });
+}
+
+function handleEchoesHeartVoiceAvatarClick(event) {
+    return handleEchoesStateAvatarClick(event);
+}
+
+function setupEchoesHeartVoiceAvatarClick() {
+    return setupEchoesStateAvatarClick();
 }
 
 setupEchoesStateAvatarClick();
