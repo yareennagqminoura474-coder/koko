@@ -12844,6 +12844,7 @@ function parseLyrics(lrc) {
         const INITIAL_STATE = {
             contacts: [],
             characterStates: [],
+            characterStateSnapshots: {},
             knowledge: [],
             worldBooks: [],
             posts: [],
@@ -12922,6 +12923,7 @@ function parseLyrics(lrc) {
         // ▲▲▲▲▲▲ 添加结束 ▲▲▲▲▲▲
         state.currentChatMode = state.currentChatMode || 'chat';
         state.heartVoicePanel = state.heartVoicePanel || { isOpen: false, characterId: null, chatId: null };
+        state.characterStateSnapshots = state.characterStateSnapshots || {};
         window.openHeartVoicePanelForCharacter = openHeartVoicePanelForCharacter;
         let automationTimer = null;
         let nextAutomationTimestamp = 0;
@@ -13151,6 +13153,7 @@ async function loadDataFromDB() {
             state.themePresets = themePresets || [];
             state.knowledge = (knowledge || []).map((entry, index) => normalizeKnowledgeEntry(entry, index));
             state.characterStates = characterStates || [];
+            state.characterStateSnapshots = rebuildCharacterStateSnapshots(state.characterStates);
                         // ▼▼▼▼▼▼ 把这段新代码粘贴到这里 ▼▼▼▼▼▼
             // 初始化分组逻辑
             if (!emoticonGroups || emoticonGroups.length === 0) {
@@ -13189,6 +13192,7 @@ async function loadDataFromDB() {
         }
         
         state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
+        state.characterStateSnapshots = rebuildCharacterStateSnapshots(state.characterStates);
         window.state = state;
 
         const migratedContacts = [];
@@ -13428,6 +13432,26 @@ function getChatById(chatId) {
     return (state.contacts || []).find(contact => contact.id === chatId) || null;
 }
 
+function inferKnowledgePerceivers(entry = {}) {
+    const directPerceivers = entry.perceivers || entry.targetRoleIds || entry.visibleTo || entry.memberIds || entry.audienceIds;
+    if (Array.isArray(directPerceivers) && directPerceivers.length > 0) {
+        return uniqueStringArray(directPerceivers.map(normalizeEntityIdForVisibility));
+    }
+
+    const explicitCharacterId = entry.characterId || entry.ownerId || entry.roleId || entry.contactId;
+    if (explicitCharacterId) {
+        return uniqueStringArray([explicitCharacterId].map(normalizeEntityIdForVisibility));
+    }
+
+    const sourceChatId = entry.chatId || entry.sceneId;
+    const sourceChat = sourceChatId ? getChatById(sourceChatId) : null;
+    if (sourceChat) {
+        return getNormalizedChatParticipantIds(sourceChat);
+    }
+
+    return [];
+}
+
 function getNormalizedChatParticipantIds(chat) {
     if (!chat) return [];
     if (chat.isGroup) {
@@ -13506,9 +13530,7 @@ function normalizeKnowledgeEntry(entry, index = 0) {
     const normalized = { ...(entry || {}) };
     normalized.summary = String(normalized.summary || normalized.content || '').trim();
     normalized.id = normalized.id || `knowledge_${normalized.chatId || 'global'}_${normalized.startTime || normalized.timestamp || Date.now()}_${index}`;
-    normalized.perceivers = uniqueStringArray(
-        (normalized.perceivers || normalized.targetRoleIds || []).map(normalizeEntityIdForVisibility)
-    );
+    normalized.perceivers = inferKnowledgePerceivers(normalized);
     normalized.startTime = Number(normalized.startTime || normalized.timestamp || Date.now()) || Date.now();
     normalized.lastMessageAt = Number(
         normalized.lastMessageAt || normalized.last_message_at || normalized.endTime || normalized.startTime || Date.now()
@@ -13532,8 +13554,11 @@ function getAllChatMessages(chats = state.contacts) {
 }
 
 function isDebugOrOocLikeMessage(message = {}) {
+    const type = String(message.type || '').toLowerCase();
     const subType = String(message.subType || '').toLowerCase();
+    if (type === 'ooc' || type === 'date_ooc' || type === 'system_debug' || type === 'debug') return true;
     if (subType === 'ooc' || subType === 'date_ooc' || subType === 'system_debug' || subType === 'debug') return true;
+    if (message.isOoc === true || message.isOOC === true || message.ooc === true) return true;
     if (message.sender === 'system_instruction') return true;
     if (message.type === 'heart_voice') return true;
     if (message.type === 'system_notification' && shouldIgnoreSystemNotification(String(message.content || ''))) return true;
@@ -13764,9 +13789,16 @@ function formatVisibleMessagesForPrompt(messages, options = {}) {
 
 function buildRecapTranscript(chat, messages) {
     return (messages || [])
-        .map(message => describeMessageForUnifiedMemory(message, { group: chat && chat.isGroup ? chat : null }))
+        .map((message, index) => {
+            const normalizedMessage = normalizeMessageRecord(message, chat, index, 'history');
+            const item = describeMessageForUnifiedMemory(normalizedMessage, { group: chat && chat.isGroup ? chat : null });
+            if (!item) return null;
+            const kind = item.rawType === 'text' || item.rawType === 'html' || item.rawType === 'video_call_text' ? '对白' : '事件';
+            const visibleIds = uniqueStringArray((normalizedMessage.perceivers || []).map(normalizeEntityIdForVisibility));
+            const timestamp = Number(normalizedMessage.timestamp) || Date.now();
+            return `[timestamp=${timestamp}] [可见=${visibleIds.join(',') || '未知'}] [${kind}] ${item.authorName}: ${item.content}`;
+        })
         .filter(Boolean)
-        .map(item => `[${item.rawType === 'text' || item.rawType === 'html' || item.rawType === 'video_call_text' ? '对白' : '事件'}] ${item.authorName}: ${item.content}`)
         .join('\n');
 }
 
@@ -13836,7 +13868,7 @@ ${recapTranscript}
 1. 只输出合法 JSON。
 2. newFacts 可以为空数组。
 3. last_message_at 必须引用片段中最后涉及到该事实的消息时间戳。
-4. perceivers 请沿用这段聊天的固定可见人，不要新增陌生人。
+4. perceivers 必须从“可见=”或“固定可见人”里选择真正知道这件事的人，不要新增陌生人；不确定时用这段聊天的固定可见人。
 5. title 控制在 4-12 个字，keywords 给 2-4 个。
 `.trim()
             }
@@ -13849,13 +13881,25 @@ ${recapTranscript}
             return false;
         }
 
+        const allowedPerceiverSet = new Set(perceivers);
+        const sanitizeFactPerceivers = fact => {
+            const factPerceivers = Array.isArray(fact?.perceivers)
+                ? fact.perceivers.map(normalizeEntityIdForVisibility).filter(id => allowedPerceiverSet.has(id))
+                : [];
+            return factPerceivers.length > 0 ? uniqueStringArray(factPerceivers) : perceivers;
+        };
+        const clampFactTimestamp = fact => {
+            const rawTimestamp = Number(fact?.last_message_at || fact?.lastMessageAt || fact?.timestamp) || lastTimestamp;
+            return Math.min(Math.max(rawTimestamp, firstTimestamp), lastTimestamp);
+        };
+
         const knowledgeEntries = rawFacts.map((fact, index) => normalizeKnowledgeEntry({
             id: `knowledge_${chat.id}_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
             chatId: chat.id,
             summary: fact.summary,
-            perceivers,
+            perceivers: sanitizeFactPerceivers(fact),
             startTime: firstTimestamp,
-            lastMessageAt: Number(fact.last_message_at) || lastTimestamp,
+            lastMessageAt: clampFactTimestamp(fact),
             recallTitle: fact.title || fact.recallTitle || '',
             recallKeywords: fact.keywords || fact.recallKeywords || [],
             isEternal: fact.isEternal === true,
@@ -17920,7 +17964,17 @@ messagesToRender.forEach((msg, index) => {
                 }
                 
                 // 如果AI强制要求显示头像，则覆盖上面的判断
-                if (msg.forceAvatar) {
+                if (
+                    msg.forceAvatar ||
+                    (
+                        msg.type !== 'heart_voice' &&
+                        msg.type !== 'system_notification' &&
+                        msg.sender !== 'user' &&
+                        msg.sender !== 'myProfile' &&
+                        msg.sender !== 'system' &&
+                        msg.sender !== 'system_instruction'
+                    )
+                ) {
                     isFirstInSequence = true;
                 }
 
@@ -19063,6 +19117,16 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
         forceAvatar: forceShowAvatar // 是否强制显示头像 (用于自动回复)
     };
     fullMessage = normalizeMessageRecord(fullMessage, contact, contact[historyArray].length, historyArray);
+    if (
+        fullMessage.type !== 'heart_voice' &&
+        fullMessage.type !== 'system_notification' &&
+        fullMessage.sender !== 'user' &&
+        fullMessage.sender !== 'myProfile' &&
+        fullMessage.sender !== 'system' &&
+        fullMessage.sender !== 'system_instruction'
+    ) {
+        fullMessage.forceAvatar = true;
+    }
     // 5. 将消息添加到正确的历史记录数组
     contact[historyArray].push(fullMessage);
     const committedMessageIndex = contact[historyArray].length - 1;
@@ -19512,7 +19576,7 @@ if (!isLatestAiRequest(contact.id, requestId)) {
     console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
     return;
 }
-                await displayAiTextInBubbles(rawResponse, contact, contact, 'chat');
+                await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
             } finally {
                 state.aiTypingStatus[contact.id] = false; 
                 
@@ -19602,8 +19666,8 @@ ${worldBookContextString}
 
 [Echoes 式输出规则]
 你必须只输出 JSON，不要输出 JSON 以外的任何文字：
-{"responses":[{"characterId":"${contact.id}","text":"角色说出口的话"}],"states":[{"characterId":"${contact.id}","mood":"当前情绪","affection":"当前关系/好感状态","clothing":"日常","action":"当前动作或状态","innerThoughts":"第一人称心理独白，15-60字，必须是角色没说出口的真实想法"}]}
-responses 负责聊天气泡；states 只用于心声面板。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
+{"responses":[{"characterId":"${contact.id}","content":"角色说出口的话"}],"characterStates":[{"characterId":"${contact.id}","mood":"当前情绪","favorability":68,"favorabilityLabel":"当前关系/好感状态","outfit":"当前穿着；没有明确换装时沿用上一状态","action":"当前动作或状态","innerThoughts":"第一人称心理独白，15-60字，必须是角色没说出口的真实想法"}]}
+responses 负责聊天气泡；characterStates 只用于状态面板。状态必须连续，outfit 没有明确换装/场景切换时保持不变。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
 `.trim() : `
 [！！！核心任务！！！]
 用户（${myProfile.name}）正在”观察”你，TA没有发言。
@@ -19616,8 +19680,8 @@ responses 负责聊天气泡；states 只用于心声面板。不要输出 [hear
 
 [Echoes 式输出规则]
 你必须只输出 JSON，不要输出 JSON 以外的任何文字：
-{"responses":[{"characterId":"${contact.id}","text":"角色说出口的话"}],"states":[{"characterId":"${contact.id}","mood":"当前情绪","affection":"当前关系/好感状态","clothing":"日常","action":"当前动作或状态","innerThoughts":"第一人称心理独白，15-60字，必须是角色没说出口的真实想法"}]}
-responses 负责聊天气泡；states 只用于心声面板。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
+{"responses":[{"characterId":"${contact.id}","content":"角色说出口的话"}],"characterStates":[{"characterId":"${contact.id}","mood":"当前情绪","favorability":68,"favorabilityLabel":"当前关系/好感状态","outfit":"当前穿着；没有明确换装时沿用上一状态","action":"当前动作或状态","innerThoughts":"第一人称心理独白，15-60字，必须是角色没说出口的真实想法"}]}
+responses 负责聊天气泡；characterStates 只用于状态面板。状态必须连续，outfit 没有明确换装/场景切换时保持不变。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
 `.trim();
         
         const requestMessages = [
@@ -19630,7 +19694,7 @@ if (!isLatestAiRequest(contact.id, requestId)) {
     console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
     return;
 }
-        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat');
+        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
     } catch (e) {
         console.error("私聊自由聊天执行失败:", e);
         await createAndAddMessage({
@@ -19796,7 +19860,7 @@ async function triggerGroupFreeChat(group) {
             return;
         }
 
-        if (await handleEchoesStyleAiResult(rawResponse, group, allMemberProfiles[0] || null)) {
+        if (await handleEchoesStyleAiResult(rawResponse, group, allMemberProfiles[0] || null, { requestId })) {
             return;
         }
 
@@ -19847,6 +19911,10 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
     const messageStartedAt = Date.now();
     const text = String(content || '').trim();
     await sleep(800 + Math.random() * 700);
+    if (!isLatestAiRequest(group.id, requestId)) {
+        console.warn(staleLogLabel, { chatId: group.id, requestId });
+        return false;
+    }
 
     let addedMessage = null;
     if (!hasSpecialGroupMessageContent(text)) {
@@ -19881,7 +19949,8 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
         await processAndDisplayAiResponse(text, speaker, group, 'chat', {
             skipHeartVoiceFallback: true,
             forceShowAvatar: true,
-            preserveSingleBubble: true
+            preserveSingleBubble: true,
+            requestId
         });
     }
     return true;
@@ -19915,7 +19984,7 @@ async function triggerGroupChatAiReply(group) {
             return;
         }
 
-        if (await handleEchoesStyleAiResult(rawResponse, group, allMemberProfiles[0] || null)) {
+        if (await handleEchoesStyleAiResult(rawResponse, group, allMemberProfiles[0] || null, { requestId })) {
             return;
         }
 
@@ -19939,6 +20008,10 @@ async function triggerGroupChatAiReply(group) {
                 );
                 if (!rendered) return;
             } catch (renderError) {
+                if (!isLatestAiRequest(group.id, requestId)) {
+                    console.warn('[GROUP FALLBACK MESSAGE SKIPPED] stale generation', { chatId: group.id, requestId });
+                    return;
+                }
                 const { speaker, content, heartVoice } = parsedMessage;
                 console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
                 const messageStartedAt = Date.now();
@@ -20187,7 +20260,7 @@ const NORMAL_BASE_PROMPT = `
 {{emoticon_list}}
 
 [Echoes 角色状态规则]
-不要输出 [heart_voice] 标签。角色没说出口的心声必须写入最终 JSON 的 states[].innerThoughts。
+不要输出 [heart_voice] 标签。角色没说出口的心声必须写入最终 JSON 的 characterStates[].innerThoughts，并同时给出 mood / favorability / outfit / action；没有明确换装时 outfit 必须沿用上一状态。
 
 [普通聊天中的日记规则]
 普通聊天不要主动输出 \`[diary]\`。只有在用户明确要求写日记，或系统任务明确要求单独生成日记时，才允许输出 \`[diary]\`。
@@ -20328,6 +20401,15 @@ ${RELATIONSHIP_ADDRESSING_PRIORITY_RULES}
                 const myProfile = state.myProfile;
                 const now = Date.now();
                 const memoryWindow = 24 * 60 * 60 * 1000; 
+
+                const latestStateRecord = contact ? getHeartVoiceRecords(contact, contact.id)[0] : null;
+                if (latestStateRecord?.content) {
+                    try {
+                        lastHeartVoiceString = JSON.stringify(latestStateRecord.content).replace(/(\r\n|\n|\r)/gm, "");
+                    } catch (error) {
+                        lastHeartVoiceString = '(无最新心声记录)';
+                    }
+                }
 
                 if (contact && contact.history) {
                     const recentChatHistory = contact.history.filter(msg => (now - msg.timestamp < memoryWindow));
@@ -23257,7 +23339,10 @@ function parseEchoesStyleAiResult(rawText, chat = null, fallbackSenderProfile = 
             characterId: item.characterId || item.senderId || item.id || item.name || fallbackSenderProfile?.id || chat?.id || '',
             mood: item.mood || item.emotion || '平静',
             affection: item.affection || '',
-            clothing: item.clothing || '',
+            favorability: item.favorability,
+            favorabilityLabel: item.favorabilityLabel || '',
+            clothing: item.clothing || item.outfit || '',
+            outfit: item.outfit || item.clothing || '',
             action: item.action || '',
             innerThoughts: item.innerThoughts || item.thoughts || ''
         }))
@@ -23343,9 +23428,11 @@ function normalizeEchoesResponseCharacterId(response, chat, fallbackSenderProfil
     return '';
 }
 
-async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile = null, explicitStates = []) {
+async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile = null, explicitStates = [], options = {}) {
     if (!Array.isArray(responses) || !chat) return [];
     const rendered = [];
+    const requestId = options.requestId || null;
+    const isStaleGeneration = () => requestId && chat?.id && !isLatestAiRequest(chat.id, requestId);
     const previousSuppressLegacy = state.suppressLegacyHeartVoiceCommit === true;
     const previousSuppressEchoes = state.suppressEchoesStateCommit === true;
     state.suppressLegacyHeartVoiceCommit = true;
@@ -23353,6 +23440,10 @@ async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile
 
     try {
         for (const response of responses) {
+            if (isStaleGeneration()) {
+                console.warn('[ECHOES_STYLE_RENDER_SKIPPED] stale generation', { chatId: chat.id, requestId });
+                break;
+            }
             const text = String(response?.text || response?.content || '').trim();
             if (!text) continue;
 
@@ -23418,28 +23509,21 @@ async function saveCharacterStateRecords(states, chat, fallbackSenderProfile = n
             continue;
         }
 
-        const record = {
-            id: `state_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        const record = await saveEchoesCharacterState(
+            chat,
             characterId,
-            chatId: chat.id,
-            source: chat.isGroup ? 'group' : 'private',
-            timestamp: Date.now(),
-            mood: item.mood || item.emotion || '平静',
-            affection: item.affection || '',
-            clothing: item.clothing || '',
-            action: item.action || '',
-            innerThoughts,
-            heartRate: item.heartRate || item.heart_rate || '平稳',
-            jealousy: item.jealousy || '无',
-            relatedMessageId: item.relatedMessageId || null
-        };
+            {
+                ...item,
+                innerThoughts,
+                visibleText: item.visibleText || item.text || item.content || innerThoughts
+            },
+            item.relatedMessageId || null
+        );
 
-        state.characterStates.push(record);
-        saved.push(record);
+        if (record) saved.push(record);
     }
 
     if (saved.length > 0) {
-        await Promise.all(saved.map(record => kokoMemory.put('character_states', record)));
         window.state = state;
         console.log('[ECHOES_STATE_SAVED]', saved);
     } else {
@@ -23491,17 +23575,32 @@ function refreshHeartVoicePanelIfOpen(chat) {
     const openedChatId = panel.dataset.chatId;
     if (!openedCharacterId || openedChatId !== chat.id) return;
 
+    if (panel.classList.contains('echoes-state-panel')) {
+        openEchoesStatePanel(chat.id, openedCharacterId);
+        return;
+    }
+
     renderHeartVoicePanelRecords(getHeartVoiceRecords(chat, openedCharacterId));
 }
 
-async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null) {
+async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null, options = {}) {
     const parsed = parseEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile);
     if (!parsed) return false;
+    const requestId = options.requestId || null;
+    const isStaleGeneration = () => requestId && chat?.id && !isLatestAiRequest(chat.id, requestId);
+    if (isStaleGeneration()) {
+        console.warn('[ECHOES_STYLE_DISCARDED] stale generation', { chatId: chat.id, requestId });
+        return true;
+    }
 
     const responseCharacterIds = new Set((parsed.responses || [])
         .map(item => normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile))
         .filter(Boolean));
-    const renderedMessages = await renderEchoesStyleResponses(parsed.responses, chat, fallbackSenderProfile, parsed.states || []);
+    const renderedMessages = await renderEchoesStyleResponses(parsed.responses, chat, fallbackSenderProfile, parsed.states || [], { requestId });
+    if (isStaleGeneration()) {
+        console.warn('[ECHOES_STYLE_STATE_SAVE_SKIPPED] stale generation', { chatId: chat.id, requestId });
+        return true;
+    }
     const extraStates = (parsed.states || [])
         .filter(item => String(item?.innerThoughts || item?.thoughts || '').trim())
         .filter(item => !responseCharacterIds.has(normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile)));
@@ -23825,6 +23924,10 @@ function refreshOpenHeartVoicePanelForSavedRecord(liveChat, senderProfile) {
         const characterIdForRefresh = openedCharacterId || (!liveChat.isGroup ? liveChat.id : null);
         const chatIdForRefresh = openedChatId || (!liveChat.isGroup ? liveChat.id : null);
         if (characterIdForRefresh && chatIdForRefresh === liveChat.id) {
+            if (openedPanel.classList.contains('echoes-state-panel')) {
+                openEchoesStatePanel(liveChat.id, characterIdForRefresh);
+                return;
+            }
             renderHeartVoicePanelRecords(getHeartVoiceRecords(liveChat, characterIdForRefresh));
         }
     }
@@ -24040,7 +24143,11 @@ async function commitHeartVoiceForAiTurn({
         const openedCharacterId = panel.dataset.characterId;
         const openedChatId = panel.dataset.chatId;
         if (openedChatId === chatContext.id && openedCharacterId === senderId) {
+            if (panel.classList.contains('echoes-state-panel')) {
+                openEchoesStatePanel(chatContext.id, senderId);
+            } else {
             renderHeartVoicePanelRecords(getHeartVoiceRecords(chatContext, senderId));
+            }
         }
     }
 
@@ -24170,7 +24277,11 @@ function getHeartVoiceRecords(chatContext, characterId) {
                 emotion: item.mood || '平静',
                 thoughts: item.innerThoughts || '',
                 heartRate: item.heartRate || inferHeartRateFromMood(item.mood),
-                jealousy: item.jealousy || inferJealousyFromThought(item.innerThoughts)
+                jealousy: item.jealousy || inferJealousyFromThought(item.innerThoughts),
+                favorability: item.favorability,
+                favorabilityLabel: item.favorabilityLabel,
+                outfit: item.outfit || item.clothing,
+                action: item.action
             },
             rawState: item
         }))
@@ -24358,8 +24469,275 @@ function getEchoesCharacterProfile(chat, characterId) {
         || { id: normalizedId, name: normalizedId };
 }
 
+function ensureCharacterStateSnapshotStore() {
+    if (!state.characterStateSnapshots || typeof state.characterStateSnapshots !== 'object') {
+        state.characterStateSnapshots = {};
+    }
+    return state.characterStateSnapshots;
+}
+
+function rebuildCharacterStateSnapshots(records = []) {
+    const snapshots = {};
+    (Array.isArray(records) ? records : [])
+        .filter(record => record && record.chatId && record.characterId)
+        .sort((left, right) => (Number(left.timestamp) || 0) - (Number(right.timestamp) || 0))
+        .forEach(record => {
+            const chatId = String(record.chatId);
+            const characterId = normalizeMessageSenderId(record.characterId);
+            if (!characterId) return;
+            if (!snapshots[chatId]) snapshots[chatId] = {};
+            snapshots[chatId][characterId] = record;
+        });
+    return snapshots;
+}
+
+function updateCharacterStateSnapshot(record) {
+    if (!record || !record.chatId || !record.characterId) return;
+    const snapshots = ensureCharacterStateSnapshotStore();
+    const chatId = String(record.chatId);
+    const characterId = normalizeMessageSenderId(record.characterId);
+    if (!characterId) return;
+    if (!snapshots[chatId]) snapshots[chatId] = {};
+    snapshots[chatId][characterId] = record;
+}
+
+function getLatestCharacterStateSnapshot(chat, characterId) {
+    const chatId = typeof chat === 'string' ? chat : chat?.id;
+    const normalizedId = normalizeMessageSenderId(characterId);
+    if (!chatId || !normalizedId) return null;
+
+    const snapshots = ensureCharacterStateSnapshotStore();
+    const snapshot = snapshots[String(chatId)]?.[normalizedId];
+    if (snapshot) return snapshot;
+
+    const latest = (state.characterStates || [])
+        .filter(record =>
+            record
+            && record.chatId === chatId
+            && normalizeMessageSenderId(record.characterId) === normalizedId
+        )
+        .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0))[0] || null;
+
+    if (latest) updateCharacterStateSnapshot(latest);
+    return latest;
+}
+
+function getCrossChatStateHintForGroupMember(group, characterId) {
+    if (!group?.isGroup) return null;
+    const normalizedId = normalizeMessageSenderId(characterId);
+    if (!normalizedId || isCurrentUserSenderId(normalizedId)) return null;
+
+    const privateContact = (state.contacts || []).find(contact =>
+        contact
+        && !contact.isGroup
+        && normalizeMessageSenderId(contact.id) === normalizedId
+    );
+    if (!privateContact) return null;
+
+    const snapshot = getLatestCharacterStateSnapshot(privateContact, normalizedId);
+    if (!snapshot) return null;
+
+    return {
+        ...snapshot,
+        sourceChatId: privateContact.id,
+        sourceChatName: privateContact.name || snapshot.sourceChatName || '私聊'
+    };
+}
+
+function clampNumber(value, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return min;
+    return Math.max(min, Math.min(max, number));
+}
+
+function getStableFavorabilityLabel(value, mood = '') {
+    const score = clampNumber(value, 0, 100);
+    const moodText = String(mood || '');
+    if (score <= 10) return '极度厌恶';
+    if (score <= 25) return '厌烦';
+    if (score <= 40) return '冷淡';
+    if (score <= 55) return '一般';
+    if (score <= 70) {
+        if (/怒|恼|烦|不爽|冷/.test(moodText)) return '恼火中带在意';
+        return '在意';
+    }
+    if (score <= 85) return '明显偏爱';
+    return /占有|嫉妒|吃醋/.test(moodText) ? '强烈占有欲' : '非常偏爱';
+}
+
+function normalizeFavorabilityValue(value, fallbackValue = 50) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return Math.round(clampNumber(numeric, 0, 100));
+    const fallback = Number(fallbackValue);
+    return Math.round(clampNumber(Number.isFinite(fallback) ? fallback : 50, 0, 100));
+}
+
+function inferFavorabilityDeltaFromText(text = '') {
+    const t = String(text || '');
+    if (/道歉|谢谢|信任|靠近|喜欢|心疼|哄|温柔|保护|在乎/.test(t)) return 2;
+    if (/冒犯|伤人|讨厌|滚|烦死|失望|欺骗|背叛|冷落|吵架/.test(t)) return -3;
+    if (/威胁|羞辱|抛弃|绝交|伤害/.test(t)) return -6;
+    if (/暧昧|告白|拥抱|亲吻|和解/.test(t)) return 5;
+    return 0;
+}
+
+function hasStrongStateTurnTrigger(text = '') {
+    return /告白|分手|背叛|威胁|重逢|和解|道歉|亲吻|拥抱|求婚|事故|受伤|崩溃|坦白|揭穿|重大/.test(String(text || ''));
+}
+
+function hasOutfitChangeTrigger(text = '') {
+    return /换衣|换上|穿上|脱下|脱衣|睡衣|校服|制服|礼服|外套|大衣|浴袍|洗完澡|洗澡后|起床|出门|回家后|第二天|清晨|早上|下班|刚从公司|换装/.test(String(text || ''));
+}
+
+function hasActionChangeTrigger(text = '') {
+    return /站起|坐下|走到|靠近|退后|抱住|松开|拿起|放下|推开|转身|低头|抬头|盯着|躺下|起身|伸手|敲|摔|笑|哭|叹气/.test(String(text || ''));
+}
+
+function getDefaultOutfitForProfile(profile) {
+    return String(
+        profile?.outfit ||
+        profile?.clothing ||
+        profile?.appearance ||
+        profile?.styleDescription ||
+        '日常穿着'
+    ).trim() || '日常穿着';
+}
+
+function getDefaultActionForMessage(text, profile) {
+    const name = profile?.name || '对方';
+    const t = String(text || '');
+    if (/笑|开心|高兴/.test(t)) return '唇角微微松动，视线仍然停在对话上。';
+    if (/怒|烦|不爽|冷/.test(t)) return '压着情绪看向对方，动作比刚才更克制。';
+    if (/低落|难过|委屈|失落/.test(t)) return '垂下眼，指尖无意识地停在原处。';
+    return `${name}维持着刚才的姿态，注意力仍落在这段对话上。`;
+}
+
+function makeContinuityInnerThought(previousState, visibleText, speakerProfile, chat) {
+    const currentThought = makeLocalHeartVoiceThought(visibleText, speakerProfile, chat);
+    const previousThought = String(previousState?.innerThoughts || '').trim();
+    if (!previousThought) return currentThought;
+    const trimmedPrevious = previousThought.length > 34
+        ? previousThought.slice(0, 34).replace(/[，。,.、\s]+$/g, '')
+        : previousThought;
+    const currentSnippet = buildHeartVoiceSnippet(visibleText || currentThought);
+    return finalizeHeartVoiceThought(`${trimmedPrevious}，这会儿听到${currentSnippet}，那点情绪还在往下延。`);
+}
+
+function getMoodFamily(mood = '') {
+    const t = String(mood || '');
+    if (/怒|恼|烦|不爽|冷|压着火|不耐/.test(t)) return 'angry';
+    if (/开心|高兴|轻松|期待|愉快|温柔/.test(t)) return 'positive';
+    if (/低落|难过|委屈|失落|酸|怕|慌/.test(t)) return 'sad';
+    if (/紧张|犹豫|试探|在意|微妙/.test(t)) return 'tense';
+    return 'neutral';
+}
+
+function smoothMoodTransition(previousMood, requestedMood, visibleText = '') {
+    const next = String(requestedMood || '').trim() || '平静';
+    const previous = String(previousMood || '').trim();
+    if (!previous || previous === next) return next;
+    if (hasStrongStateTurnTrigger(visibleText)) return next;
+
+    const prevFamily = getMoodFamily(previous);
+    const nextFamily = getMoodFamily(next);
+    if (prevFamily === nextFamily || prevFamily === 'neutral' || nextFamily === 'neutral') return next;
+
+    if (prevFamily === 'angry') {
+        if (nextFamily === 'positive') return '压着火气';
+        if (nextFamily === 'sad') return '冷怒';
+        return '不耐';
+    }
+    if (prevFamily === 'sad' && nextFamily === 'positive') return '稍微缓和';
+    if (prevFamily === 'positive' && nextFamily === 'angry') return '笑意收敛';
+    if (prevFamily === 'tense' && nextFamily === 'positive') return '试探着放松';
+    return next;
+}
+
+function normalizeCharacterStateTransition(previousState, nextState, chat, speakerProfile) {
+    const previous = previousState || null;
+    const visibleText = String(nextState?.visibleText || nextState?.innerThoughts || '').trim();
+    const combinedText = `${visibleText} ${nextState?.mood || ''} ${nextState?.action || ''} ${nextState?.outfit || ''}`;
+    const mood = smoothMoodTransition(previous?.mood, nextState?.mood || previous?.mood || '平静', combinedText);
+
+    const previousFavorability = normalizeFavorabilityValue(previous?.favorability, 50);
+    const requestedFavorability = Number(nextState?.favorability);
+    const deltaLimit = hasStrongStateTurnTrigger(combinedText) ? 8 : 3;
+    let favorability = Number.isFinite(requestedFavorability)
+        ? Math.round(clampNumber(requestedFavorability, previousFavorability - deltaLimit, previousFavorability + deltaLimit))
+        : previousFavorability + inferFavorabilityDeltaFromText(combinedText);
+    favorability = normalizeFavorabilityValue(
+        clampNumber(favorability, previousFavorability - deltaLimit, previousFavorability + deltaLimit),
+        previousFavorability
+    );
+
+    const requestedOutfit = String(nextState?.outfit || nextState?.clothing || '').trim();
+    let outfit = requestedOutfit || previous?.outfit || previous?.clothing || getDefaultOutfitForProfile(speakerProfile);
+    if (previous?.outfit && !hasOutfitChangeTrigger(combinedText)) {
+        outfit = previous.outfit;
+    }
+
+    const requestedAction = String(nextState?.action || '').trim();
+    let action = requestedAction || previous?.action || getDefaultActionForMessage(visibleText, speakerProfile);
+    if (!requestedAction && previous?.action && !hasActionChangeTrigger(combinedText)) {
+        action = previous.action;
+    }
+
+    const innerThoughts = String(nextState?.innerThoughts || '').trim()
+        || makeLocalHeartVoiceThought(visibleText || action || mood, speakerProfile, chat);
+
+    return {
+        mood,
+        favorability,
+        favorabilityLabel: getStableFavorabilityLabel(favorability, mood),
+        outfit,
+        clothing: outfit,
+        action,
+        innerThoughts,
+        heartRate: nextState?.heartRate || inferHeartVoiceHeartRate(innerThoughts, mood),
+        jealousy: nextState?.jealousy || inferHeartVoiceJealousy(innerThoughts),
+        visibleText
+    };
+}
+
+function buildNextCharacterState(previousState, visibleMessage, speakerProfile, chat, explicitStateFromAI = null) {
+    const visibleText = String(
+        typeof visibleMessage === 'string'
+            ? visibleMessage
+            : getMessageTextContent(visibleMessage) || ''
+    ).trim();
+    const normalizedExplicit = normalizeEchoesStatePayload(explicitStateFromAI, visibleText, speakerProfile, chat);
+    const hasExplicitThought = !!(
+        explicitStateFromAI &&
+        typeof explicitStateFromAI === 'object' &&
+        String(explicitStateFromAI.innerThoughts || explicitStateFromAI.thoughts || '').trim()
+    );
+    const candidate = {
+        ...normalizedExplicit,
+        mood: normalizedExplicit.mood || previousState?.mood || inferHeartVoiceEmotion(visibleText),
+        favorability: normalizedExplicit.favorability,
+        favorabilityLabel: normalizedExplicit.favorabilityLabel,
+        outfit: normalizedExplicit.outfit || normalizedExplicit.clothing,
+        action: normalizedExplicit.action,
+        innerThoughts: hasExplicitThought
+            ? normalizedExplicit.innerThoughts
+            : makeContinuityInnerThought(previousState, visibleText || normalizedExplicit.innerThoughts, speakerProfile, chat),
+        visibleText
+    };
+    return normalizeCharacterStateTransition(previousState, candidate, chat, speakerProfile);
+}
+
+function ensureCompleteCharacterStateForMessage(message, chat, speakerProfile, explicitState = null) {
+    if (!chat || !speakerProfile) return null;
+    let characterId = normalizeMessageSenderId(message?.senderId || message?.sender || speakerProfile.id);
+    if (!chat.isGroup) characterId = normalizeMessageSenderId(chat.id);
+    if (!characterId || isCurrentUserSenderId(characterId)) return null;
+    const previousState = getLatestCharacterStateSnapshot(chat, characterId);
+    return buildNextCharacterState(previousState, message, speakerProfile, chat, explicitState);
+}
+
 function normalizeEchoesStatePayload(payload, fallbackText, speakerProfile, chat) {
     const source = payload && typeof payload === 'object' ? payload : {};
+    const visibleText = stripAiMetaTags(source.visibleText || fallbackText || source.text || source.content || '');
     const thoughts = String(
         source.innerThoughts ||
         source.thoughts ||
@@ -24367,12 +24745,22 @@ function normalizeEchoesStatePayload(payload, fallbackText, speakerProfile, chat
         source.text ||
         ''
     ).trim();
-    const fallback = buildFallbackHeartVoicePayload(thoughts || fallbackText || '', speakerProfile, chat);
+    const fallback = buildFallbackHeartVoicePayload(thoughts || visibleText || '', speakerProfile, chat);
+    const outfit = String(source.outfit || source.clothing || '').trim();
+    const favorability = source.favorability === undefined || source.favorability === null || source.favorability === ''
+        ? undefined
+        : normalizeFavorabilityValue(source.favorability, 50);
     return {
         mood: source.mood || source.emotion || fallback.emotion || '微妙',
+        favorability,
+        favorabilityLabel: source.favorabilityLabel || '',
+        outfit,
+        clothing: outfit,
+        action: String(source.action || '').trim(),
         innerThoughts: thoughts || fallback.thoughts || '我没有直接说出来，但心里还是因为这一轮对话起了波动。',
         heartRate: source.heartRate || source.heart_rate || fallback.heartRate || '平稳',
-        jealousy: source.jealousy || fallback.jealousy || '无'
+        jealousy: source.jealousy || fallback.jealousy || '无',
+        visibleText
     };
 }
 
@@ -24403,7 +24791,11 @@ async function persistEchoesCharacterStateRecord(record, chat) {
                 emotion: record.mood,
                 thoughts: record.innerThoughts,
                 heartRate: record.heartRate,
-                jealousy: record.jealousy
+                jealousy: record.jealousy,
+                favorability: record.favorability,
+                favorabilityLabel: record.favorabilityLabel,
+                outfit: record.outfit,
+                action: record.action
             },
             text: record.innerThoughts,
             timestamp: record.timestamp,
@@ -24426,11 +24818,31 @@ async function saveEchoesCharacterState(chat, characterId, payload, relatedMessa
 
     state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
     const speakerProfile = getEchoesCharacterProfile(chat, normalizedCharacterId);
-    const normalizedPayload = normalizeEchoesStatePayload(
-        payload,
-        typeof payload === 'string' ? payload : '',
+    const groupPreviousState = getLatestCharacterStateSnapshot(chat, normalizedCharacterId);
+    const privateStateHint = chat?.isGroup
+        ? getCrossChatStateHintForGroupMember(chat, normalizedCharacterId)
+        : null;
+    const previousState = groupPreviousState
+        ? {
+            ...privateStateHint,
+            ...groupPreviousState,
+            outfit: groupPreviousState.outfit || groupPreviousState.clothing || privateStateHint?.outfit || privateStateHint?.clothing,
+            clothing: groupPreviousState.clothing || groupPreviousState.outfit || privateStateHint?.clothing || privateStateHint?.outfit,
+            action: groupPreviousState.action || privateStateHint?.action,
+            favorability: groupPreviousState.favorability ?? privateStateHint?.favorability,
+            favorabilityLabel: groupPreviousState.favorabilityLabel || privateStateHint?.favorabilityLabel,
+            innerThoughts: groupPreviousState.innerThoughts || privateStateHint?.innerThoughts
+        }
+        : privateStateHint;
+    const visibleText = typeof payload === 'string'
+        ? payload
+        : (payload?.visibleText || payload?.text || payload?.content || payload?.innerThoughts || payload?.thoughts || '');
+    const normalizedPayload = buildNextCharacterState(
+        previousState,
+        visibleText,
         speakerProfile,
-        chat
+        chat,
+        payload
     );
 
     const existing = relatedMessageId
@@ -24447,7 +24859,13 @@ async function saveEchoesCharacterState(chat, characterId, payload, relatedMessa
         characterId: normalizedCharacterId,
         timestamp: Date.now(),
         source: chat.isGroup ? 'group' : 'private',
-        mood: normalizedPayload.mood || '微妙',
+        mood: normalizedPayload.mood || '平静',
+        favorability: normalizeFavorabilityValue(normalizedPayload.favorability, previousState?.favorability ?? 50),
+        favorabilityLabel: normalizedPayload.favorabilityLabel || getStableFavorabilityLabel(normalizedPayload.favorability, normalizedPayload.mood),
+        affection: normalizedPayload.favorabilityLabel || getStableFavorabilityLabel(normalizedPayload.favorability, normalizedPayload.mood),
+        outfit: normalizedPayload.outfit || normalizedPayload.clothing || previousState?.outfit || getDefaultOutfitForProfile(speakerProfile),
+        clothing: normalizedPayload.outfit || normalizedPayload.clothing || previousState?.outfit || getDefaultOutfitForProfile(speakerProfile),
+        action: normalizedPayload.action || previousState?.action || getDefaultActionForMessage(visibleText, speakerProfile),
         innerThoughts: normalizedPayload.innerThoughts,
         heartRate: normalizedPayload.heartRate || '平稳',
         jealousy: normalizedPayload.jealousy || '无',
@@ -24464,6 +24882,7 @@ async function saveEchoesCharacterState(chat, characterId, payload, relatedMessa
     }
 
     await persistEchoesCharacterStateRecord(record, chat);
+    updateCharacterStateSnapshot(record);
     window.state = state;
     refreshHeartVoicePanelIfOpen(chat);
     console.log('[ECHOES_STATE_SAVED]', record);
@@ -24499,14 +24918,17 @@ async function ensureEchoesStateForVisibleMessage(message, chat, speakerProfile,
 
     const visibleText = getMessageTextContent(message);
     const speaker = speakerProfile || getEchoesCharacterProfile(chat, characterId);
-    const payload = explicitState
-        ? normalizeEchoesStatePayload(explicitState, visibleText, speaker, chat)
-        : {
+    const payload = ensureCompleteCharacterStateForMessage(
+        message,
+        chat,
+        speaker,
+        explicitState || {
             mood: inferHeartVoiceEmotion(visibleText),
             innerThoughts: makeLocalHeartVoiceThought(visibleText, speaker, chat),
-            heartRate: '平稳',
-            jealousy: inferHeartVoiceJealousy(visibleText)
-        };
+            visibleText
+        }
+    );
+    if (!payload) return null;
 
     return saveEchoesCharacterState(chat, characterId, payload, relatedMessageId);
 }
@@ -24535,87 +24957,413 @@ async function ensureFallbackHeartVoiceForClickedCharacter(chat, characterId) {
     const visibleText = latestMessage
         ? getMessageTextContent(latestMessage)
         : '刚才没有说出口的话还停在心里。';
+    const payload = latestMessage
+        ? ensureCompleteCharacterStateForMessage(latestMessage, chat, speaker, null)
+        : buildNextCharacterState(
+            getLatestCharacterStateSnapshot(chat, normalizedId),
+            visibleText,
+            speaker,
+            chat,
+            {
+                mood: inferHeartVoiceEmotion(visibleText),
+                innerThoughts: makeLocalHeartVoiceThought(visibleText, speaker, chat),
+                visibleText
+            }
+        );
 
-    return saveEchoesCharacterState(chat, normalizedId, {
-        mood: inferHeartVoiceEmotion(visibleText),
-        innerThoughts: makeLocalHeartVoiceThought(visibleText, speaker, chat),
-        heartRate: '平稳',
-        jealousy: inferHeartVoiceJealousy(visibleText)
-    }, latestMessage?.id || `manual_hv_${chat.id}_${normalizedId}_${Date.now()}`);
+    return saveEchoesCharacterState(
+        chat,
+        normalizedId,
+        payload,
+        latestMessage?.id || `manual_hv_${chat.id}_${normalizedId}_${Date.now()}`
+    );
 }
 
-async function openEchoesHeartVoicePanel(chatId, characterId, options = {}) {
-    const panel = ensureEchoesHeartVoicePanel();
-    const nameEl = document.getElementById('hv-character-name');
-    const toggleBtn = document.getElementById('hv-toggle-history-btn');
-    const chat = state.contacts.find(contact => contact.id === chatId);
-    if (!panel) {
-        alert('心声面板不存在：#heart-voice-panel');
-        console.warn('[ECHOES HV PANEL OPEN FAILED] missing_panel', { chatId, characterId });
-        return null;
-    }
-    document.body.appendChild(panel);
-    panel.style.setProperty('display', 'flex', 'important');
-    panel.style.setProperty('visibility', 'visible', 'important');
-    panel.style.setProperty('opacity', '1', 'important');
-    panel.style.setProperty('pointer-events', 'auto', 'important');
-    panel.style.setProperty('z-index', '2147483647', 'important');
+function ensureEchoesStatePanelStyles() {
+    if (document.getElementById('echoes-state-panel-style')) return;
+    const style = document.createElement('style');
+    style.id = 'echoes-state-panel-style';
+    style.textContent = `
+        #heart-voice-panel.echoes-state-panel {
+            position: fixed !important;
+            left: 50% !important;
+            bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+            transform: translateX(-50%) !important;
+            width: min(92vw, 420px) !important;
+            max-height: 78vh !important;
+            overflow-y: auto !important;
+            z-index: 2147483647 !important;
+            display: none;
+            flex-direction: column !important;
+            gap: 14px !important;
+            padding: 0 !important;
+            color: #1f2933;
+            background: rgba(248, 250, 252, 0.88) !important;
+            border: 1px solid rgba(255,255,255,0.72) !important;
+            border-radius: 28px !important;
+            box-shadow: 0 24px 70px rgba(31, 41, 55, 0.28) !important;
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+        .echoes-state-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 22px 24px 18px;
+            border-bottom: 1px solid rgba(255,255,255,0.7);
+        }
+        .echoes-state-title {
+            font-size: 24px;
+            font-weight: 800;
+            color: #17212f;
+        }
+        .echoes-state-close {
+            width: 42px;
+            height: 42px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.66);
+            color: #64748b;
+            font-size: 30px;
+            line-height: 38px;
+            cursor: pointer;
+        }
+        .echoes-state-body {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            padding: 18px 20px 22px;
+        }
+        .echoes-state-profile {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 8px 2px 12px;
+        }
+        .echoes-state-avatar {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: rgba(255,255,255,0.8);
+            box-shadow: 0 8px 22px rgba(15,23,42,0.16);
+        }
+        .echoes-state-name {
+            font-size: 22px;
+            font-weight: 800;
+            color: #162033;
+        }
+        .echoes-state-subtitle {
+            margin-top: 4px;
+            color: #758195;
+            font-size: 14px;
+        }
+        .echoes-state-card {
+            background: rgba(255,255,255,0.68);
+            border: 1px solid rgba(255,255,255,0.82);
+            border-radius: 18px;
+            padding: 16px;
+            box-shadow: 0 8px 22px rgba(31,41,55,0.10);
+        }
+        .echoes-state-card-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #77869a;
+            margin-bottom: 8px;
+        }
+        .echoes-state-card-value {
+            font-size: 18px;
+            line-height: 1.65;
+            color: #202c3b;
+            white-space: pre-wrap;
+        }
+        .echoes-state-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        .echoes-state-thoughts .echoes-state-card-value {
+            max-height: 210px;
+            overflow-y: auto;
+            font-size: 17px;
+        }
+        .echoes-state-history-toggle {
+            align-self: flex-end;
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-radius: 50%;
+            color: #60748b;
+            background: rgba(255,255,255,0.72);
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(31,41,55,0.10);
+        }
+        .echoes-state-history {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+        }
+        #heart-voice-panel.show-history .echoes-state-history {
+            display: flex;
+        }
+        .echoes-state-history-item {
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.62);
+            border: 1px solid rgba(255,255,255,0.78);
+        }
+        .echoes-state-history-meta {
+            display: flex;
+            justify-content: space-between;
+            color: #7b8794;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .echoes-state-empty {
+            padding: 18px;
+            color: #718096;
+            text-align: center;
+        }
+        @media (max-width: 420px) {
+            #heart-voice-panel.echoes-state-panel {
+                width: min(94vw, 390px) !important;
+                max-height: 80vh !important;
+                border-radius: 24px !important;
+            }
+            .echoes-state-grid {
+                grid-template-columns: 1fr;
+            }
+            .echoes-state-title {
+                font-size: 22px;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
 
-    if (!nameEl || !toggleBtn) {
-        console.warn('[ECHOES HV PANEL OPEN FAILED] missing_panel_children', { nameEl, toggleBtn });
-        return null;
+function ensureEchoesStatePanel() {
+    ensureEchoesStatePanelStyles();
+    let panel = document.getElementById('heart-voice-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'heart-voice-panel';
     }
+    panel.className = 'echoes-state-panel';
+    panel.innerHTML = `
+        <div class="echoes-state-header">
+            <div class="echoes-state-title" id="echoes-state-title">角色的状态</div>
+            <button class="echoes-state-close" id="close-heart-voice-panel" type="button">&times;</button>
+        </div>
+        <div class="echoes-state-body">
+            <div class="echoes-state-profile">
+                <img class="echoes-state-avatar" id="echoes-state-avatar" alt="角色头像">
+                <div style="flex:1; min-width:0;">
+                    <div class="echoes-state-name" id="echoes-state-name">角色</div>
+                    <div class="echoes-state-subtitle" id="hv-character-name">实时状态同步中</div>
+                </div>
+                <button class="echoes-state-history-toggle" id="hv-toggle-history-btn" type="button" title="查看历史状态">
+                    <i class="fas fa-clock-rotate-left"></i>
+                </button>
+            </div>
+            <div id="hv-empty-state" class="echoes-state-empty" style="display:none;">还没有状态记录</div>
+            <div id="hv-content-wrap">
+                <div class="echoes-state-card">
+                    <div class="echoes-state-card-label">实时心情</div>
+                    <div class="echoes-state-card-value" id="echoes-state-mood"></div>
+                </div>
+                <div class="echoes-state-card">
+                    <div class="echoes-state-card-label">对你的好感度</div>
+                    <div class="echoes-state-card-value" id="echoes-state-favorability"></div>
+                </div>
+                <div class="echoes-state-grid">
+                    <div class="echoes-state-card">
+                        <div class="echoes-state-card-label">穿着</div>
+                        <div class="echoes-state-card-value" id="echoes-state-outfit"></div>
+                    </div>
+                    <div class="echoes-state-card">
+                        <div class="echoes-state-card-label">动作</div>
+                        <div class="echoes-state-card-value" id="echoes-state-action"></div>
+                    </div>
+                </div>
+                <div class="echoes-state-card echoes-state-thoughts">
+                    <div class="echoes-state-card-label">内心想法</div>
+                    <div class="echoes-state-card-value" id="echoes-state-inner-thoughts"></div>
+                </div>
+                <div class="echoes-state-history" id="hv-history-section">
+                    <div class="echoes-state-card-label">历史状态记录</div>
+                    <div id="hv-history-list"></div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(panel);
+
+    const closeBtn = panel.querySelector('#close-heart-voice-panel');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeHeartVoicePanel();
+        });
+    }
+
+    const toggleBtn = panel.querySelector('#hv-toggle-history-btn');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            panel.classList.toggle('show-history');
+        });
+    }
+
+    return panel;
+}
+
+function getEchoesStateHistory(chat, characterId) {
+    const chatId = typeof chat === 'string' ? chat : chat?.id;
+    const normalizedId = normalizeMessageSenderId(characterId);
+    return (state.characterStates || [])
+        .filter(record =>
+            record
+            && record.chatId === chatId
+            && normalizeMessageSenderId(record.characterId) === normalizedId
+        )
+        .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0));
+}
+
+function buildEmptyEchoesState(chat, characterId) {
+    const profile = getEchoesCharacterProfile(chat, characterId) || chat || {};
+    const previous = getLatestCharacterStateSnapshot(chat, characterId);
+    return previous || {
+        id: `state_preview_${Date.now()}`,
+        chatId: chat?.id || '',
+        characterId: normalizeMessageSenderId(characterId),
+        timestamp: Date.now(),
+        source: chat?.isGroup ? 'group' : 'private',
+        mood: '等待同步',
+        favorability: 50,
+        favorabilityLabel: getStableFavorabilityLabel(50, '等待同步'),
+        outfit: getDefaultOutfitForProfile(profile),
+        action: '还没有新的动作记录。',
+        innerThoughts: '还没有状态记录。继续聊一轮后，这里会同步角色没有说出口的想法。',
+        heartRate: '平稳',
+        jealousy: '无'
+    };
+}
+
+function renderEchoesStatePanel(chat, characterId, snapshot, historyRecords = []) {
+    const profile = getEchoesCharacterProfile(chat, characterId) || chat || {};
+    const name = profile.name || '角色';
+    const avatar = profile.avatar || `https://via.placeholder.com/80/DDD/666?text=${encodeURIComponent(name.slice(0, 1) || 'U')}`;
+
+    const titleEl = document.getElementById('echoes-state-title');
+    const avatarEl = document.getElementById('echoes-state-avatar');
+    const nameEl = document.getElementById('echoes-state-name');
+    const subtitleEl = document.getElementById('hv-character-name');
+    const emptyEl = document.getElementById('hv-empty-state');
+    const contentWrapEl = document.getElementById('hv-content-wrap');
+    const moodEl = document.getElementById('echoes-state-mood');
+    const favorabilityEl = document.getElementById('echoes-state-favorability');
+    const outfitEl = document.getElementById('echoes-state-outfit');
+    const actionEl = document.getElementById('echoes-state-action');
+    const thoughtsEl = document.getElementById('echoes-state-inner-thoughts');
+    const historyListEl = document.getElementById('hv-history-list');
+
+    if (titleEl) titleEl.textContent = `${name} 的状态`;
+    if (avatarEl) avatarEl.src = avatar;
+    if (nameEl) nameEl.textContent = name;
+    if (subtitleEl) subtitleEl.textContent = '实时状态同步中';
+
+    if (!snapshot) {
+        if (emptyEl) {
+            emptyEl.textContent = '还没有状态记录';
+            emptyEl.style.display = 'block';
+        }
+        if (contentWrapEl) contentWrapEl.style.display = 'none';
+        return;
+    }
+
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (contentWrapEl) contentWrapEl.style.display = 'block';
+    const favorability = normalizeFavorabilityValue(snapshot.favorability, 50);
+    const label = snapshot.favorabilityLabel || getStableFavorabilityLabel(favorability, snapshot.mood);
+    if (moodEl) moodEl.textContent = snapshot.mood || '平静';
+    if (favorabilityEl) favorabilityEl.textContent = `${favorability}（${label}）`;
+    if (outfitEl) outfitEl.textContent = snapshot.outfit || snapshot.clothing || getDefaultOutfitForProfile(profile);
+    if (actionEl) actionEl.textContent = snapshot.action || '维持着当前状态。';
+    if (thoughtsEl) thoughtsEl.textContent = snapshot.innerThoughts || '还没有记录到内心想法。';
+
+    if (historyListEl) {
+        historyListEl.innerHTML = historyRecords.slice(0, 8).map(record => `
+            <div class="echoes-state-history-item">
+                <div class="echoes-state-history-meta">
+                    <span>${escapeUiHtml(formatHeartVoiceRecordTime(record.timestamp))}</span>
+                    <span>${escapeUiHtml(record.mood || '平静')}</span>
+                </div>
+                <div>${escapeUiHtml(record.innerThoughts || '')}</div>
+            </div>
+        `).join('') || '<div class="echoes-state-empty">暂无历史状态</div>';
+    }
+}
+
+async function openEchoesStatePanel(chatId, characterId, options = {}) {
+    const panel = ensureEchoesStatePanel();
+    const chat = state.contacts.find(contact => contact.id === chatId);
     if (!chat) {
-        nameEl.textContent = '心声记录';
-        renderHeartVoicePanelRecords([]);
         alert('没有当前聊天');
-        console.warn('[ECHOES HV PANEL OPEN FAILED] missing_chat', { chatId, characterId });
+        console.warn('[ECHOES STATE PANEL OPEN FAILED] missing_chat', { chatId, characterId });
         return null;
     }
 
     let normalizedCharacterId = normalizeMessageSenderId(characterId);
-    if (!chat.isGroup && normalizedCharacterId === 'contact') {
-        normalizedCharacterId = normalizeMessageSenderId(chat.id);
-    }
-    if (!chat.isGroup) {
+    if (!chat.isGroup || normalizedCharacterId === 'contact') {
         normalizedCharacterId = normalizeMessageSenderId(chat.id);
     }
     if (!normalizedCharacterId || isCurrentUserSenderId(normalizedCharacterId)) {
-        nameEl.textContent = '心声记录';
-        renderHeartVoicePanelRecords([]);
-        console.warn('[ECHOES HV PANEL OPEN FAILED] invalid_character', { chatId, characterId, normalizedCharacterId });
+        console.warn('[ECHOES STATE PANEL OPEN FAILED] invalid_character', { chatId, characterId, normalizedCharacterId });
         return null;
     }
 
-    const profile = getEchoesCharacterProfile(chat, normalizedCharacterId);
-    let records = getEchoesHeartVoiceRecords(chat, normalizedCharacterId);
-
-    if (records.length === 0 && options.createFallbackIfEmpty === true) {
-        await ensureFallbackHeartVoiceForClickedCharacter(chat, normalizedCharacterId);
-        records = getEchoesHeartVoiceRecords(chat, normalizedCharacterId);
+    let snapshot = getLatestCharacterStateSnapshot(chat, normalizedCharacterId);
+    if (!snapshot && options.createFallbackIfEmpty === true) {
+        snapshot = await ensureFallbackHeartVoiceForClickedCharacter(chat, normalizedCharacterId);
     }
+    snapshot = snapshot || buildEmptyEchoesState(chat, normalizedCharacterId);
+    const historyRecords = getEchoesStateHistory(chat, normalizedCharacterId);
+    renderEchoesStatePanel(chat, normalizedCharacterId, snapshot, historyRecords);
 
-    nameEl.textContent = profile?.name
-        ? `${profile.name} · ${chat.isGroup ? '当前群聊 · ' + chat.name : '当前私聊'}`
-        : '心声记录';
-
-    renderHeartVoicePanelRecords(records);
-    panel.classList.remove('show-history');
     panel.dataset.characterId = normalizedCharacterId;
     panel.dataset.chatId = chat.id || '';
     panel.style.setProperty('display', 'flex', 'important');
+    panel.style.setProperty('position', 'fixed', 'important');
+    panel.style.setProperty('left', '50%', 'important');
+    panel.style.setProperty('bottom', 'calc(72px + env(safe-area-inset-bottom, 0px))', 'important');
+    panel.style.setProperty('transform', 'translateX(-50%)', 'important');
+    panel.style.setProperty('width', 'min(92vw, 420px)', 'important');
+    panel.style.setProperty('max-height', '78vh', 'important');
+    panel.style.setProperty('overflow-y', 'auto', 'important');
+    panel.style.setProperty('z-index', '2147483647', 'important');
     panel.style.setProperty('visibility', 'visible', 'important');
     panel.style.setProperty('opacity', '1', 'important');
     panel.style.setProperty('pointer-events', 'auto', 'important');
-    panel.style.setProperty('z-index', '2147483647', 'important');
+
     state.heartVoicePanel = {
         isOpen: true,
         characterId: normalizedCharacterId,
         chatId: chat.id || null
     };
 
-    console.log('[ECHOES HV PANEL OPEN]', { chatId: chat.id, characterId: normalizedCharacterId, recordsCount: records.length });
-    return records;
+    console.log('[ECHOES STATE PANEL OPEN]', {
+        chatId: chat.id,
+        characterId: normalizedCharacterId,
+        hasSnapshot: !!snapshot,
+        historyCount: historyRecords.length
+    });
+    return snapshot;
+}
+
+async function openEchoesHeartVoicePanel(chatId, characterId, options = {}) {
+    return openEchoesStatePanel(chatId, characterId, options);
 }
 
 function openHeartVoicePanelForCharacter(characterId, chatId) {
@@ -24629,11 +25377,21 @@ function openHeartVoicePanel(characterId, chatContext) {
 
 window.openHeartVoicePanelForCharacter = openHeartVoicePanelForCharacter;
 window.openEchoesHeartVoicePanel = openEchoesHeartVoicePanel;
+window.openEchoesStatePanel = openEchoesStatePanel;
 window.state = state;
 
-async function handleEchoesHeartVoiceAvatarClick(e) {
-    const avatar = e.target.closest('#chat-messages .message-avatar');
-    const authorName = e.target.closest('#chat-messages .message-author-name[data-heart-voice-character-id]');
+async function handleEchoesStateAvatarClick(e) {
+    const clickTarget = e.target?.closest ? e.target : e.target?.parentElement;
+    console.log('[ECHOES STATE CLICK RAW]', {
+        target: e.target,
+        targetClass: e.target?.className,
+        avatar: !!clickTarget?.closest('#chat-messages .message-avatar'),
+        authorName: !!clickTarget?.closest('#chat-messages .message-author-name[data-heart-voice-character-id]'),
+        activeChatId: state.activeChatId
+    });
+
+    const avatar = clickTarget?.closest('#chat-messages .message-avatar');
+    const authorName = clickTarget?.closest('#chat-messages .message-author-name[data-heart-voice-character-id]');
     const trigger = avatar || authorName;
     if (!trigger) return;
 
@@ -24671,24 +25429,33 @@ async function handleEchoesHeartVoiceAvatarClick(e) {
         characterId = normalizeMessageSenderId(chat.id);
     }
 
-    console.log('[ECHOES HV AVATAR CLICK]', {
+    console.log('[ECHOES STATE AVATAR CLICK]', {
         chatId: chat.id,
         isGroup: chat.isGroup,
         senderId,
         characterId
     });
 
-    await openEchoesHeartVoicePanel(chat.id, characterId, { createFallbackIfEmpty: true });
+    await openEchoesStatePanel(chat.id, characterId, { createFallbackIfEmpty: true });
 }
 
-function setupEchoesHeartVoiceAvatarClick() {
-    if (window.__echoesHvAvatarClickBound) return;
-    document.addEventListener('click', handleEchoesHeartVoiceAvatarClick, true);
+function handleEchoesHeartVoiceAvatarClick(e) {
+    return handleEchoesStateAvatarClick(e);
+}
+
+function setupEchoesStateAvatarClick() {
+    if (window.__echoesStateAvatarClickBound) return;
+    document.addEventListener('click', handleEchoesStateAvatarClick, true);
+    window.__echoesStateAvatarClickBound = true;
     window.__echoesHvAvatarClickBound = true;
     window.__echoesHeartVoiceAvatarClickBound = true;
 }
 
-setupEchoesHeartVoiceAvatarClick();
+function setupEchoesHeartVoiceAvatarClick() {
+    setupEchoesStateAvatarClick();
+}
+
+setupEchoesStateAvatarClick();
 window.__testGenerateHeartVoice = undefined;
 
 window.__debugHeartVoice = function() {
@@ -24827,10 +25594,16 @@ async function cleanBadHeartVoices() {
 
 // ===== END 心声辅助函数 =====
 
-async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat') {
+async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat', options = {}) {
     console.log('[AI RAW BEFORE ECHOES_PARSE]', rawText);
+    const requestId = options.requestId || null;
+    const isStaleGeneration = () => requestId && originContext?.id && !isLatestAiRequest(originContext.id, requestId);
+    if (isStaleGeneration()) {
+        console.warn('[AI DISPLAY DISCARDED] stale generation', { chatId: originContext.id, requestId });
+        return;
+    }
     if (contextMode === 'chat' && (originContext || senderProfile)) {
-        const handledEchoesStyle = await handleEchoesStyleAiResult(rawText, originContext || senderProfile, senderProfile);
+        const handledEchoesStyle = await handleEchoesStyleAiResult(rawText, originContext || senderProfile, senderProfile, { requestId });
         if (handledEchoesStyle) return;
     }
 
@@ -24852,10 +25625,15 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
     console.log('[AI SPLIT PARTS]', parts);
 
     for (const part of parts) {
+        if (isStaleGeneration()) {
+            console.warn('[AI PART DISPLAY SKIPPED] stale generation', { chatId: originContext.id, requestId });
+            return;
+        }
         await processAndDisplayAiResponse(part, senderProfile, originContext, contextMode, {
             skipHeartVoiceFallback: true,
             forceShowAvatar: true,
-            sinceTimestamp: roundStartedAt
+            sinceTimestamp: roundStartedAt,
+            requestId
         });
 
         if (parts.length > 1) {
@@ -24866,7 +25644,8 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
     if (
         isPrivateChat &&
         String(rawText || '').trim() &&
-        (state.characterStates || []).length === echoesStateCountBeforeFallback
+        (state.characterStates || []).length === echoesStateCountBeforeFallback &&
+        !isStaleGeneration()
     ) {
         await saveEchoesCharacterState(originContext, senderProfile.id, {
             mood: senderProfile.status || '平静',
@@ -24882,6 +25661,10 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
 // ▼▼▼ 使用这个【最终解决方案】替换掉你原来的 processAndDisplayAiResponse 函数 ▼▼▼
 async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat', options = {}) { // 默认设为 'chat'
     if (!senderProfile) return;
+    if (options.requestId && originContext?.id && !isLatestAiRequest(originContext.id, options.requestId)) {
+        console.warn('[AI PROCESS DISCARDED] stale generation', { chatId: originContext.id, requestId: options.requestId });
+        return;
+    }
         // ▼▼▼ ✨✨✨ 粘贴这个 if 判断 ✨✨✨ ▼▼▼
   // ▼▼▼ 使用这个【V2 完整修正版】替换掉旧的 "if (state.currentChatMode === 'sms')" 代码块 ▼▼▼
 
@@ -25165,9 +25948,13 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
                         openedChatId === effectiveChatContext.id &&
                         openedCharacterId === normalizeMessageSenderId(senderProfile.id)
                     ) {
+                        if (panel.classList.contains('echoes-state-panel')) {
+                            openEchoesStatePanel(effectiveChatContext.id, normalizeMessageSenderId(senderProfile.id));
+                        } else {
                         renderHeartVoicePanelRecords(
                             getHeartVoiceRecords(effectiveChatContext, normalizeMessageSenderId(senderProfile.id))
                         );
+                        }
                     }
                 } else {
                     console.warn('[HV STATUS SAVE FAILED]', {
@@ -25211,7 +25998,7 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
                     id: `mem_${Date.now()}`,
                     content: memoryContent,
                     summary: memoryContent,
-                    perceivers: [effectiveChatContext.id],
+                    perceivers: [normalizeMessageSenderId(senderProfile?.id || effectiveChatContext.id)],
                     startTime: Date.now(),
                     timestamp: Date.now(),
                     recallTitle: '',
@@ -26180,7 +26967,7 @@ case 'takeout': {
                                         id: `mem_${Date.now()}`,
                                         content: memoryContent,
                                         summary: memoryContent,
-                                        perceivers: [effectiveChatContext.id],
+                                        perceivers: [normalizeMessageSenderId(senderProfile?.id || effectiveChatContext.id)],
                                         startTime: Date.now(),
                                         timestamp: Date.now(),
                                         recallTitle: '',
@@ -46104,15 +46891,16 @@ ${mode === 'free'
   "responses": [
     {
       "characterId": "${refreshedContact.id}",
-      "text": "角色说出口的话"
+      "content": "角色说出口的话"
     }
   ],
-  "states": [
+  "characterStates": [
     {
       "characterId": "${refreshedContact.id}",
-      "mood": "当前情绪",
-      "affection": "当前对用户的关系/好感状态",
-      "clothing": "当前穿着，没有明确就写日常",
+      "mood": "怒极反笑",
+      "favorability": 68,
+      "favorabilityLabel": "极度恼火",
+      "outfit": "当前穿着。没有明确换装时必须沿用上一状态，不要随机变化",
       "action": "当前动作或状态",
       "innerThoughts": "第一人称心理独白，15-60字，必须是角色没说出口的真实想法"
     }
@@ -46121,11 +46909,12 @@ ${mode === 'free'
 
 规则：
 1. responses 负责显示聊天气泡。
-2. states 不显示成气泡，只用于心声面板和角色状态。
+2. characterStates 不显示成气泡，只用于状态面板。
 3. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
 4. 不要泛泛模板，不要复述旧记忆，不要写成总结报告。
 5. 不要输出 [heart_voice]、[status]、[memory]、HEART_VOICE 或其他标签。
-6. 如果角色只想沉默，也必须在 states 里记录这一轮心声；responses 可以为空数组。
+6. 如果角色只想沉默，也必须在 characterStates 里记录这一轮状态；responses 可以为空数组。
+7. 状态要连续：mood、favorability、outfit、action、innerThoughts 都要承接上一轮；没有明确换衣/场景切换时 outfit 必须保持不变。
 `.trim();
 
     if (dynamicInstructions) {
@@ -46152,6 +46941,99 @@ function getActiveGroupAiProfiles(group) {
         .filter(memberId => !(group.mutedMembers || []).includes(memberId))
         .map(memberId => getProfileInGroupContext(group, memberId))
         .filter(Boolean);
+}
+
+function getPrivateMemoryLineForGroupPrompt(message, privateContact, memberProfile) {
+    const senderId = normalizeMessageSenderId(message?.senderId || message?.sender);
+    const authorName = isCurrentUserSenderId(senderId)
+        ? (state.myProfile?.name || '用户')
+        : (memberProfile?.name || privateContact?.name || '该角色');
+    const described = describeMessageForUnifiedMemory(message, { contact: privateContact })?.content
+        || getMessageTextContent(message)
+        || '';
+    const compact = String(described || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 90);
+    return compact ? `- ${authorName}：${compact}` : '';
+}
+
+function buildPrivateMemoryDigestForGroupMember(group, memberProfile, options = {}) {
+    if (!group?.isGroup || !memberProfile) return '';
+
+    const normalizedMemberId = normalizeMessageSenderId(memberProfile.id);
+    const memberName = memberProfile.name || normalizedMemberId || '该成员';
+    const privateContact = (state.contacts || []).find(contact =>
+        contact
+        && !contact.isGroup
+        && normalizeMessageSenderId(contact.id) === normalizedMemberId
+    );
+
+    if (!privateContact) {
+        return `【${memberName}】\n${memberName}：暂无和用户的私聊记录。`;
+    }
+
+    const limit = Number(options.limit) || 8;
+    const validMessages = getVisibleUnrecappedMessagesForEntity(
+        normalizedMemberId,
+        getAllChatMessages(state.contacts),
+        state.contacts,
+        limit
+    )
+        .filter(message => message.chatId === privateContact.id)
+        .sort((left, right) => (Number(left.timestamp) || 0) - (Number(right.timestamp) || 0))
+        .slice(-limit);
+
+    const messageLines = validMessages
+        .map(message => getPrivateMemoryLineForGroupPrompt(message, privateContact, memberProfile))
+        .filter(Boolean);
+
+    const privateSnapshot = getLatestCharacterStateSnapshot(privateContact, normalizedMemberId);
+    const snapshotLine = privateSnapshot
+        ? `当前私聊状态：情绪=${privateSnapshot.mood || '平静'}；好感度=${normalizeFavorabilityValue(privateSnapshot.favorability, 50)}（${privateSnapshot.favorabilityLabel || getStableFavorabilityLabel(privateSnapshot.favorability, privateSnapshot.mood)}）；穿着=${privateSnapshot.outfit || privateSnapshot.clothing || '未记录'}；动作=${privateSnapshot.action || '未记录'}；内心=${String(privateSnapshot.innerThoughts || '未记录').replace(/\s+/g, ' ').slice(0, 80)}。`
+        : '当前私聊状态：暂无状态快照。';
+
+    return [
+        `【${memberName}自己的私聊记忆，仅${memberName}可用，不能被其他群成员知道】`,
+        messageLines.length ? messageLines.join('\n') : '- 最近没有可用的私聊消息。',
+        '可用但不可公开复述：这些内容只能影响该角色的语气、沉默、回避、维护或私下想说，不能在群里直接说破。',
+        snapshotLine
+    ].join('\n');
+}
+
+function buildPrivateMemoryDigestForGroup(group, allMemberProfiles) {
+    const profiles = Array.isArray(allMemberProfiles) ? allMemberProfiles : [];
+    const chunks = [];
+    let usefulCount = 0;
+
+    for (const profile of profiles) {
+        const normalizedId = normalizeMessageSenderId(profile?.id);
+        if (!normalizedId || isCurrentUserSenderId(normalizedId)) continue;
+
+        const privateContact = (state.contacts || []).find(contact =>
+            contact
+            && !contact.isGroup
+            && normalizeMessageSenderId(contact.id) === normalizedId
+        );
+        const hasUsefulPrivateMemory = !!(
+            privateContact &&
+            (
+                getVisibleUnrecappedMessagesForEntity(
+                    normalizedId,
+                    getAllChatMessages(state.contacts),
+                    state.contacts,
+                    1
+                ).some(message => message.chatId === privateContact.id)
+                || getLatestCharacterStateSnapshot(privateContact, normalizedId)
+            )
+        );
+
+        if (hasUsefulPrivateMemory) usefulCount++;
+        chunks.push(buildPrivateMemoryDigestForGroupMember(group, profile));
+    }
+
+    if (usefulCount === 0) return '（暂无群成员自己的私聊记忆）';
+    return chunks.filter(Boolean).join('\n\n');
 }
 
 function buildGroupChatOpenAiMessages(group, history = []) {
@@ -46287,6 +47169,7 @@ async function buildGroupChatRequestContext(group, mode = 'reply') {
         characters: allMemberProfiles,
         users: [myProfile]
     });
+    const privateMemoryDigestString = buildPrivateMemoryDigestForGroup(refreshedGroup, allMemberProfiles);
 
     const finalSystemPrompt = `
 [SYSTEM] 你是一个群聊模拟器和剧本导演。
@@ -46309,6 +47192,9 @@ ${longTermKnowledgeString}
 [按可见性读取的未总结最近消息]
 ${visibleWindowString}
 
+[各成员自己的私聊记忆，仅对应成员可用]
+${privateMemoryDigestString}
+
 [群聊关系与称呼参考]
 ${addressingPrompt}
 
@@ -46321,6 +47207,17 @@ ${worldBookContextString}
 3. 即使导演提示里出现了别人的私聊记忆，你也只能让对应角色据此行动，其他成员不能说穿。
 4. 当前 messages 数组里的最新用户消息优先级最高，先回应当前轮，再自然扩展。
 5. 不要复用上一轮已经生成过的回复，不要把旧轮次内容混进本轮。
+6. “各成员自己的私聊记忆”中每一段只允许标题对应的角色使用；其他角色不能知道、不能复述、不能接话、不能阴阳怪气地点破。
+7. 私聊内容只能影响对应角色的语气、沉默、回避、吃醋、维护用户或单独关心用户；如果内容私密，在群里只能含糊处理。
+8. 除非用户在群聊里主动提起同一件事，否则不要直接公开私聊秘密。
+
+[私聊记忆驱动的群聊反应]
+1. 如果某角色和用户最近私聊中有未解决情绪，群聊里可以自然带出反差：冷淡、回避、沉默、阴阳怪气、偷偷维护或转移话题。
+2. 私聊里刚暧昧，群聊里该角色可以故作平静但更快维护用户；私聊里刚吵过，可以表现得不耐或避开用户。
+3. 不要直接说“因为我们私聊里你说过……”，要像真实人一样心里有数、话里留白。
+4. 不相关角色绝不能知道私聊秘密，也不能替对应角色反应。
+5. 私聊记忆不能覆盖当前群聊最新消息；当前群聊最新轮仍然优先。
+6. 不要让所有角色同时因为私聊记忆反应，只有相关角色反应即可。
 
 [通用规则]
 1. 你只能控制角色，绝对不能扮演用户“${myProfile.name}”。
@@ -46362,15 +47259,16 @@ ${replyGuidance.guidance}
   "responses": [
     {
       "characterId": "角色id",
-      "text": "该角色说出口的话"
+      "content": "该角色说出口的话"
     }
   ],
-  "states": [
+  "characterStates": [
     {
       "characterId": "角色id",
       "mood": "当前情绪",
-      "affection": "当前关系/好感状态",
-      "clothing": "当前穿着，没有明确就写日常",
+      "favorability": 68,
+      "favorabilityLabel": "当前关系/好感状态",
+      "outfit": "当前穿着；没有明确换装时沿用上一状态",
       "action": "当前动作或状态",
       "innerThoughts": "该角色自己的第一人称心声，15-60字"
     }
@@ -46380,13 +47278,14 @@ ${replyGuidance.guidance}
 规则：
 1. characterId 必须使用对应角色的真实 id，不要用角色名、代称或外号。
 2. responses 里的每个对象会显示成一个独立聊天气泡。
-3. states 不显示成气泡，只用于心声面板和角色状态。
-4. 每个发言角色都必须有一条 state。
-5. states 里的 innerThoughts 必须严格属于对应 characterId，不能让 A 写 B 的心理。
+3. characterStates 不显示成气泡，只用于状态面板。
+4. 每个发言角色都必须有一条 characterState。
+5. characterStates 里的 innerThoughts 必须严格属于对应 characterId，不能让 A 写 B 的心理。
 6. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
 7. 不要泛泛模板，不要复述旧记忆，不要写总结报告。
 8. 不要输出 MESSAGE_START、SPEAKER、CONTENT、HEART_VOICE、[heart_voice]、[status] 或其他标签。
 9. 不要扮演用户“${myProfile.name}”。
+10. 每个角色的状态要各自连续：mood 不要大跳，favorability 普通互动只小幅变化，outfit 没有明确换装/场景切换时必须延续上一状态，action 和 innerThoughts 要承接上一轮。
 `.trim();
 
     const requestMessages = mode === 'free'
@@ -46482,7 +47381,7 @@ async function triggerAiReply(contact) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
-        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat');
+        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
     } finally {
         state.aiTypingStatus[contact.id] = false;
 
@@ -46529,7 +47428,7 @@ async function triggerPrivateFreeChat(contact) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
-        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat');
+        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
     } catch (error) {
         console.error('私聊自由聊天执行失败:', error);
         await createAndAddMessage({
