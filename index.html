@@ -23528,6 +23528,106 @@ async function saveLatestHeartVoice(senderProfile, effectiveChatContext, heartVo
     return saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVoiceContent, options);
 }
 
+async function commitHeartVoiceForAiTurn({
+    senderProfile,
+    chatContext,
+    rawResponse,
+    visibleText,
+    explicitHeartVoice,
+    relatedMessageIds = [],
+    roundStartedAt = Date.now()
+}) {
+    if (!senderProfile || !chatContext) {
+        console.warn('[HV TURN SKIP] missing_sender_or_chat', { senderProfile, chatContext });
+        return null;
+    }
+
+    const senderId = normalizeMessageSenderId(senderProfile.id);
+    if (!senderId || isCurrentUserSenderId(senderId) || senderId === 'system' || senderId === 'system_instruction') {
+        console.warn('[HV TURN SKIP] invalid_sender', { senderId, senderProfile });
+        return null;
+    }
+
+    if (chatContext.isGroup) {
+        const inGroup =
+            (chatContext.members || []).map(normalizeMessageSenderId).includes(senderId) ||
+            (chatContext.npcMembers || []).some(npc => normalizeMessageSenderId(npc.id) === senderId);
+
+        if (!inGroup) {
+            console.warn('[HV TURN SKIP] sender_not_in_group', { senderId, chatId: chatContext.id });
+            return null;
+        }
+    }
+
+    const cleanedRaw = removeHeartVoiceBlocks(String(rawResponse || ''))
+        .replace(/\[diary\][\s\S]*?(?:\[\/diary\]|$)/gi, '')
+        .replace(/\[status:\s*([^\]]+)\]/gi, '状态变更为：$1')
+        .replace(/\[memory:\s*([^\]]+)\]/gi, '记住了：$1')
+        .replace(/\[[^\]]+\]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const finalVisibleText =
+        String(visibleText || '').trim() ||
+        cleanedRaw ||
+        '这一轮没有说出口的话，只是状态有了变化';
+
+    const normalizedExplicit = normalizeHeartVoiceContent(explicitHeartVoice);
+    const payload = normalizedExplicit || buildFallbackHeartVoicePayload(finalVisibleText, senderProfile, chatContext);
+
+    const relatedMessageId =
+        relatedMessageIds.find(Boolean) ||
+        `ai_turn_${chatContext.id}_${senderId}_${roundStartedAt}`;
+
+    const duplicate = (chatContext.history || []).some(message =>
+        message &&
+        message.type === 'heart_voice' &&
+        message.relatedMessageId === relatedMessageId &&
+        getHeartVoiceSenderId(message, chatContext) === senderId
+    );
+
+    if (duplicate) {
+        console.log('[HV TURN REPLACE EXISTING]', { chatId: chatContext.id, senderId, relatedMessageId });
+    }
+
+    console.log('[HV TURN CREATE]', {
+        chatId: chatContext.id,
+        senderId,
+        relatedMessageId,
+        finalVisibleText,
+        payload
+    });
+
+    const saved = await saveHeartVoiceRecord(senderProfile, chatContext, payload, {
+        relatedMessageId,
+        sinceTimestamp: roundStartedAt,
+        replaceExisting: true
+    });
+
+    if (!saved) {
+        console.warn('[HV TURN SAVE FAILED]', { chatId: chatContext.id, senderId, payload });
+        return null;
+    }
+
+    const panel = document.getElementById('heart-voice-panel');
+    if (panel && panel.style.display === 'flex') {
+        const openedCharacterId = panel.dataset.characterId;
+        const openedChatId = panel.dataset.chatId;
+        if (openedChatId === chatContext.id && openedCharacterId === senderId) {
+            renderHeartVoicePanelRecords(getHeartVoiceRecords(chatContext, senderId));
+        }
+    }
+
+    console.log('[HV TURN SAVED]', {
+        chatId: chatContext.id,
+        senderId,
+        relatedMessageId,
+        saved
+    });
+
+    return saved;
+}
+
 async function ensureHeartVoiceForPrivateReply(rawText, visibleText, contact, originContext, roundStartedAt) {
     if (!contact || !originContext || originContext.isGroup) return null;
     const rawHasHeartVoice = /\[(heart_voice|心声)\]/i.test(String(rawText || ''));
@@ -23814,6 +23914,76 @@ window.__testGenerateHeartVoice = async function() {
     alert(saved ? '已生成一条测试心声' : '测试心声保存失败，请看控制台 [HV SAVE SKIP]');
 };
 
+window.__debugHeartVoice = function() {
+    const chat = state.contacts.find(c => c.id === state.activeChatId);
+    if (!chat) {
+        console.warn('[HV DEBUG] no active chat', { activeChatId: state.activeChatId });
+        alert('没有当前聊天');
+        return;
+    }
+
+    const allHv = (chat.history || []).filter(m => m && m.type === 'heart_voice');
+
+    const possibleIds = [];
+    if (!chat.isGroup) {
+        possibleIds.push(chat.id);
+    } else {
+        (chat.members || []).forEach(id => possibleIds.push(id));
+        (chat.npcMembers || []).forEach(npc => possibleIds.push(npc.id));
+    }
+
+    const detail = possibleIds.map(id => ({
+        id,
+        records: getHeartVoiceRecords(chat, id).length
+    }));
+
+    console.log('[HV DEBUG]', {
+        activeChatId: state.activeChatId,
+        chatId: chat.id,
+        chatName: chat.name,
+        isGroup: chat.isGroup,
+        totalHistory: (chat.history || []).length,
+        totalHeartVoice: allHv.length,
+        allHeartVoices: allHv.map(m => ({
+            id: m.id,
+            sender: m.sender,
+            senderId: m.senderId,
+            characterId: m.characterId,
+            relatedMessageId: m.relatedMessageId,
+            content: m.content,
+            text: m.text,
+            timestamp: m.timestamp
+        })),
+        matchByPossibleIds: detail
+    });
+
+    alert(`心声总数：${allHv.length}，详情看控制台 [HV DEBUG]`);
+};
+
+window.__showLatestHeartVoice = function() {
+    const chat = state.contacts.find(c => c.id === state.activeChatId);
+    if (!chat) {
+        alert('没有当前聊天');
+        return;
+    }
+
+    const allHv = (chat.history || [])
+        .filter(m => m && m.type === 'heart_voice')
+        .sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
+
+    if (!allHv.length) {
+        alert('当前聊天 history 里没有任何 heart_voice，说明没有保存成功。请看控制台有没有 [HV SAVE SKIP] 或 [HV STATUS SAVE FAILED]');
+        return;
+    }
+
+    const latest = allHv[0];
+    const characterId = normalizeMessageSenderId(latest.senderId || latest.sender || latest.characterId);
+
+    console.log('[HV SHOW LATEST]', { latest, characterId, chat });
+
+    openHeartVoicePanelForCharacter(characterId, chat.id);
+};
+
 async function cleanBadHeartVoices() {
     for (const contact of state.contacts) {
         if (!contact || !Array.isArray(contact.history)) continue;
@@ -23993,6 +24163,41 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
         return; 
     }
 
+    const hvTurnStartedAt = Date.now();
+    const hvRawResponse = String(rawResponse || '');
+    let hvVisiblePieces = [];
+    let hvRelatedMessageIds = [];
+    let hvExplicitHeartVoice = null;
+    let hvTurnCommitted = false;
+    const commitHvTurnIfNeeded = async () => {
+        if (hvTurnCommitted) return null;
+        hvTurnCommitted = true;
+        if (
+            contextMode === 'chat' &&
+            senderProfile &&
+            effectiveChatContext &&
+            !isCurrentUserSenderId(senderProfile.id) &&
+            senderProfile.id !== 'system' &&
+            senderProfile.id !== 'system_instruction'
+        ) {
+            return commitHeartVoiceForAiTurn({
+                senderProfile,
+                chatContext: effectiveChatContext,
+                rawResponse: hvRawResponse,
+                visibleText: hvVisiblePieces.join('。'),
+                explicitHeartVoice: hvExplicitHeartVoice,
+                relatedMessageIds: hvRelatedMessageIds,
+                roundStartedAt: hvTurnStartedAt
+            });
+        }
+        console.log('[HV TURN SKIP] not_ai_chat_turn', {
+            contextMode,
+            senderId: senderProfile?.id,
+            chatId: effectiveChatContext?.id
+        });
+        return null;
+    };
+
     const forceAvatarForThisReply =
         options.forceShowAvatar === true
         && contextMode === 'chat'
@@ -24000,7 +24205,17 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
     let deferredExplicitHeartVoiceContent = null;
     const addSenderChatMessage = async (messageData, target = effectiveChatContext, mode = 'chat', forceAvatar = forceAvatarForThisReply) => {
         const addedMessage = await createAndAddMessage(messageData, senderProfile.id, target, forceAvatar, mode);
+        if (addedMessage && mode === 'chat' && target?.id === effectiveChatContext?.id) {
+            hvRelatedMessageIds.push(addedMessage.id);
+
+            const text = getMessageTextContent(addedMessage);
+            if (text && addedMessage.type !== 'heart_voice' && addedMessage.type !== 'system_notification') {
+                hvVisiblePieces.push(text);
+            }
+        }
+
         if (deferredExplicitHeartVoiceContent && addedMessage && mode === 'chat') {
+            hvExplicitHeartVoice = deferredExplicitHeartVoiceContent;
             await saveHeartVoiceRecord(senderProfile, target, deferredExplicitHeartVoiceContent, {
                 relatedMessageId: addedMessage.id,
                 sinceTimestamp: addedMessage.timestamp || options.sinceTimestamp,
@@ -24023,6 +24238,7 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
     if (!heartVoiceContent) {
         console.warn('[HV INLINE EXPLICIT PARSE FAILED]', { rawResponse });
     }
+    hvExplicitHeartVoice = heartVoiceContent;
     deferredExplicitHeartVoiceContent = heartVoiceContent;
     conversation = removeHeartVoiceBlocks(conversation);
 }
@@ -24048,6 +24264,7 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
         if (newStatus) {
             // 1. 更新数据
             senderProfile.status = newStatus;
+            hvVisiblePieces.push(`状态变更为：${newStatus}`);
             await kokoMemory.put('contacts', senderProfile);
             
             if (state.activeChatId === senderProfile.id) {
@@ -24061,6 +24278,67 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
                 sender: 'system', 
                 content: `状态变更为：${newStatus}` 
             }, senderProfile.id, effectiveChatContext, false, 'chat');
+
+            if (
+                contextMode === 'chat' &&
+                senderProfile &&
+                effectiveChatContext &&
+                !isCurrentUserSenderId(senderProfile.id) &&
+                senderProfile.id !== 'system' &&
+                senderProfile.id !== 'system_instruction'
+            ) {
+                const statusHeartVoiceText = `状态变更为：${newStatus}`;
+                const statusHeartVoicePayload = buildFallbackHeartVoicePayload(
+                    statusHeartVoiceText,
+                    senderProfile,
+                    effectiveChatContext
+                );
+
+                const statusRelatedMessageId = `status_turn_${effectiveChatContext.id}_${normalizeMessageSenderId(senderProfile.id)}_${Date.now()}`;
+
+                console.log('[HV STATUS CREATE]', {
+                    chatId: effectiveChatContext.id,
+                    senderId: senderProfile.id,
+                    newStatus,
+                    statusHeartVoicePayload
+                });
+
+                const savedStatusHeartVoice = await saveHeartVoiceRecord(
+                    senderProfile,
+                    effectiveChatContext,
+                    statusHeartVoicePayload,
+                    {
+                        relatedMessageId: statusRelatedMessageId,
+                        sinceTimestamp: Date.now(),
+                        replaceExisting: false
+                    }
+                );
+
+                if (savedStatusHeartVoice) {
+                    console.log('[HV STATUS SAVED]', savedStatusHeartVoice);
+
+                    const panel = document.getElementById('heart-voice-panel');
+                    const openedCharacterId = panel?.dataset?.characterId;
+                    const openedChatId = panel?.dataset?.chatId;
+
+                    if (
+                        panel &&
+                        panel.style.display === 'flex' &&
+                        openedChatId === effectiveChatContext.id &&
+                        openedCharacterId === normalizeMessageSenderId(senderProfile.id)
+                    ) {
+                        renderHeartVoicePanelRecords(
+                            getHeartVoiceRecords(effectiveChatContext, normalizeMessageSenderId(senderProfile.id))
+                        );
+                    }
+                } else {
+                    console.warn('[HV STATUS SAVE FAILED]', {
+                        chatId: effectiveChatContext.id,
+                        senderId: senderProfile.id,
+                        newStatus
+                    });
+                }
+            }
         }
 
         // ★★★ 关键：从对话文本中彻底移除这条指令 ★★★
@@ -24245,15 +24523,23 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
         // 4. 弹出来电界面
         handleIncomingCall(senderProfile);
 
+        await commitHvTurnIfNeeded();
         return; // 拦截结束，不再执行后续的普通文本发送逻辑
     }
     // ▲▲▲▲▲▲▲▲▲▲ 修复结束 ▲▲▲▲▲▲▲▲▲▲
 
     if (contextMode === 'chat' && state.activeCall && state.activeCall.contactId === effectiveChatContext.id) {
-await createAndAddMessage({
+const activeCallMessage = await createAndAddMessage({
             type: 'video_call_text',
             content: conversation
         }, senderProfile.id, senderProfile, false, 'chat');
+        if (activeCallMessage) {
+            hvRelatedMessageIds.push(activeCallMessage.id);
+            const activeCallText = getMessageTextContent(activeCallMessage);
+            if (activeCallText) {
+                hvVisiblePieces.push(activeCallText);
+            }
+        }
 
         const narrativeFeed = document.getElementById('narrative-feed');
         const actionRegex = /\[action:(.*?)\]/g;
@@ -24272,6 +24558,7 @@ await createAndAddMessage({
                     await sleep(1000);
                 }
                 await endVideoCall('contact', `${senderProfile.name} 挂断了电话`);
+                await commitHvTurnIfNeeded();
                 return;
             }
         }
@@ -24307,6 +24594,7 @@ if (fullDialogue) {
     await playNextInQueue(fullDialogue, senderProfile); 
 }
         }
+        await commitHvTurnIfNeeded();
         return;
     }
 
@@ -24479,6 +24767,7 @@ if (fullDialogue) {
 
                 // 1. 执行状态更新逻辑 (复用 status 指令的逻辑)
                 senderProfile.status = extractedStatus;
+                hvVisiblePieces.push(`状态变更为：${extractedStatus}`);
                 await kokoMemory.put('contacts', senderProfile);
                 
                 if (state.activeChatId === senderProfile.id) {
@@ -24797,6 +25086,7 @@ case 'status': {
                             if (newStatus) {
                                 // 1. 更新数据
                                 senderProfile.status = newStatus;
+                                hvVisiblePieces.push(`状态变更为：${newStatus}`);
                                 await kokoMemory.put('contacts', senderProfile);
                                 
                                 if (state.activeChatId === senderProfile.id) {
@@ -25169,6 +25459,7 @@ case 'takeout': {
         
         // --- 智能缓冲循环 V4 结束 ---
     }
+    await commitHvTurnIfNeeded();
 // ▲▲▲ 替换到这里结束 ▲▲▲
     }
  // --- (替换) renderPostDetail 函数 (V2.1 - 支持评论图片) ---
