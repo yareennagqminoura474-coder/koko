@@ -3311,14 +3311,14 @@
 }
 /* --- 新的心声面板样式 (猫咪主题 - 硬编码颜色版) --- */
 #heart-voice-panel {
-    position: fixed;
-    bottom: calc(82px + env(safe-area-inset-bottom, 0px));
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(92vw, 380px);
-    max-height: 65vh;
-    overflow-y: auto;
-    z-index: 99999;
+    position: fixed !important;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: min(92vw, 390px) !important;
+    max-height: 65vh !important;
+    overflow-y: auto !important;
+    z-index: 2147483647 !important;
     background: rgba(255, 250, 248, 0.96);
     border: 1px solid rgba(240, 220, 216, 0.95);
     border-radius: 22px;
@@ -3326,6 +3326,7 @@
     padding: 14px;
     display: none;
     flex-direction: column;
+    pointer-events: auto !important;
     gap: 10px;
 }
 
@@ -8025,7 +8026,6 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
     <div id="chat-header-badges" class="chat-header-badges"></div>
     <div>
         <i class="fas fa-search action-btn" id="search-chat-btn" title="搜索聊天记录" style="margin-right: 15px; position: relative; z-index: 10000;" onclick="event.stopPropagation(); showChatSearch();"></i>
-        <i class="fas fa-heart action-btn" id="test-heart-voice-btn" title="测试心声入口" onclick="event.preventDefault(); event.stopPropagation(); if (window.__openHeartVoiceHard) { window.__openHeartVoiceHard(null, window.state && window.state.activeChatId); } else { alert('心声基础脚本没有加载'); }" style="margin-right: 15px;"></i>
         <i class="fas fa-ellipsis-v action-btn" id="more-chat-options-btn" title="更多操作"></i>
     </div>
 </div>
@@ -12308,35 +12308,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 
     window.__openHeartVoiceBasic = forceShowHeartVoicePanel;
 
-    window.__openHeartVoiceHard = function (characterId, chatId) {
-        console.log('[HV HARD ENTRY]', { characterId: characterId, chatId: chatId });
-
-        forceShowHeartVoicePanel('心声记录', '心声面板已打开。如果这里还没有角色心声，说明后续角色记录读取逻辑还没接上。');
-
-        try {
-            if (typeof window.openHeartVoicePanelForCharacter === 'function') {
-                var finalChatId = chatId;
-                var finalCharacterId = characterId;
-
-                if (!finalChatId && window.state && window.state.activeChatId) {
-                    finalChatId = window.state.activeChatId;
-                }
-
-                if (!finalCharacterId && window.state && Array.isArray(window.state.contacts)) {
-                    var chat = window.state.contacts.find(function (c) { return c.id === finalChatId; });
-                    if (chat && !chat.isGroup) {
-                        finalCharacterId = chat.id;
-                    }
-                }
-
-                if (finalCharacterId && finalChatId) {
-                    window.openHeartVoicePanelForCharacter(finalCharacterId, finalChatId);
-                }
-            }
-        } catch (err) {
-            console.warn('[HV ADVANCED OPEN FAILED, BASIC PANEL KEPT]', err);
-        }
-    };
+    window.__openHeartVoiceHard = null;
 
     document.addEventListener('click', function (event) {
         var closeBtn = event.target.closest('#close-heart-voice-panel');
@@ -12348,21 +12320,6 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
             return;
         }
 
-        var trigger = event.target.closest('#test-heart-voice-btn, [data-action="open-heart-voice"], #chat-contact-name');
-        if (!trigger) return;
-        if (trigger.closest && trigger.closest('#chat-messages')) return;
-
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
-
-        var characterId = trigger.dataset ? trigger.dataset.heartVoiceCharacterId : null;
-        var chatId = trigger.dataset ? trigger.dataset.heartVoiceChatId : null;
-
-        if (!chatId && window.state) chatId = window.state.activeChatId;
-
-        console.log('[HV BASIC CLICK]', { characterId: characterId, chatId: chatId, trigger: trigger });
-        window.__openHeartVoiceHard(characterId, chatId);
     }, true);
 })();
 </script>
@@ -19127,8 +19084,10 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
         decision: heartVoiceDecision
     });
 
-    if (heartVoiceDecision.shouldCreate && state.suppressLegacyHeartVoiceCommit !== true) {
-        await createHeartVoiceForCommittedMessage(fullMessage, contact, heartVoiceDecision);
+    if (heartVoiceDecision.shouldCreate && state.suppressEchoesStateCommit !== true) {
+        const echoesSpeaker = getEchoesCharacterProfile(contact, heartVoiceDecision.characterId)
+            || getHeartVoiceSenderProfile(heartVoiceDecision.characterId, contact);
+        await ensureEchoesStateForVisibleMessage(fullMessage, contact, echoesSpeaker);
     }
 
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
@@ -19889,13 +19848,35 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
     const text = String(content || '').trim();
     await sleep(800 + Math.random() * 700);
 
+    let addedMessage = null;
     if (!hasSpecialGroupMessageContent(text)) {
-        await createAndAddMessage({
+        addedMessage = await createAndAddMessage({
             type: 'text',
             sender: speaker.id,
             senderId: speaker.id,
-            content: text
+            content: text,
+            forceAvatar: true
         }, speaker.id, group, true, 'chat');
+        if (addedMessage) {
+            await ensureEchoesStateForVisibleMessage(
+                addedMessage,
+                group,
+                speaker,
+                heartVoice || null
+            );
+        } else {
+            await saveEchoesCharacterState(
+                group,
+                speaker.id,
+                heartVoice || {
+                    mood: inferHeartVoiceEmotion(text),
+                    innerThoughts: makeLocalHeartVoiceThought(text, speaker, group),
+                    heartRate: '平稳',
+                    jealousy: inferHeartVoiceJealousy(text)
+                },
+                `group_turn_${group.id}_${speaker.id}_${messageStartedAt}`
+            );
+        }
     } else {
         await processAndDisplayAiResponse(text, speaker, group, 'chat', {
             skipHeartVoiceFallback: true,
@@ -19903,8 +19884,6 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
             preserveSingleBubble: true
         });
     }
-
-    await ensureHeartVoiceForGroupMessage(text, speaker, group, messageStartedAt, heartVoice);
     return true;
 }
 
@@ -19963,13 +19942,23 @@ async function triggerGroupChatAiReply(group) {
                 const { speaker, content, heartVoice } = parsedMessage;
                 console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
                 const messageStartedAt = Date.now();
-                await createAndAddMessage({
+                const fallbackMessage = await createAndAddMessage({
                     type: 'text',
                     sender: speaker.id,
                     senderId: speaker.id,
                     content: String(content || '').trim()
                 }, speaker.id, group, true, 'chat');
-                await ensureHeartVoiceForGroupMessage(content, speaker, group, messageStartedAt, heartVoice);
+                await saveEchoesCharacterState(
+                    group,
+                    speaker.id,
+                    heartVoice || {
+                        mood: inferHeartVoiceEmotion(content),
+                        innerThoughts: makeLocalHeartVoiceThought(content, speaker, group),
+                        heartRate: '平稳',
+                        jealousy: inferHeartVoiceJealousy(content)
+                    },
+                    fallbackMessage?.id || `group_fallback_${group.id}_${speaker.id}_${messageStartedAt}`
+                );
             }
         }
     } catch (e) {
@@ -23354,11 +23343,13 @@ function normalizeEchoesResponseCharacterId(response, chat, fallbackSenderProfil
     return '';
 }
 
-async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile = null) {
+async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile = null, explicitStates = []) {
     if (!Array.isArray(responses) || !chat) return [];
     const rendered = [];
     const previousSuppressLegacy = state.suppressLegacyHeartVoiceCommit === true;
+    const previousSuppressEchoes = state.suppressEchoesStateCommit === true;
     state.suppressLegacyHeartVoiceCommit = true;
+    state.suppressEchoesStateCommit = true;
 
     try {
         for (const response of responses) {
@@ -23376,12 +23367,20 @@ async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile
             const message = await createAndAddMessage({
                 type: 'text',
                 sender: speaker.id,
+                senderId: speaker.id,
                 content: text
             }, speaker.id, chat, true, 'chat');
-            if (message) rendered.push(message);
+            if (message) {
+                const explicitState = (explicitStates || []).find(item =>
+                    normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile) === characterId
+                );
+                await ensureEchoesStateForVisibleMessage(message, chat, speaker, explicitState || null);
+                rendered.push(message);
+            }
         }
     } finally {
         state.suppressLegacyHeartVoiceCommit = previousSuppressLegacy;
+        state.suppressEchoesStateCommit = previousSuppressEchoes;
     }
 
     return rendered;
@@ -23429,7 +23428,10 @@ async function saveCharacterStateRecords(states, chat, fallbackSenderProfile = n
             affection: item.affection || '',
             clothing: item.clothing || '',
             action: item.action || '',
-            innerThoughts
+            innerThoughts,
+            heartRate: item.heartRate || item.heart_rate || '平稳',
+            jealousy: item.jealousy || '无',
+            relatedMessageId: item.relatedMessageId || null
         };
 
         state.characterStates.push(record);
@@ -23496,14 +23498,14 @@ async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfil
     const parsed = parseEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile);
     if (!parsed) return false;
 
-    const renderedMessages = await renderEchoesStyleResponses(parsed.responses, chat, fallbackSenderProfile);
-    const explicitStateIds = new Set((parsed.states || [])
-        .filter(item => String(item?.innerThoughts || item?.thoughts || '').trim())
+    const responseCharacterIds = new Set((parsed.responses || [])
         .map(item => normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile))
         .filter(Boolean));
-    const fallbackStates = buildFallbackStatesForEchoesResponses(parsed.responses, chat, fallbackSenderProfile, rawResponse)
-        .filter(item => !explicitStateIds.has(normalizeMessageSenderId(item.characterId)));
-    const allStates = [...(parsed.states || []), ...fallbackStates];
+    const renderedMessages = await renderEchoesStyleResponses(parsed.responses, chat, fallbackSenderProfile, parsed.states || []);
+    const extraStates = (parsed.states || [])
+        .filter(item => String(item?.innerThoughts || item?.thoughts || '').trim())
+        .filter(item => !responseCharacterIds.has(normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile)));
+    const allStates = extraStates;
 
     if (!parsed.responses.length && !allStates.length) {
         console.warn('[ECHOES_STYLE_NOT_HANDLED_EMPTY]', { rawResponse, parsed });
@@ -23518,7 +23520,7 @@ async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfil
         responses: parsed.responses.length,
         renderedMessages: renderedMessages.length,
         states: (parsed.states || []).length,
-        fallbackStates: fallbackStates.length,
+        fallbackStates: 0,
         savedStates: savedStates.length
     });
     return renderedMessages.length > 0 || savedStates.length > 0;
@@ -24167,8 +24169,8 @@ function getHeartVoiceRecords(chatContext, characterId) {
             content: {
                 emotion: item.mood || '平静',
                 thoughts: item.innerThoughts || '',
-                heartRate: inferHeartRateFromMood(item.mood),
-                jealousy: inferJealousyFromThought(item.innerThoughts)
+                heartRate: item.heartRate || inferHeartRateFromMood(item.mood),
+                jealousy: item.jealousy || inferJealousyFromThought(item.innerThoughts)
             },
             rawState: item
         }))
@@ -24220,7 +24222,7 @@ function formatHeartVoiceRecordTime(timestamp) {
 function closeHeartVoicePanel() {
     const panel = document.getElementById('heart-voice-panel');
     if (!panel) return;
-    panel.style.display = 'none';
+    panel.style.setProperty('display', 'none', 'important');
     panel.classList.remove('show-history');
     panel.dataset.characterId = '';
     panel.dataset.chatId = '';
@@ -24284,38 +24286,314 @@ function renderHeartVoicePanelRecords(records = []) {
     toggleBtn.textContent = '查看全部心声记录';
 }
 
-function openHeartVoicePanelForCharacter(characterId, chatId) {
-    console.log('[HV OPEN START]', { characterId, chatId });
-    const panel = document.getElementById('heart-voice-panel');
-    console.log('[HV PANEL FOUND]', !!panel);
-    const nameEl = document.getElementById('hv-character-name');
-    const toggleBtn = document.getElementById('hv-toggle-history-btn');
-    const requestedChatId = chatId || state.activeChatId;
-    const chat = state.contacts.find(item => item.id === requestedChatId)
-        || state.contacts.find(item => item.id === state.activeChatId)
-        || null;
-    let targetCharacterId = characterId;
-    if (!targetCharacterId && chat && !chat.isGroup) {
-        targetCharacterId = chat.id;
-    }
-    if (!panel || !nameEl || !toggleBtn || !chat || !targetCharacterId || !requestedChatId) {
-        console.warn('[HV OPEN FAILED]', { characterId, chatId, panel, chat });
-        return;
+function ensureEchoesHeartVoicePanel() {
+    let panel = document.getElementById('heart-voice-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'heart-voice-panel';
+        panel.className = 'heart-voice-panel';
+        panel.style.display = 'none';
+        panel.innerHTML = `
+            <div class="hv-panel-header">
+                <div>
+                    <div class="hv-panel-title">心声记录</div>
+                    <div class="hv-panel-subtitle" id="hv-character-name">点击角色头像查看心声</div>
+                </div>
+                <button class="hv-panel-close" id="close-heart-voice-panel" type="button">&times;</button>
+            </div>
+            <div id="hv-empty-state" class="hv-empty" style="display: none;">还没有心声记录</div>
+            <div id="hv-content-wrap">
+                <div class="hv-section-title">最近心声卡片</div>
+                <div class="hv-latest-card">
+                    <div class="hv-item"><span class="hv-icon">😊</span><span class="hv-label">情绪：</span><span class="hv-value" id="hv-emotion"></span></div>
+                    <div class="hv-item"><span class="hv-icon">💭</span><span class="hv-label">思绪：</span><span class="hv-value" id="hv-thoughts"></span></div>
+                    <div class="hv-item"><span class="hv-icon">❤️</span><span class="hv-label">心率：</span><span class="hv-value" id="hv-heart-rate"></span></div>
+                    <div class="hv-item"><span class="hv-icon">😶‍🌫️</span><span class="hv-label">醋意：</span><span class="hv-value" id="hv-jealousy"></span></div>
+                </div>
+                <button id="hv-toggle-history-btn" class="hv-toggle-history-btn" type="button">查看全部心声记录</button>
+                <div id="hv-history-section">
+                    <div class="hv-section-title">历史心声列表</div>
+                    <div id="hv-history-list" class="hv-record-list"></div>
+                </div>
+            </div>
+        `;
     }
 
-    let normalizedCharacterId = normalizeMessageSenderId(targetCharacterId);
+    document.body.appendChild(panel);
+    panel.style.setProperty('position', 'fixed', 'important');
+    panel.style.setProperty('left', '50%', 'important');
+    panel.style.setProperty('bottom', 'calc(80px + env(safe-area-inset-bottom, 0px))', 'important');
+    panel.style.setProperty('transform', 'translateX(-50%)', 'important');
+    panel.style.setProperty('width', 'min(92vw, 390px)', 'important');
+    panel.style.setProperty('max-height', '65vh', 'important');
+    panel.style.setProperty('overflow-y', 'auto', 'important');
+    panel.style.setProperty('z-index', '2147483647', 'important');
+    panel.style.setProperty('flex-direction', 'column', 'important');
+    panel.style.setProperty('pointer-events', 'auto', 'important');
+
+    const closeBtn = panel.querySelector('#close-heart-voice-panel');
+    if (closeBtn && !closeBtn.dataset.echoesBound) {
+        closeBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeHeartVoicePanel();
+        });
+        closeBtn.dataset.echoesBound = 'true';
+    }
+
+    return panel;
+}
+
+function getEchoesCharacterProfile(chat, characterId) {
+    const normalizedId = normalizeMessageSenderId(characterId);
+    if (!chat || !normalizedId) return null;
+    if (chat.isGroup) {
+        return getProfileInGroupContext(chat, normalizedId)
+            || state.contacts.find(contact => normalizeMessageSenderId(contact.id) === normalizedId)
+            || (chat.npcMembers || []).find(npc => normalizeMessageSenderId(npc.id) === normalizedId)
+            || { id: normalizedId, name: normalizedId };
+    }
+    return state.contacts.find(contact => normalizeMessageSenderId(contact.id) === normalizedId)
+        || chat
+        || { id: normalizedId, name: normalizedId };
+}
+
+function normalizeEchoesStatePayload(payload, fallbackText, speakerProfile, chat) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const thoughts = String(
+        source.innerThoughts ||
+        source.thoughts ||
+        source.content ||
+        source.text ||
+        ''
+    ).trim();
+    const fallback = buildFallbackHeartVoicePayload(thoughts || fallbackText || '', speakerProfile, chat);
+    return {
+        mood: source.mood || source.emotion || fallback.emotion || '微妙',
+        innerThoughts: thoughts || fallback.thoughts || '我没有直接说出来，但心里还是因为这一轮对话起了波动。',
+        heartRate: source.heartRate || source.heart_rate || fallback.heartRate || '平稳',
+        jealousy: source.jealousy || fallback.jealousy || '无'
+    };
+}
+
+async function persistEchoesCharacterStateRecord(record, chat) {
+    try {
+        await kokoMemory.put('character_states', record);
+    } catch (error) {
+        console.warn('[ECHOES STATE STORE FAILED, LEGACY FALLBACK]', error, record);
+        if (!chat || !Array.isArray(chat.history)) return;
+        const duplicate = chat.history.some(message =>
+            message
+            && message.type === 'heart_voice'
+            && message.relatedMessageId === record.relatedMessageId
+            && getHeartVoiceSenderId(message, chat) === normalizeMessageSenderId(record.characterId)
+        );
+        if (duplicate) return;
+        chat.history.push({
+            id: `heart_voice_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            type: 'heart_voice',
+            subType: 'heart_voice_record',
+            sender: record.characterId,
+            senderId: record.characterId,
+            characterId: record.characterId,
+            chatId: record.chatId,
+            relatedChatId: record.chatId,
+            relatedMessageId: record.relatedMessageId,
+            content: {
+                emotion: record.mood,
+                thoughts: record.innerThoughts,
+                heartRate: record.heartRate,
+                jealousy: record.jealousy
+            },
+            text: record.innerThoughts,
+            timestamp: record.timestamp,
+            time: new Date(record.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            source: record.source
+        });
+        await kokoMemory.put('contacts', chat);
+    }
+}
+
+async function saveEchoesCharacterState(chat, characterId, payload, relatedMessageId = null) {
+    if (!chat) return null;
+    const normalizedCharacterId = normalizeEchoesResponseCharacterId(
+        { characterId },
+        chat,
+        getEchoesCharacterProfile(chat, characterId)
+    );
+    if (!normalizedCharacterId || isCurrentUserSenderId(normalizedCharacterId)) return null;
+    if (normalizedCharacterId === 'system' || normalizedCharacterId === 'system_instruction') return null;
+
+    state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
+    const speakerProfile = getEchoesCharacterProfile(chat, normalizedCharacterId);
+    const normalizedPayload = normalizeEchoesStatePayload(
+        payload,
+        typeof payload === 'string' ? payload : '',
+        speakerProfile,
+        chat
+    );
+
+    const existing = relatedMessageId
+        ? state.characterStates.find(record =>
+            record
+            && record.chatId === chat.id
+            && record.relatedMessageId === relatedMessageId
+            && normalizeMessageSenderId(record.characterId) === normalizedCharacterId
+        )
+        : null;
+
+    const nextFields = {
+        chatId: chat.id,
+        characterId: normalizedCharacterId,
+        timestamp: Date.now(),
+        source: chat.isGroup ? 'group' : 'private',
+        mood: normalizedPayload.mood || '微妙',
+        innerThoughts: normalizedPayload.innerThoughts,
+        heartRate: normalizedPayload.heartRate || '平稳',
+        jealousy: normalizedPayload.jealousy || '无',
+        relatedMessageId: relatedMessageId || null
+    };
+
+    const record = existing || {
+        id: `state_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    };
+    Object.assign(record, nextFields);
+
+    if (!existing) {
+        state.characterStates.push(record);
+    }
+
+    await persistEchoesCharacterStateRecord(record, chat);
+    window.state = state;
+    refreshHeartVoicePanelIfOpen(chat);
+    console.log('[ECHOES_STATE_SAVED]', record);
+    return record;
+}
+
+function getEchoesHeartVoiceRecords(chatContext, characterId) {
+    return getHeartVoiceRecords(chatContext, characterId);
+}
+
+async function ensureEchoesStateForVisibleMessage(message, chat, speakerProfile, explicitState = null) {
+    if (!message || !chat) return null;
+    if (message.type === 'heart_voice' || message.type === 'system_notification') return null;
+    if (message.sender === 'system' || message.sender === 'system_instruction') return null;
+
+    const rawSenderId = message.senderId || message.sender || speakerProfile?.id;
+    let characterId = normalizeMessageSenderId(rawSenderId);
+    if (!chat.isGroup) {
+        characterId = normalizeMessageSenderId(chat.id);
+    }
+    if (!characterId || isCurrentUserSenderId(characterId)) return null;
+
+    const relatedMessageId = message.id || null;
+    if (relatedMessageId) {
+        const exists = (state.characterStates || []).some(record =>
+            record
+            && record.chatId === chat.id
+            && record.relatedMessageId === relatedMessageId
+            && normalizeMessageSenderId(record.characterId) === characterId
+        );
+        if (exists && !explicitState) return null;
+    }
+
+    const visibleText = getMessageTextContent(message);
+    const speaker = speakerProfile || getEchoesCharacterProfile(chat, characterId);
+    const payload = explicitState
+        ? normalizeEchoesStatePayload(explicitState, visibleText, speaker, chat)
+        : {
+            mood: inferHeartVoiceEmotion(visibleText),
+            innerThoughts: makeLocalHeartVoiceThought(visibleText, speaker, chat),
+            heartRate: '平稳',
+            jealousy: inferHeartVoiceJealousy(visibleText)
+        };
+
+    return saveEchoesCharacterState(chat, characterId, payload, relatedMessageId);
+}
+
+async function ensureFallbackHeartVoiceForClickedCharacter(chat, characterId) {
+    if (!chat || !characterId) return null;
+
+    const normalizedId = normalizeMessageSenderId(characterId);
+    if (!normalizedId || isCurrentUserSenderId(normalizedId)) return null;
+
+    const latestMessage = [...(chat.history || [])]
+        .reverse()
+        .find(msg => {
+            if (!msg || msg.type === 'heart_voice' || msg.type === 'system_notification') return false;
+            if (msg.sender === 'system' || msg.sender === 'system_instruction') return false;
+
+            const msgSender = normalizeMessageSenderId(msg.senderId || msg.sender);
+            if (chat.isGroup) return msgSender === normalizedId;
+            return msgSender && !isCurrentUserSenderId(msgSender) && msgSender !== 'system';
+        });
+
+    const speaker =
+        getEchoesCharacterProfile(chat, normalizedId) ||
+        getHeartVoiceSenderProfile(normalizedId, chat) ||
+        chat;
+    const visibleText = latestMessage
+        ? getMessageTextContent(latestMessage)
+        : '刚才没有说出口的话还停在心里。';
+
+    return saveEchoesCharacterState(chat, normalizedId, {
+        mood: inferHeartVoiceEmotion(visibleText),
+        innerThoughts: makeLocalHeartVoiceThought(visibleText, speaker, chat),
+        heartRate: '平稳',
+        jealousy: inferHeartVoiceJealousy(visibleText)
+    }, latestMessage?.id || `manual_hv_${chat.id}_${normalizedId}_${Date.now()}`);
+}
+
+async function openEchoesHeartVoicePanel(chatId, characterId, options = {}) {
+    const panel = ensureEchoesHeartVoicePanel();
+    const nameEl = document.getElementById('hv-character-name');
+    const toggleBtn = document.getElementById('hv-toggle-history-btn');
+    const chat = state.contacts.find(contact => contact.id === chatId);
+    if (!panel) {
+        alert('心声面板不存在：#heart-voice-panel');
+        console.warn('[ECHOES HV PANEL OPEN FAILED] missing_panel', { chatId, characterId });
+        return null;
+    }
+    document.body.appendChild(panel);
+    panel.style.setProperty('display', 'flex', 'important');
+    panel.style.setProperty('visibility', 'visible', 'important');
+    panel.style.setProperty('opacity', '1', 'important');
+    panel.style.setProperty('pointer-events', 'auto', 'important');
+    panel.style.setProperty('z-index', '2147483647', 'important');
+
+    if (!nameEl || !toggleBtn) {
+        console.warn('[ECHOES HV PANEL OPEN FAILED] missing_panel_children', { nameEl, toggleBtn });
+        return null;
+    }
+    if (!chat) {
+        nameEl.textContent = '心声记录';
+        renderHeartVoicePanelRecords([]);
+        alert('没有当前聊天');
+        console.warn('[ECHOES HV PANEL OPEN FAILED] missing_chat', { chatId, characterId });
+        return null;
+    }
+
+    let normalizedCharacterId = normalizeMessageSenderId(characterId);
     if (!chat.isGroup && normalizedCharacterId === 'contact') {
         normalizedCharacterId = normalizeMessageSenderId(chat.id);
     }
-    if (normalizedCharacterId === 'user' || normalizedCharacterId === 'myProfile') {
-        console.warn('[HV OPEN FAILED]', { characterId, chatId, panel, chat });
-        return;
+    if (!chat.isGroup) {
+        normalizedCharacterId = normalizeMessageSenderId(chat.id);
+    }
+    if (!normalizedCharacterId || isCurrentUserSenderId(normalizedCharacterId)) {
+        nameEl.textContent = '心声记录';
+        renderHeartVoicePanelRecords([]);
+        console.warn('[ECHOES HV PANEL OPEN FAILED] invalid_character', { chatId, characterId, normalizedCharacterId });
+        return null;
     }
 
-    const profile = chat.isGroup
-        ? getProfileInGroupContext(chat, normalizedCharacterId)
-        : (state.contacts.find(item => item.id === normalizedCharacterId) || chat);
-    const records = getHeartVoiceRecords(chat, normalizedCharacterId);
+    const profile = getEchoesCharacterProfile(chat, normalizedCharacterId);
+    let records = getEchoesHeartVoiceRecords(chat, normalizedCharacterId);
+
+    if (records.length === 0 && options.createFallbackIfEmpty === true) {
+        await ensureFallbackHeartVoiceForClickedCharacter(chat, normalizedCharacterId);
+        records = getEchoesHeartVoiceRecords(chat, normalizedCharacterId);
+    }
 
     nameEl.textContent = profile?.name
         ? `${profile.name} · ${chat.isGroup ? '当前群聊 · ' + chat.name : '当前私聊'}`
@@ -24325,64 +24603,93 @@ function openHeartVoicePanelForCharacter(characterId, chatId) {
     panel.classList.remove('show-history');
     panel.dataset.characterId = normalizedCharacterId;
     panel.dataset.chatId = chat.id || '';
-    panel.style.display = 'flex';
-    panel.style.pointerEvents = 'auto';
+    panel.style.setProperty('display', 'flex', 'important');
+    panel.style.setProperty('visibility', 'visible', 'important');
+    panel.style.setProperty('opacity', '1', 'important');
+    panel.style.setProperty('pointer-events', 'auto', 'important');
+    panel.style.setProperty('z-index', '2147483647', 'important');
     state.heartVoicePanel = {
         isOpen: true,
         characterId: normalizedCharacterId,
         chatId: chat.id || null
     };
 
-    console.log('[HV OPEN DONE]', { characterId: normalizedCharacterId, chatId: chat.id, recordsCount: records.length });
+    console.log('[ECHOES HV PANEL OPEN]', { chatId: chat.id, characterId: normalizedCharacterId, recordsCount: records.length });
+    return records;
+}
+
+function openHeartVoicePanelForCharacter(characterId, chatId) {
+    return openEchoesHeartVoicePanel(chatId || state.activeChatId, characterId);
 }
 
 function openHeartVoicePanel(characterId, chatContext) {
     const chatId = typeof chatContext === 'string' ? chatContext : chatContext?.id;
-    openHeartVoicePanelForCharacter(characterId, chatId);
+    return openEchoesHeartVoicePanel(chatId || state.activeChatId, characterId);
 }
 
 window.openHeartVoicePanelForCharacter = openHeartVoicePanelForCharacter;
+window.openEchoesHeartVoicePanel = openEchoesHeartVoicePanel;
 window.state = state;
 
-window.__testGenerateHeartVoice = async function() {
+async function handleEchoesHeartVoiceAvatarClick(e) {
+    const avatar = e.target.closest('#chat-messages .message-avatar');
+    const authorName = e.target.closest('#chat-messages .message-author-name[data-heart-voice-character-id]');
+    const trigger = avatar || authorName;
+    if (!trigger) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+
     const chat = state.contacts.find(c => c.id === state.activeChatId);
     if (!chat) {
-        alert('请先进入一个聊天');
+        alert('没有当前聊天');
         return;
     }
 
-    let characterId = null;
-    let senderProfile = null;
+    const wrapper = trigger.closest('.message-wrapper');
+    let senderId =
+        trigger.dataset.heartVoiceCharacterId ||
+        trigger.dataset.senderId ||
+        wrapper?.dataset.senderId ||
+        wrapper?.dataset.sender ||
+        wrapper?.querySelector('.message-avatar')?.dataset.senderId;
 
+    senderId = normalizeMessageSenderId(senderId);
+
+    if (!senderId || senderId === 'system' || senderId === 'system_instruction') {
+        alert('未找到该角色资料或心声记录');
+        return;
+    }
+
+    if (isCurrentUserSenderId(senderId)) {
+        return;
+    }
+
+    let characterId = senderId;
     if (!chat.isGroup) {
-        characterId = chat.id;
-        senderProfile = chat;
-    } else {
-        characterId = (chat.members || []).find(id => !isCurrentUserSenderId(id));
-        senderProfile = getHeartVoiceSenderProfile(characterId, chat);
+        characterId = normalizeMessageSenderId(chat.id);
     }
 
-    if (!characterId || !senderProfile) {
-        alert('找不到可测试角色');
-        console.warn('[HV TEST FAILED] no character', { chat });
-        return;
-    }
-
-    const saved = await saveHeartVoiceRecord(senderProfile, chat, {
-        emotion: '在意',
-        thoughts: '这是测试生成的心声记录，用来确认保存和显示链路已经打通。',
-        heartRate: '偏快',
-        jealousy: '无'
-    }, {
-        relatedMessageId: 'test_' + Date.now(),
-        sinceTimestamp: Date.now()
+    console.log('[ECHOES HV AVATAR CLICK]', {
+        chatId: chat.id,
+        isGroup: chat.isGroup,
+        senderId,
+        characterId
     });
 
-    console.log('[HV TEST SAVED RESULT]', saved);
+    await openEchoesHeartVoicePanel(chat.id, characterId, { createFallbackIfEmpty: true });
+}
 
-    openHeartVoicePanelForCharacter(characterId, chat.id);
-    alert(saved ? '已生成一条测试心声' : '测试心声保存失败，请看控制台 [HV SAVE SKIP]');
-};
+function setupEchoesHeartVoiceAvatarClick() {
+    if (window.__echoesHvAvatarClickBound) return;
+    document.addEventListener('click', handleEchoesHeartVoiceAvatarClick, true);
+    window.__echoesHvAvatarClickBound = true;
+    window.__echoesHeartVoiceAvatarClickBound = true;
+}
+
+setupEchoesHeartVoiceAvatarClick();
+window.__testGenerateHeartVoice = undefined;
 
 window.__debugHeartVoice = function() {
     const chat = state.contacts.find(c => c.id === state.activeChatId);
@@ -24540,13 +24847,14 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
     const visibleText = removeHeartVoiceBlocks(rawText);
 
     const parts = splitAiTextIntoBubbles(visibleText);
+    const echoesStateCountBeforeFallback = (state.characterStates || []).length;
 
     console.log('[AI SPLIT PARTS]', parts);
 
     for (const part of parts) {
         await processAndDisplayAiResponse(part, senderProfile, originContext, contextMode, {
             skipHeartVoiceFallback: true,
-            forceShowAvatar: !originContext?.isGroup,
+            forceShowAvatar: true,
             sinceTimestamp: roundStartedAt
         });
 
@@ -24555,24 +24863,17 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
         }
     }
 
-    if (isPrivateChat && String(rawText || '').trim()) {
-        await ensureHeartVoiceForPrivateReply(
-            rawText,
-            visibleText,
-            senderProfile,
-            originContext,
-            roundStartedAt
-        );
-
-        await saveCharacterStateRecords([{
-            characterId: senderProfile.id,
+    if (
+        isPrivateChat &&
+        String(rawText || '').trim() &&
+        (state.characterStates || []).length === echoesStateCountBeforeFallback
+    ) {
+        await saveEchoesCharacterState(originContext, senderProfile.id, {
             mood: senderProfile.status || '平静',
-            affection: '',
-            clothing: '',
-            action: '',
-            innerThoughts: buildFallbackInnerThought(visibleText || rawText, senderProfile, originContext)
-        }], originContext, senderProfile);
-        refreshHeartVoicePanelIfOpen(originContext);
+            innerThoughts: buildFallbackInnerThought(visibleText || rawText, senderProfile, originContext),
+            heartRate: '平稳',
+            jealousy: inferHeartVoiceJealousy(visibleText || rawText)
+        }, `ai_turn_${originContext.id}_${senderProfile.id}_${roundStartedAt}`);
     }
 }
 
@@ -24705,15 +25006,26 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
             senderProfile.id !== 'system' &&
             senderProfile.id !== 'system_instruction'
         ) {
-            return commitHeartVoiceForAiTurn({
-                senderProfile,
-                chatContext: effectiveChatContext,
-                rawResponse: hvRawResponse,
-                visibleText: hvVisiblePieces.join('。'),
-                explicitHeartVoice: hvExplicitHeartVoice,
-                relatedMessageIds: hvRelatedMessageIds,
-                roundStartedAt: hvTurnStartedAt
-            });
+            const visibleTurnText = hvVisiblePieces.join('。')
+                || removeHeartVoiceBlocks(hvRawResponse)
+                    .replace(/\[diary\][\s\S]*?(?:\[\/diary\]|$)/gi, '')
+                    .replace(/\[status:\s*([^\]]+)\]/gi, '状态变更为：$1')
+                    .replace(/\[memory:\s*([^\]]+)\]/gi, '记住了：$1')
+                    .replace(/\[[^\]]+\]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                || '这一轮没有说出口的话，只是状态有了变化';
+            const payload = hvExplicitHeartVoice
+                ? normalizeEchoesStatePayload(hvExplicitHeartVoice, visibleTurnText, senderProfile, effectiveChatContext)
+                : {
+                    mood: inferHeartVoiceEmotion(visibleTurnText),
+                    innerThoughts: makeLocalHeartVoiceThought(visibleTurnText, senderProfile, effectiveChatContext),
+                    heartRate: '平稳',
+                    jealousy: inferHeartVoiceJealousy(visibleTurnText)
+                };
+            const relatedMessageId = hvRelatedMessageIds.find(Boolean)
+                || `ai_turn_${effectiveChatContext.id}_${normalizeMessageSenderId(senderProfile.id)}_${hvTurnStartedAt}`;
+            return saveEchoesCharacterState(effectiveChatContext, senderProfile.id, payload, relatedMessageId);
         }
         console.log('[HV TURN SKIP] not_ai_chat_turn', {
             contextMode,
@@ -24740,11 +25052,12 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
 
         if (deferredExplicitHeartVoiceContent && addedMessage && mode === 'chat') {
             hvExplicitHeartVoice = deferredExplicitHeartVoiceContent;
-            await saveHeartVoiceRecord(senderProfile, target, deferredExplicitHeartVoiceContent, {
-                relatedMessageId: addedMessage.id,
-                sinceTimestamp: addedMessage.timestamp || options.sinceTimestamp,
-                replaceExisting: true
-            });
+            await saveEchoesCharacterState(
+                target,
+                senderProfile.id,
+                deferredExplicitHeartVoiceContent,
+                addedMessage.id
+            );
             deferredExplicitHeartVoiceContent = null;
         }
         return addedMessage;
@@ -24827,15 +25140,16 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
                     statusHeartVoicePayload
                 });
 
-                const savedStatusHeartVoice = await saveHeartVoiceRecord(
-                    senderProfile,
+                const savedStatusHeartVoice = await saveEchoesCharacterState(
                     effectiveChatContext,
-                    statusHeartVoicePayload,
+                    senderProfile.id,
                     {
-                        relatedMessageId: statusRelatedMessageId,
-                        sinceTimestamp: Date.now(),
-                        replaceExisting: false
-                    }
+                        mood: statusHeartVoicePayload.emotion || '微妙',
+                        innerThoughts: statusHeartVoicePayload.thoughts,
+                        heartRate: statusHeartVoicePayload.heartRate || '平稳',
+                        jealousy: statusHeartVoicePayload.jealousy || '无'
+                    },
+                    statusRelatedMessageId
                 );
 
                 if (savedStatusHeartVoice) {
@@ -25215,9 +25529,22 @@ if (fullDialogue) {
         // --- 智能缓冲循环 V4 (Koko特供版) 开始 ---
         
         const lines = conversation.split('\n');
+        const preserveSingleBubble = options.preserveSingleBubble === true;
         let htmlBuffer = [];
         let inHtmlBlock = false;
         let openingTag = null; 
+        let singleBubbleTextBuffer = [];
+        const flushSingleBubbleTextBuffer = async () => {
+            if (!preserveSingleBubble || singleBubbleTextBuffer.length === 0) return;
+            const mergedText = singleBubbleTextBuffer.join('\n').trim();
+            singleBubbleTextBuffer = [];
+            if (!mergedText) return;
+            await addSenderChatMessage({
+                type: 'text',
+                content: mergedText
+            });
+            await sleep(400 + Math.random() * 400);
+        };
 
         for (const line of lines) {
             const trimmedLine = line.trim();
@@ -25252,6 +25579,7 @@ if (fullDialogue) {
             let tagMatch = trimmedLine.match(/^<(div|style)/i);
             
             if (tagMatch) {
+                await flushSingleBubbleTextBuffer();
                 openingTag = tagMatch[1].toLowerCase();
                 htmlBuffer = [line];
                 
@@ -25282,6 +25610,7 @@ if (fullDialogue) {
             const fakeMatch = trimmedLine.match(fakeStatusRegex);
 
             if (fakeMatch) {
+                await flushSingleBubbleTextBuffer();
                 // 提取出 AI 想要设置的状态文字 (比如 "有点......烦躁。")
                 let extractedStatus = fakeMatch[1].trim();
                 // 去掉末尾可能存在的句号或右括号
@@ -25337,6 +25666,7 @@ const commandRegex = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_t
                 }
                 
                 if (commandMatch) {
+                    await flushSingleBubbleTextBuffer();
                     processed = true;
                     const command = commandMatch[1];
                     const value = commandMatch[2] || '';
@@ -25958,13 +26288,17 @@ case 'takeout': {
 
                     // 如果删掉指令后还有内容，就发送
                     if (finalContent) {
-                        await addSenderChatMessage({ 
-                            type: 'text', 
-                            content: finalContent,
-                            quote: quoteData // <--- ✨ 注入引用数据
-                        });
-                        
-                        await sleep(400 + Math.random() * 400);
+                        if (preserveSingleBubble && !quoteData) {
+                            singleBubbleTextBuffer.push(finalContent);
+                        } else {
+                            await addSenderChatMessage({ 
+                                type: 'text', 
+                                content: finalContent,
+                                quote: quoteData // <--- ✨ 注入引用数据
+                            });
+                            
+                            await sleep(400 + Math.random() * 400);
+                        }
                     }
                 }
             }
@@ -25980,6 +26314,7 @@ case 'takeout': {
             // ✨ 核心修复：补上这里的延迟
             await sleep(400 + Math.random() * 400); 
         }
+        await flushSingleBubbleTextBuffer();
         
         // --- 智能缓冲循环 V4 结束 ---
     }
@@ -42337,8 +42672,6 @@ document.getElementById('chat-messages').addEventListener('click', async (e) => 
     const replyBtn = e.target.closest('.reply-btn');
     const quoteBox = e.target.closest('.message-quote');
     const clickedWrapper = e.target.closest('.message-wrapper');
-    const clickedAvatar = e.target.closest('.message-avatar');
-    const heartVoiceTrigger = e.target.closest('[data-action="open-heart-voice"]');
     // ▼▼▼ 最终修复版：读取完整数据的点击逻辑 ▼▼▼
     const cpShareCard = e.target.closest('.cp-share-card');
     if (cpShareCard) {
@@ -42418,79 +42751,6 @@ document.getElementById('chat-messages').addEventListener('click', async (e) => 
         return;
     }
 
-    if (clickedAvatar) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (editModeState.active) return;
-        const avatarWrapper = clickedAvatar.closest('.message-wrapper');
-        const senderId = clickedAvatar.dataset.senderId
-            || avatarWrapper?.dataset.senderId
-            || avatarWrapper?.querySelector('.message-avatar')?.dataset.senderId;
-        if (!contact || !senderId) {
-            alert('未找到该角色资料或心声记录');
-            return;
-        }
-        let characterId = normalizeMessageSenderId(senderId);
-        if (!contact.isGroup && characterId === 'contact') {
-            characterId = normalizeMessageSenderId(contact.id);
-        }
-        if (isCurrentUserSenderId(characterId)) {
-            return;
-        }
-        if (!contact.isGroup) {
-            characterId = contact.id;
-        }
-        if (chatAvatarClickTimer) {
-            clearTimeout(chatAvatarClickTimer);
-        }
-        chatAvatarClickTimer = setTimeout(() => {
-            chatAvatarClickTimer = null;
-            console.log('[AVATAR OPEN HEART VOICE]', {
-                senderId,
-                characterId,
-                chatId: contact.id,
-                isGroup: contact.isGroup
-            });
-            openHeartVoicePanelForCharacter(characterId, contact.id);
-        }, 220);
-        return;
-    }
-
-    if (heartVoiceTrigger && heartVoiceTrigger.closest('#chat-messages')) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (editModeState.active) return;
-
-        const wrapper = heartVoiceTrigger.closest('.message-wrapper');
-        const senderId =
-            heartVoiceTrigger.dataset.heartVoiceCharacterId ||
-            heartVoiceTrigger.dataset.senderId ||
-            wrapper?.dataset.senderId ||
-            wrapper?.querySelector('.message-avatar')?.dataset.senderId;
-
-        if (!contact || !senderId) {
-            alert('未找到该角色资料或心声记录');
-            return;
-        }
-
-        let characterId = normalizeMessageSenderId(senderId);
-        if (!contact.isGroup && characterId === 'contact') {
-            characterId = normalizeMessageSenderId(contact.id);
-        }
-        if (isCurrentUserSenderId(characterId)) return;
-        if (!contact.isGroup) {
-            characterId = contact.id;
-        }
-
-        console.log('[MESSAGE OPEN HEART VOICE]', {
-            senderId,
-            characterId,
-            chatId: contact.id,
-            isGroup: contact.isGroup
-        });
-        openHeartVoicePanelForCharacter(characterId, contact.id);
-        return;
-    }
 // ... (if (quoteBox) { ... return; })
 
 // ▼▼▼ 用这段【新版】代码替换旧的 'aiRecallBubble' 逻辑 ▼▼▼
