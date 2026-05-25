@@ -23142,23 +23142,107 @@ function buildFallbackInnerThought(rawText, senderProfile, chatContext) {
     return payload.thoughts || '我没有直接说出来，但心里还是因为这一轮对话起了波动。';
 }
 
-function parseEchoesStyleAiResult(rawText) {
-    const cleaned = String(rawText || '')
+function parseEchoesStyleAiResult(rawText, chat = null, fallbackSenderProfile = null) {
+    const raw = String(rawText || '').trim();
+    if (!raw) return null;
+
+    let cleaned = raw
         .replace(/^```json\s*/i, '')
         .replace(/^```\s*/i, '')
         .replace(/```$/i, '')
         .trim();
 
+    if (!cleaned.startsWith('{')) {
+        const start = cleaned.indexOf('{');
+        const end = cleaned.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            cleaned = cleaned.slice(start, end + 1);
+        }
+    }
+
+    let parsed = null;
     try {
-        const parsed = JSON.parse(cleaned);
-        return {
-            responses: Array.isArray(parsed.responses) ? parsed.responses : [],
-            states: Array.isArray(parsed.states) ? parsed.states : []
-        };
+        parsed = JSON.parse(cleaned);
     } catch (error) {
         console.warn('[ECHOES_STYLE_PARSE_FAILED]', error, rawText);
         return null;
     }
+
+    let responses = [];
+    let states = [];
+
+    if (Array.isArray(parsed.responses)) {
+        responses = parsed.responses;
+    }
+
+    if (Array.isArray(parsed.states)) {
+        states = parsed.states;
+    }
+
+    if (!responses.length) {
+        if (Array.isArray(parsed.messages)) {
+            responses = parsed.messages;
+        } else if (Array.isArray(parsed.replies)) {
+            responses = parsed.replies;
+        } else if (parsed.response) {
+            responses = [{
+                characterId: parsed.characterId,
+                text: parsed.response
+            }];
+        } else if (parsed.reply) {
+            responses = [{
+                characterId: parsed.characterId,
+                text: parsed.reply
+            }];
+        } else if (parsed.text || parsed.content || parsed.message) {
+            responses = [{
+                characterId: parsed.characterId,
+                text: parsed.text || parsed.content || parsed.message
+            }];
+        }
+    }
+
+    if (!states.length) {
+        if (Array.isArray(parsed.characterStates)) {
+            states = parsed.characterStates;
+        } else if (parsed.state && typeof parsed.state === 'object') {
+            states = [parsed.state];
+        } else if (parsed.innerThoughts || parsed.thoughts || parsed.mood || parsed.emotion) {
+            states = [{
+                characterId: parsed.characterId,
+                mood: parsed.mood || parsed.emotion || '平静',
+                affection: parsed.affection || '',
+                clothing: parsed.clothing || '',
+                action: parsed.action || '',
+                innerThoughts: parsed.innerThoughts || parsed.thoughts || ''
+            }];
+        }
+    }
+
+    responses = responses
+        .map(item => ({
+            characterId: item.characterId || item.senderId || item.id || item.name || fallbackSenderProfile?.id || chat?.id || '',
+            text: item.text || item.content || item.message || item.reply || item.response || ''
+        }))
+        .filter(item => String(item.text || '').trim());
+
+    states = states
+        .map(item => ({
+            characterId: item.characterId || item.senderId || item.id || item.name || fallbackSenderProfile?.id || chat?.id || '',
+            mood: item.mood || item.emotion || '平静',
+            affection: item.affection || '',
+            clothing: item.clothing || '',
+            action: item.action || '',
+            innerThoughts: item.innerThoughts || item.thoughts || ''
+        }))
+        .filter(item => String(item.innerThoughts || '').trim());
+
+    if (!responses.length && !states.length) {
+        console.warn('[ECHOES_STYLE_EMPTY_JSON_NOT_HANDLED]', parsed);
+        return null;
+    }
+
+    return { responses, states };
 }
 
 function normalizeEchoesResponseCharacterId(response, chat, fallbackSenderProfile = null) {
@@ -23374,7 +23458,7 @@ function refreshHeartVoicePanelIfOpen(chat) {
 }
 
 async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null) {
-    const parsed = parseEchoesStyleAiResult(rawResponse);
+    const parsed = parseEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile);
     if (!parsed) return false;
 
     const renderedMessages = await renderEchoesStyleResponses(parsed.responses, chat, fallbackSenderProfile);
@@ -23384,7 +23468,14 @@ async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfil
         .filter(Boolean));
     const fallbackStates = buildFallbackStatesForEchoesResponses(parsed.responses, chat, fallbackSenderProfile, rawResponse)
         .filter(item => !explicitStateIds.has(normalizeMessageSenderId(item.characterId)));
-    await saveCharacterStateRecords([...(parsed.states || []), ...fallbackStates], chat, fallbackSenderProfile);
+    const allStates = [...(parsed.states || []), ...fallbackStates];
+
+    if (!parsed.responses.length && !allStates.length) {
+        console.warn('[ECHOES_STYLE_NOT_HANDLED_EMPTY]', { rawResponse, parsed });
+        return false;
+    }
+
+    const savedStates = await saveCharacterStateRecords(allStates, chat, fallbackSenderProfile);
     refreshHeartVoicePanelIfOpen(chat);
 
     console.log('[ECHOES_STYLE_HANDLED]', {
@@ -23392,9 +23483,10 @@ async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfil
         responses: parsed.responses.length,
         renderedMessages: renderedMessages.length,
         states: (parsed.states || []).length,
-        fallbackStates: fallbackStates.length
+        fallbackStates: fallbackStates.length,
+        savedStates: savedStates.length
     });
-    return true;
+    return renderedMessages.length > 0 || savedStates.length > 0;
 }
 
 function inferHeartVoiceEmotion(text) {
@@ -24364,6 +24456,7 @@ async function cleanBadHeartVoices() {
 // ===== END 心声辅助函数 =====
 
 async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat') {
+    console.log('[AI RAW BEFORE ECHOES_PARSE]', rawText);
     if (contextMode === 'chat' && (originContext || senderProfile)) {
         const handledEchoesStyle = await handleEchoesStyleAiResult(rawText, originContext || senderProfile, senderProfile);
         if (handledEchoesStyle) return;
