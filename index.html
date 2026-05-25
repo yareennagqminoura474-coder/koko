@@ -19662,9 +19662,9 @@ ${worldBookContextString}
 4. 不要输出 [diary]。
 
 [Echoes 式输出规则]
-你必须只输出 JSON，不要输出 JSON 以外的任何文字：
+你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出 JSON 以外的任何文字：
 {"responses":[{"characterId":"${contact.id}","content":"角色说出口的话"}],"characterStates":[{"characterId":"${contact.id}","mood":"当前情绪","favorability":68,"favorabilityLabel":"当前关系/好感状态","outfit":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
-responses 负责聊天气泡；characterStates 只用于状态面板。每个发言角色必须有 characterState。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；outfit 没有明确换装/场景切换时保持上一状态。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
+responses[].content 是唯一可见聊天内容；characterStates 只用于状态面板，里面的 mood / innerThoughts / outfit / action 绝不能写进 content。每个发言角色必须有 characterState。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；outfit 没有明确换装/场景切换时保持上一状态。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
 `.trim() : `
 [！！！核心任务！！！]
 用户（${myProfile.name}）正在”观察”你，TA没有发言。
@@ -19676,9 +19676,9 @@ responses 负责聊天气泡；characterStates 只用于状态面板。每个发
 5. 不要输出 [diary]。
 
 [Echoes 式输出规则]
-你必须只输出 JSON，不要输出 JSON 以外的任何文字：
+你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出 JSON 以外的任何文字：
 {"responses":[{"characterId":"${contact.id}","content":"角色说出口的话"}],"characterStates":[{"characterId":"${contact.id}","mood":"当前情绪","favorability":68,"favorabilityLabel":"当前关系/好感状态","outfit":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
-responses 负责聊天气泡；characterStates 只用于状态面板。每个发言角色必须有 characterState。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；outfit 没有明确换装/场景切换时保持上一状态。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
+responses[].content 是唯一可见聊天内容；characterStates 只用于状态面板，里面的 mood / innerThoughts / outfit / action 绝不能写进 content。每个发言角色必须有 characterState。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；outfit 没有明确换装/场景切换时保持上一状态。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
 `.trim();
         
         const requestMessages = [
@@ -20257,7 +20257,7 @@ const NORMAL_BASE_PROMPT = `
 {{emoticon_list}}
 
 [Echoes 角色状态规则]
-不要输出 [heart_voice] 标签。角色没说出口的心声必须写入最终 JSON 的 characterStates[].innerThoughts，并同时给出 mood / favorability / favorabilityLabel / outfit / action / heartRate / jealousy。
+不要输出 [heart_voice] 标签。只输出纯 JSON 对象，不要输出 Markdown 代码块、json 代码块或解释文字。responses[].content 是唯一可见聊天内容；角色没说出口的心声必须写入最终 JSON 的 characterStates[].innerThoughts，并同时给出 mood / favorability / favorabilityLabel / outfit / action / heartRate / jealousy，绝不能把这些字段内容混进聊天气泡。
 每个发言角色都必须有 characterState。innerThoughts 必须是第一人称，用“我”写，基于本轮用户消息和本轮角色回复，不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
 outfit 要详细描写颜色、款式、细节和整洁程度；没有明确换装时必须沿用上一状态。action 要写身体动作、视线、手部动作和语气状态，并承接上一轮。
 
@@ -46804,7 +46804,7 @@ ${mode === 'free'
 4. 普通聊天不要输出 [diary]，日记只在定时日记任务里生成。`}
 
 [Echoes 式输出规则]
-你必须只输出 JSON，不要输出 JSON 以外的任何文字。格式如下：
+你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出解释文字。格式如下：
 {
   "responses": [
     {
@@ -46826,11 +46826,11 @@ ${mode === 'free'
 }
 
 规则：
-1. responses 负责显示聊天气泡。
-2. characterStates 不显示成气泡，只用于状态面板。
+1. responses[].content 是唯一可见聊天内容，只负责显示聊天气泡。
+2. characterStates 不显示成气泡，只用于状态面板；mood、innerThoughts、outfit、action 等字段绝不能出现在 responses[].content 里。
 3. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
 4. innerThoughts 必须是第一人称，用“我”写；不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
-5. 不要输出 [heart_voice]、[status]、[memory]、HEART_VOICE 或其他标签。
+5. 不要输出 [heart_voice]、[status]、[memory]、HEART_VOICE、Markdown 代码块、json 代码块或其他标签。
 6. 如果角色只想沉默，也必须在 characterStates 里记录这一轮状态；responses 可以为空数组。
 7. 状态要连续：mood、favorability、outfit、action、innerThoughts 都要承接上一轮；没有明确换衣/场景切换时 outfit 必须保持不变。
 8. outfit 要写颜色、款式、细节、整洁程度；action 要写身体动作、视线、手部动作和语气状态。
@@ -47173,7 +47173,7 @@ ${replyGuidance.guidance}
 7. 只要不是明确冷场，就不要长期只让一个角色单独回复。
 
 [Echoes 式输出格式]
-你必须只输出 JSON，不要输出 JSON 以外的任何文字。格式如下：
+你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出解释文字。格式如下：
 {
   "responses": [
     {
@@ -47196,13 +47196,13 @@ ${replyGuidance.guidance}
 
 规则：
 1. characterId 必须使用对应角色的真实 id，不要用角色名、代称或外号。
-2. responses 里的每个对象会显示成一个独立聊天气泡。
-3. characterStates 不显示成气泡，只用于状态面板。
+2. responses[].content 是唯一可见聊天内容，responses 里的每个对象会显示成一个独立聊天气泡。
+3. characterStates 不显示成气泡，只用于状态面板；mood、innerThoughts、outfit、action 等字段绝不能出现在 responses[].content 里。
 4. 每个发言角色都必须有一条 characterState。
 5. characterStates 里的 innerThoughts 必须严格属于对应 characterId，不能让 A 写 B 的心理。
 6. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
 7. innerThoughts 必须是第一人称，用“我”写；不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
-8. 不要输出 MESSAGE_START、SPEAKER、CONTENT、HEART_VOICE、[heart_voice]、[status] 或其他标签。
+8. 不要输出 MESSAGE_START、SPEAKER、CONTENT、HEART_VOICE、[heart_voice]、[status]、Markdown 代码块、json 代码块或其他标签。
 9. 不要扮演用户“${myProfile.name}”。
 10. 每个角色的状态要各自连续：mood 不要大跳，favorability 普通互动只小幅变化，outfit 没有明确换装/场景切换时必须延续上一状态，action 和 innerThoughts 要承接上一轮。
 11. outfit 要写颜色、款式、细节、整洁程度；action 要写身体动作、视线、手部动作和语气状态。
@@ -50239,6 +50239,1172 @@ await initApp();
 
     setupEchoesStateBridge();
     setTimeout(markExistingMessagesEchoesStateClickable, 0);
+})();
+</script>
+
+<script>
+(function installEchoesRoundStateEngine() {
+    if (window.__echoesRoundStateEngineInstalled) return;
+    window.__echoesRoundStateEngineInstalled = true;
+
+    const SKIP_STATE_TYPES = new Set([
+        'heart_voice',
+        'system_notification',
+        'system_instruction',
+        'red_packet',
+        'transfer',
+        'uploaded_image',
+        'image',
+        'picture',
+        'picture_description',
+        'voice',
+        'music',
+        'music_share',
+        'location',
+        'location_share',
+        'product_share',
+        'post_share',
+        'game_wheel',
+        'gift',
+        'takeout',
+        'chat_history_share',
+        'cp_share',
+        'recall_ai'
+    ]);
+
+    const originalDisplayAiTextInBubbles = window.displayAiTextInBubbles || (typeof displayAiTextInBubbles === 'function' ? displayAiTextInBubbles : null);
+    const originalProcessAndDisplayAiResponse = window.processAndDisplayAiResponse || (typeof processAndDisplayAiResponse === 'function' ? processAndDisplayAiResponse : null);
+    const originalSplitAiTextIntoBubbles = window.splitAiTextIntoBubbles || (typeof splitAiTextIntoBubbles === 'function' ? splitAiTextIntoBubbles : null);
+    const originalParseGroupAiMessages = window.parseGroupAiMessages || (typeof parseGroupAiMessages === 'function' ? parseGroupAiMessages : null);
+    const originalTriggerGroupChatAiReply = window.triggerGroupChatAiReply || (typeof triggerGroupChatAiReply === 'function' ? triggerGroupChatAiReply : null);
+    const originalTriggerGroupFreeChat = window.triggerGroupFreeChat || (typeof triggerGroupFreeChat === 'function' ? triggerGroupFreeChat : null);
+
+    const activeRoundByChatId = window.__echoesActiveRoundByChatId || (window.__echoesActiveRoundByChatId = new Map());
+
+    function normalizeId(value) {
+        if (typeof normalizeMessageSenderId === 'function') return normalizeMessageSenderId(value);
+        return String(value || '').trim();
+    }
+
+    function isUserSender(value) {
+        const id = normalizeId(value);
+        if (!id) return false;
+        if (typeof isCurrentUserSenderId === 'function') return isCurrentUserSenderId(id);
+        return id === 'user' || id === 'myProfile' || id === state?.myProfile?.id;
+    }
+
+    function getText(messageOrText) {
+        if (!messageOrText) return '';
+        if (typeof messageOrText === 'string') return messageOrText;
+        if (typeof getMessageTextContent === 'function') return getMessageTextContent(messageOrText) || '';
+        const content = messageOrText.content;
+        if (typeof content === 'string') return content;
+        if (content?.text) return String(content.text);
+        if (content?.description) return String(content.description);
+        return String(messageOrText.text || '');
+    }
+
+    function escapeHtml(value = '') {
+        if (typeof escapeUiHtml === 'function') return escapeUiHtml(value);
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function getProfile(chat, characterId) {
+        const id = normalizeId(characterId);
+        if (typeof getEchoesCharacterProfile === 'function') {
+            const found = getEchoesCharacterProfile(chat, id);
+            if (found) return found;
+        }
+        if (!chat?.isGroup) return chat;
+        return (chat.npcMembers || []).find(item => normalizeId(item.id) === id)
+            || (state.contacts || []).find(item => normalizeId(item.id) === id)
+            || { id, name: id || '角色', avatar: '' };
+    }
+
+    function latestUserText(chat, beforeTimestamp = Date.now()) {
+        const messages = Array.isArray(chat?.history) ? chat.history : [];
+        const before = Number(beforeTimestamp) || Date.now();
+        const found = [...messages].reverse().find(message => {
+            const sender = normalizeId(message?.senderId || message?.sender);
+            const timestamp = Number(message?.timestamp) || 0;
+            return timestamp <= before && isUserSender(sender);
+        });
+        return getText(found);
+    }
+
+    function createEchoesRoundId(chat, source = 'chat') {
+        const chatId = String(chat?.id || 'unknown').replace(/[^\w-]/g, '_');
+        return `round_${chatId}_${source}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    }
+
+    function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
+        let id = normalizeId(rawId || fallbackProfile?.id || '');
+        if (!chat?.isGroup && id && !isUserSender(id)) return normalizeId(chat.id);
+        if (chat?.isGroup && (id === 'contact' || id === normalizeId(chat.id))) return '';
+        return id;
+    }
+
+    function isStateVisibleMessage(message) {
+        if (!message || SKIP_STATE_TYPES.has(message.type)) return false;
+        const sender = normalizeId(message.senderId || message.sender);
+        return !!sender && !isUserSender(sender) && sender !== 'system' && sender !== 'system_instruction';
+    }
+
+    function beginEchoesRound(chat, source = 'chat', options = {}) {
+        if (!chat?.id) return { ctx: null, owner: false };
+        const existing = activeRoundByChatId.get(chat.id);
+        if (existing) return { ctx: existing, owner: false };
+
+        const now = Date.now();
+        const ctx = {
+            chat,
+            chatId: chat.id,
+            source,
+            roundId: options.roundId || createEchoesRoundId(chat, source),
+            roundUserText: options.roundUserText || latestUserText(chat, now),
+            startedAt: now,
+            startedHistoryLength: Array.isArray(chat.history) ? chat.history.length : 0,
+            speakerMessageMap: new Map(),
+            explicitStateMap: new Map(),
+            relatedMessageMap: new Map()
+        };
+        activeRoundByChatId.set(chat.id, ctx);
+        return { ctx, owner: true };
+    }
+
+    function getActiveEchoesRound(chat) {
+        return chat?.id ? activeRoundByChatId.get(chat.id) || null : null;
+    }
+
+    function rememberExplicitState(ctx, characterId, explicitState) {
+        if (!ctx || !explicitState) return;
+        const id = normalizeCharacterIdForChat(ctx.chat, characterId || explicitState.characterId || explicitState.id || explicitState.name);
+        if (!id || isUserSender(id)) return;
+        const previous = ctx.explicitStateMap.get(id) || {};
+        ctx.explicitStateMap.set(id, { ...previous, ...explicitState, characterId: id });
+    }
+
+    function rememberRoundMessage(ctx, message, characterId, explicitState = null) {
+        if (!ctx || !isStateVisibleMessage(message)) return;
+        const id = normalizeCharacterIdForChat(ctx.chat, characterId || message.senderId || message.sender);
+        if (!id || isUserSender(id)) return;
+        if (!ctx.speakerMessageMap.has(id)) ctx.speakerMessageMap.set(id, []);
+        const messages = ctx.speakerMessageMap.get(id);
+        if (!messages.some(item => item && item.id === message.id)) {
+            messages.push(message);
+        }
+        ctx.relatedMessageMap.set(id, message.id || ctx.relatedMessageMap.get(id) || null);
+        rememberExplicitState(ctx, id, explicitState);
+    }
+
+    function collectRoundMessagesFromHistory(ctx, startIndex, fallbackCharacterId = null, explicitState = null) {
+        if (!ctx?.chat || !Array.isArray(ctx.chat.history)) return;
+        ctx.chat.history.slice(Math.max(0, startIndex || 0)).forEach(message => {
+            if (!isStateVisibleMessage(message)) return;
+            let id = normalizeId(message.senderId || message.sender || fallbackCharacterId);
+            if (!ctx.chat.isGroup) id = normalizeId(ctx.chat.id);
+            rememberRoundMessage(ctx, message, id, explicitState);
+        });
+    }
+
+    function extractBalancedObject(text, startIndex) {
+        let depth = 0;
+        let inString = false;
+        let escaped = false;
+        for (let i = startIndex; i < text.length; i++) {
+            const ch = text[i];
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch === '\\') {
+                    escaped = true;
+                } else if (ch === '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (ch === '"') {
+                inString = true;
+                continue;
+            }
+            if (ch === '{') depth++;
+            if (ch === '}') {
+                depth--;
+                if (depth === 0) return text.slice(startIndex, i + 1);
+            }
+        }
+        return '';
+    }
+
+    function extractEchoesJsonPayload(rawText) {
+        const text = String(rawText || '').trim();
+        if (!text) return '';
+
+        const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+        if (fenced && /"?(responses|characterStates|states|innerThoughts|favorabilityLabel)"?/i.test(fenced[1])) {
+            return fenced[1].trim();
+        }
+
+        if (text.startsWith('{') && /"?(responses|characterStates|states|innerThoughts|favorabilityLabel)"?/i.test(text)) {
+            const balanced = extractBalancedObject(text, 0);
+            if (balanced) return balanced;
+        }
+
+        const keyIndex = text.search(/"?(responses|characterStates|states|innerThoughts|favorabilityLabel)"?\s*[:：]/i);
+        if (keyIndex >= 0) {
+            const start = text.lastIndexOf('{', keyIndex);
+            if (start >= 0) {
+                const balanced = extractBalancedObject(text, start);
+                if (balanced) return balanced;
+            }
+        }
+
+        return '';
+    }
+
+    function normalizeEchoesParsedPayload(payload) {
+        if (!payload || typeof payload !== 'object') return null;
+        const responsesRaw = Array.isArray(payload.responses)
+            ? payload.responses
+            : Array.isArray(payload.messages)
+                ? payload.messages
+                : Array.isArray(payload.replies)
+                    ? payload.replies
+                    : [];
+        const statesRaw = Array.isArray(payload.characterStates)
+            ? payload.characterStates
+            : Array.isArray(payload.states)
+                ? payload.states
+                : Array.isArray(payload.heartVoices)
+                    ? payload.heartVoices
+                    : [];
+        if (!responsesRaw.length && !statesRaw.length) return null;
+        return {
+            responses: responsesRaw
+                .map(item => ({
+                    ...item,
+                    characterId: item.characterId || item.id || item.name || item.speakerId || item.speaker,
+                    content: String(item.content || item.text || item.message || '').trim()
+                }))
+                .filter(item => item.content || item.characterId),
+            states: statesRaw
+                .map(item => ({
+                    ...item,
+                    characterId: item.characterId || item.id || item.name || item.speakerId || item.speaker
+                }))
+                .filter(item => item.characterId || item.innerThoughts || item.thoughts)
+        };
+    }
+
+    function tryParseEchoesJson(rawText) {
+        const json = extractEchoesJsonPayload(rawText);
+        if (!json) return null;
+        try {
+            return normalizeEchoesParsedPayload(JSON.parse(json));
+        } catch (error) {
+            const cleaned = json
+                .replace(/,\s*([}\]])/g, '$1')
+                .replace(/[“”]/g, '"')
+                .replace(/[‘’]/g, "'");
+            try {
+                return normalizeEchoesParsedPayload(JSON.parse(cleaned));
+            } catch (secondError) {
+                console.warn('[ECHOES JSON PARSE FAILED]', secondError, rawText);
+                return null;
+            }
+        }
+    }
+
+    function isRawEchoesJsonLeak(text) {
+        return /```json|```|"?characterStates"?\s*[:：]|"?responses"?\s*[:：]|"?innerThoughts"?\s*[:：]|"?favorabilityLabel"?\s*[:：]|HEART_VOICE|\[heart_voice\]/i.test(String(text || ''));
+    }
+
+    function stripEchoesJsonFromVisibleText(rawText) {
+        let text = String(rawText || '');
+        text = text.replace(/```(?:json)?\s*[\s\S]*?```/gi, '');
+        const payload = extractEchoesJsonPayload(text);
+        if (payload) text = text.replace(payload, '');
+        text = text
+            .replace(/\[heart_voice\][\s\S]*?(?:\[\/heart_voice\]|$)/gi, '')
+            .replace(/HEART_VOICE\s*[:：][\s\S]*$/gi, '')
+            .split(/\n+/)
+            .filter(line => {
+                const trimmed = line.trim();
+                if (!trimmed) return false;
+                if (/^[{}\[\],]+$/.test(trimmed)) return false;
+                if (/^["']?[\w\u4e00-\u9fa5-]+["']?\s*[:：]/.test(trimmed)) return false;
+                if (/"?(responses|characterStates|states|innerThoughts|favorability|favorabilityLabel|mood|outfit|action|heartRate|jealousy|characterId|name|content)"?\s*[:：]/i.test(trimmed)) return false;
+                if (/^```/.test(trimmed)) return false;
+                return true;
+            })
+            .join('\n')
+            .trim();
+        return text;
+    }
+
+    function isFirstPersonThought(text) {
+        const value = String(text || '').trim();
+        return /(^|[，。！？\s])我|咱|自己/.test(value) && !/^(他|她|TA|ta|角色|.+觉得|.+认为)/.test(value);
+    }
+
+    function isGenericInnerThought(text) {
+        const value = String(text || '').trim();
+        if (value.length < 35) return true;
+        return /表面上|其实关于这件事|回得很自然|语气|角色|沈逸觉得|他觉得|她觉得|对方的反应|继续观察|有些复杂|内心并不平静|表面.*其实|嘴上不说/.test(value);
+    }
+
+    function snippet(text, limit = 54) {
+        const cleaned = String(text || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        return cleaned.length > limit ? `${cleaned.slice(0, limit)}...` : cleaned;
+    }
+
+    function normalizeInnerThoughtsToFirstPerson(text, context = {}) {
+        return buildFirstPersonInnerThought({ ...context, explicitThought: text });
+    }
+
+    function buildFirstPersonInnerThought(...args) {
+        const context = args.length === 1 && args[0] && typeof args[0] === 'object'
+            ? args[0]
+            : {
+                roundUserText: args[0],
+                roundAiText: args[1],
+                previousState: args[2],
+                speakerProfile: args[3],
+                chat: args[4],
+                explicitThought: args[5]
+            };
+
+        const {
+            roundUserText = '',
+            roundAiText = '',
+            visibleText = '',
+            previousState = null,
+            speakerProfile = null,
+            explicitThought = ''
+        } = context;
+
+        const speakerName = String(speakerProfile?.name || '').trim();
+        const userLine = snippet(roundUserText, 64);
+        const aiLine = snippet(roundAiText || visibleText, 64);
+        const previousLine = snippet(previousState?.innerThoughts || '', 42);
+        let thought = String(explicitThought || '').trim();
+
+        if (thought) {
+            if (speakerName) {
+                thought = thought.replace(new RegExp(`${speakerName}(觉得|认为|心想|意识到|明白|知道)?`, 'g'), '我');
+            }
+            thought = thought
+                .replace(/^(他|她|TA|ta|角色)(觉得|认为|心想|意识到|明白|知道)?/g, '我')
+                .replace(/(他|她|TA|ta)嘴上/g, '我嘴上')
+                .replace(/(他|她|TA|ta)心里/g, '我心里')
+                .replace(/(他|她|TA|ta)其实/g, '我其实')
+                .replace(/(他|她|TA|ta)不想/g, '我不想')
+                .replace(/表面上[^，。；;]*[，。；;]?\s*/g, '');
+        }
+
+        if (!thought || !isFirstPersonThought(thought) || isGenericInnerThought(thought)) {
+            const userPart = userLine ? `听到她刚才那句“${userLine}”，` : '这一轮里，';
+            const aiPart = aiLine ? `我嘴上只说了“${aiLine}”，` : '我嘴上没有把话说透，';
+            const previousPart = previousLine ? `上一轮那点情绪还没散，` : '';
+            let hidden = '可我心里一直绕着这句话转，想靠近一点，又怕自己显得太容易被牵动。';
+            const moodSource = `${previousState?.mood || ''} ${previousState?.jealousy || ''} ${roundUserText} ${roundAiText}`;
+            if (/怒|恼|烦|火|冷|不爽|怼/.test(moodSource)) {
+                hidden = '可我偏不想让她看出来我被戳中了。我要是真顺着她问下去，倒像是我先低头了。';
+            } else if (/吃醋|嫉妒|别人|他们|他\b|她\b|护着|抢/.test(moodSource)) {
+                hidden = '可我就是没法装作完全不在意，尤其想到她把注意力分给别人时，心里那点酸意压不下去。';
+            } else if (/怕|担心|难过|委屈|沉默|没事/.test(moodSource)) {
+                hidden = '可我其实怕她继续追问，怕自己一开口就把那点慌张和心软全漏出来。';
+            }
+            thought = `我${previousPart}${userPart}${aiPart}${hidden}`;
+        }
+
+        if (!/^我|^咱/.test(thought)) {
+            thought = `我${thought.replace(/^[，。,.、\s]+/g, '')}`;
+        }
+        const visible = snippet(roundAiText || visibleText, 80);
+        if (visible && thought === visible) {
+            thought = `我刚才那句话只说了一半。真正没说出口的是，我还在反复咬着她前面那句，不想让自己显得太容易被影响。`;
+        }
+        return thought.slice(0, 220);
+    }
+
+    function hasOutfitChange(text = '') {
+        if (typeof hasOutfitChangeTrigger === 'function') return hasOutfitChangeTrigger(text);
+        return /换衣|换上|穿上|脱下|睡衣|校服|制服|礼服|外套|大衣|浴袍|洗澡|起床|出门|回家|换装/.test(String(text || ''));
+    }
+
+    function hasActionChange(text = '') {
+        if (typeof hasActionChangeTrigger === 'function') return hasActionChangeTrigger(text);
+        return /站起|坐下|走到|靠近|退后|抱住|松开|拿起|放下|推开|转身|低头|抬头|盯着|躺下|起身|伸手|敲|摔|笑|哭|叹气/.test(String(text || ''));
+    }
+
+    function expandOutfitDescription(outfit, speakerProfile, previousState, visibleText) {
+        const previous = String(previousState?.outfit || previousState?.clothing || '').trim();
+        const incoming = String(outfit || '').trim();
+        const triggerText = `${visibleText || ''} ${incoming}`;
+        if (previous && !hasOutfitChange(triggerText)) return previous;
+
+        const base = String(
+            incoming ||
+            speakerProfile?.outfit ||
+            speakerProfile?.clothing ||
+            speakerProfile?.appearance ||
+            speakerProfile?.persona ||
+            ''
+        ).trim();
+
+        if (base.length >= 22 && base.length <= 80) return base;
+        if (/西装|衬衫|皮鞋|领带|西裤/.test(base)) {
+            return `${base || '白色衬衫'}的领口整理得很平整，袖口干净利落地贴着腕线，深色长裤没有明显褶皱，整体看起来克制而整洁。`;
+        }
+        if (/裙|连衣裙|长裙|短裙/.test(base)) {
+            return `${base || '浅色裙装'}的裙摆保持着柔和线条，肩颈和袖口都收拾得细致，整体干净又有一点不易靠近的精致感。`;
+        }
+        return '白色衬衫的领口整理得很平整，袖口松松挽到小臂，深色长裤贴着腿线，整体看起来干净而克制。';
+    }
+
+    function expandActionDescription(action, visibleText, speakerProfile, previousState, mood) {
+        const incoming = String(action || '').trim();
+        const previous = String(previousState?.action || '').trim();
+        const combined = `${visibleText || ''} ${incoming} ${mood || ''}`;
+        if (incoming.length >= 22 && (hasActionChange(combined) || !previous)) return incoming;
+        if (previous && !hasActionChange(combined)) {
+            return previous.replace(/[。.!！]*$/g, '') + '，只是视线比刚才多停了一瞬，像是在压住没说出口的话。';
+        }
+        if (/怒|恼|烦|冷|不爽/.test(combined)) {
+            return '指节在杯壁上轻轻敲了两下，视线没有立刻移开，像是把那点不耐压回喉咙里，才慢慢开口。';
+        }
+        if (/笑|软|温柔|在意|心软/.test(combined)) {
+            return '原本绷着的肩线稍微松了些，视线在对方脸上停了一下，声音放轻，却仍旧故意留着一点克制。';
+        }
+        if (/低落|委屈|难过|怕|慌/.test(combined)) {
+            return '手指无意识地收紧又松开，眼神短暂垂下去，像是不想让那点动摇太快被人看见。';
+        }
+        return '身体微微前倾，目光停在对方身上，手指在身侧轻轻收拢，像是把真实反应压了一层才开口。';
+    }
+
+    function favorabilityValue(value, fallback = 50) {
+        if (typeof normalizeFavorabilityValue === 'function') return normalizeFavorabilityValue(value, fallback);
+        const n = Number(value);
+        return Math.max(0, Math.min(100, Math.round(Number.isFinite(n) ? n : fallback)));
+    }
+
+    function favorabilityLabel(value, mood = '') {
+        if (typeof getStableFavorabilityLabel === 'function') return getStableFavorabilityLabel(value, mood);
+        const n = Number(value);
+        if (n <= 25) return '疏离';
+        if (n <= 45) return '冷淡';
+        if (n <= 60) return '一般';
+        if (n <= 75) return /怒|恼|烦/.test(String(mood)) ? '恼火中带在意' : '在意';
+        if (n <= 88) return '明显偏爱';
+        return '强烈偏爱';
+    }
+
+    function normalizeCharacterStateTransition(previousState, nextState, chat, speakerProfile) {
+        const previous = previousState || null;
+        const visibleText = String(nextState?.visibleText || nextState?.roundAiText || '').trim();
+        const roundUserText = String(nextState?.roundUserText || '').trim();
+        const roundAiText = String(nextState?.roundAiText || visibleText || '').trim();
+        const combined = `${roundUserText} ${roundAiText} ${nextState?.mood || ''} ${nextState?.action || ''} ${nextState?.outfit || ''}`;
+        const mood = typeof smoothMoodTransition === 'function'
+            ? smoothMoodTransition(previous?.mood, nextState?.mood || previous?.mood || '平静', combined)
+            : String(nextState?.mood || previous?.mood || '平静').trim();
+        const previousFavorability = favorabilityValue(previous?.favorability, 50);
+        const requested = Number(nextState?.favorability);
+        const limit = typeof hasStrongStateTurnTrigger === 'function' && hasStrongStateTurnTrigger(combined) ? 8 : 3;
+        let nextFavorability = Number.isFinite(requested)
+            ? Math.max(previousFavorability - limit, Math.min(previousFavorability + limit, Math.round(requested)))
+            : previousFavorability + (typeof inferFavorabilityDeltaFromText === 'function' ? inferFavorabilityDeltaFromText(combined) : 0);
+        nextFavorability = favorabilityValue(Math.max(previousFavorability - limit, Math.min(previousFavorability + limit, nextFavorability)), previousFavorability);
+        const outfit = expandOutfitDescription(nextState?.outfit || nextState?.clothing, speakerProfile, previous, combined);
+        const action = expandActionDescription(nextState?.action, combined, speakerProfile, previous, mood);
+        const innerThoughts = buildFirstPersonInnerThought({
+            roundUserText,
+            roundAiText,
+            visibleText,
+            previousState: previous,
+            speakerProfile,
+            chat,
+            explicitThought: nextState?.innerThoughts || nextState?.thoughts
+        });
+
+        return {
+            mood,
+            favorability: nextFavorability,
+            favorabilityLabel: nextState?.favorabilityLabel || favorabilityLabel(nextFavorability, mood),
+            affection: nextState?.favorabilityLabel || favorabilityLabel(nextFavorability, mood),
+            outfit,
+            clothing: outfit,
+            action,
+            innerThoughts,
+            heartRate: nextState?.heartRate || nextState?.heart_rate || (typeof inferHeartVoiceHeartRate === 'function' ? inferHeartVoiceHeartRate(innerThoughts, mood) : '平稳'),
+            jealousy: nextState?.jealousy || (typeof inferHeartVoiceJealousy === 'function' ? inferHeartVoiceJealousy(innerThoughts) : '无'),
+            visibleText,
+            roundUserText,
+            roundAiText
+        };
+    }
+
+    function buildNextCharacterState(...args) {
+        if (args.length === 2 && args[1] && typeof args[1] === 'object' && !('sender' in args[1])) {
+            const previousState = args[0];
+            const options = args[1];
+            return normalizeCharacterStateTransition(previousState, {
+                ...(options.explicitState || {}),
+                visibleText: options.visibleText,
+                roundUserText: options.roundUserText,
+                roundAiText: options.roundAiText,
+                innerThoughts: options.explicitState?.innerThoughts || options.explicitState?.thoughts
+            }, options.chat, options.speakerProfile);
+        }
+
+        const previousState = args[0];
+        const visibleMessage = args[1];
+        const speakerProfile = args[2];
+        const chat = args[3];
+        const explicitState = args[4] || {};
+        const visibleText = getText(visibleMessage).trim();
+        return normalizeCharacterStateTransition(previousState, {
+            ...explicitState,
+            visibleText: explicitState.visibleText || visibleText,
+            roundUserText: explicitState.roundUserText || latestUserText(chat, visibleMessage?.timestamp || Date.now()),
+            roundAiText: explicitState.roundAiText || visibleText,
+            innerThoughts: explicitState.innerThoughts || explicitState.thoughts
+        }, chat, speakerProfile);
+    }
+
+    async function saveEchoesCharacterState(chat, characterId, payload, relatedMessageId = null, options = {}) {
+        if (!chat) return null;
+        let id = typeof normalizeEchoesResponseCharacterId === 'function'
+            ? normalizeEchoesResponseCharacterId({ characterId }, chat, getProfile(chat, characterId))
+            : normalizeId(characterId);
+        if (!chat.isGroup) id = normalizeId(chat.id);
+        if (!id || isUserSender(id) || id === 'system' || id === 'system_instruction') return null;
+
+        const activeRound = getActiveEchoesRound(chat);
+        const payloadObject = payload && typeof payload === 'object' ? payload : { innerThoughts: payload };
+        const roundId = options.roundId || payloadObject.roundId || activeRound?.roundId || createEchoesRoundId(chat, 'state');
+        const relatedMessage = relatedMessageId && Array.isArray(chat.history)
+            ? chat.history.find(message => String(message.id) === String(relatedMessageId))
+            : null;
+        const roundUserText = options.roundUserText || payloadObject.roundUserText || activeRound?.roundUserText || latestUserText(chat, relatedMessage?.timestamp || Date.now());
+        const visibleText = String(options.visibleText || payloadObject.visibleText || payloadObject.roundAiText || payloadObject.text || payloadObject.content || getText(relatedMessage) || '').trim();
+        const roundAiText = String(options.roundAiText || payloadObject.roundAiText || visibleText || getText(relatedMessage)).trim();
+        const speakerProfile = getProfile(chat, id);
+        const previousState = typeof getLatestCharacterStateSnapshot === 'function'
+            ? getLatestCharacterStateSnapshot(chat, id)
+            : null;
+        const normalized = buildNextCharacterState(previousState, {
+            visibleText,
+            roundUserText,
+            roundAiText,
+            speakerProfile,
+            chat,
+            explicitState: payloadObject
+        });
+
+        state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
+        const sameRoundRecord = state.characterStates.find(record =>
+            record &&
+            normalizeId(record.chatId) === normalizeId(chat.id) &&
+            normalizeId(record.characterId) === id &&
+            record.roundId &&
+            roundId &&
+            record.roundId === roundId
+        );
+
+        const timestamp = Date.now();
+        const nextFields = {
+            chatId: chat.id,
+            characterId: id,
+            timestamp,
+            source: chat.isGroup ? 'group' : 'private',
+            roundId,
+            relatedMessageId: relatedMessageId || payloadObject.relatedMessageId || null,
+            mood: normalized.mood || '平静',
+            favorability: favorabilityValue(normalized.favorability, previousState?.favorability ?? 50),
+            favorabilityLabel: normalized.favorabilityLabel || favorabilityLabel(normalized.favorability, normalized.mood),
+            affection: normalized.favorabilityLabel || favorabilityLabel(normalized.favorability, normalized.mood),
+            outfit: normalized.outfit,
+            clothing: normalized.outfit,
+            action: normalized.action,
+            innerThoughts: normalized.innerThoughts,
+            heartRate: normalized.heartRate || '平稳',
+            jealousy: normalized.jealousy || '无',
+            visibleText,
+            roundUserText,
+            roundAiText
+        };
+
+        let record;
+        if (sameRoundRecord && (options.replaceSameRound === true || activeRound?.roundId === roundId)) {
+            record = Object.assign(sameRoundRecord, nextFields, { id: sameRoundRecord.id });
+        } else {
+            record = {
+                id: `state_${timestamp}_${Math.random().toString(36).slice(2)}`,
+                ...nextFields
+            };
+            state.characterStates.push(record);
+        }
+
+        if (typeof updateCharacterStateSnapshot === 'function') {
+            updateCharacterStateSnapshot(record);
+        }
+        try {
+            if (typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
+                await kokoMemory.put('character_states', record);
+            }
+        } catch (error) {
+            console.warn('[ECHOES STATE STORE FAILED]', error, record);
+        }
+        window.state = state;
+        console.log('[ECHOES_STATE_SAVED_ROUND]', record);
+        return record;
+    }
+
+    async function ensureEchoesStateForVisibleMessage(message, chat, speakerProfile, explicitState = null) {
+        if (!isStateVisibleMessage(message) || !chat) return null;
+        let id = normalizeCharacterIdForChat(chat, message.senderId || message.sender || speakerProfile?.id, speakerProfile);
+        if (!id) return null;
+        const activeRound = getActiveEchoesRound(chat);
+        if (activeRound) {
+            rememberRoundMessage(activeRound, message, id, explicitState);
+            return null;
+        }
+        const roundId = createEchoesRoundId(chat, 'message');
+        const text = getText(message);
+        return saveEchoesCharacterState(chat, id, {
+            ...(explicitState || {}),
+            visibleText: text,
+            roundAiText: text,
+            roundUserText: latestUserText(chat, message.timestamp || Date.now())
+        }, message.id || null, {
+            roundId,
+            replaceSameRound: true
+        });
+    }
+
+    async function savePrivateRoundEchoesState({ chat, characterId, roundId, roundUserText, aiMessages = [], explicitState = null }) {
+        if (!chat || !characterId) return null;
+        const messages = aiMessages.filter(Boolean);
+        const roundAiText = messages.map(getText).filter(Boolean).join('\n').trim()
+            || String(explicitState?.roundAiText || explicitState?.visibleText || '').trim();
+        if (!roundAiText && !explicitState) return null;
+        const relatedMessageId = messages[messages.length - 1]?.id || null;
+        return saveEchoesCharacterState(chat, characterId, {
+            ...(explicitState || {}),
+            visibleText: roundAiText,
+            roundUserText,
+            roundAiText
+        }, relatedMessageId, {
+            roundId,
+            roundUserText,
+            roundAiText,
+            visibleText: roundAiText,
+            replaceSameRound: true
+        });
+    }
+
+    async function saveGroupRoundEchoesStates({ group, roundId, roundUserText, speakerMessageMap, explicitStateMap }) {
+        if (!group) return [];
+        const saved = [];
+        const speakerIds = new Set([
+            ...Array.from(speakerMessageMap?.keys?.() || []),
+            ...Array.from(explicitStateMap?.keys?.() || [])
+        ]);
+        for (const speakerId of speakerIds) {
+            const id = normalizeCharacterIdForChat(group, speakerId);
+            if (!id) continue;
+            const messages = speakerMessageMap?.get(id) || [];
+            const explicitState = explicitStateMap?.get(id) || null;
+            const roundAiText = messages.map(getText).filter(Boolean).join('\n').trim()
+                || String(explicitState?.roundAiText || explicitState?.visibleText || '').trim();
+            if (!roundAiText && !explicitState) continue;
+            const relatedMessageId = messages[messages.length - 1]?.id || null;
+            const record = await saveEchoesCharacterState(group, id, {
+                ...(explicitState || {}),
+                visibleText: roundAiText,
+                roundUserText,
+                roundAiText
+            }, relatedMessageId, {
+                roundId,
+                roundUserText,
+                roundAiText,
+                visibleText: roundAiText,
+                replaceSameRound: true
+            });
+            if (record) saved.push(record);
+        }
+        return saved;
+    }
+
+    async function commitEchoesRound(ctx) {
+        if (!ctx) return [];
+        if (ctx.chat?.isGroup) {
+            return saveGroupRoundEchoesStates({
+                group: ctx.chat,
+                roundId: ctx.roundId,
+                roundUserText: ctx.roundUserText,
+                speakerMessageMap: ctx.speakerMessageMap,
+                explicitStateMap: ctx.explicitStateMap
+            });
+        }
+        const characterId = normalizeId(ctx.chat.id);
+        const explicitState = ctx.explicitStateMap.get(characterId) || Array.from(ctx.explicitStateMap.values())[0] || null;
+        const record = await savePrivateRoundEchoesState({
+            chat: ctx.chat,
+            characterId,
+            roundId: ctx.roundId,
+            roundUserText: ctx.roundUserText,
+            aiMessages: ctx.speakerMessageMap.get(characterId) || [],
+            explicitState
+        });
+        return record ? [record] : [];
+    }
+
+    async function finishEchoesRound(ctx, owner) {
+        if (!ctx) return [];
+        try {
+            return await commitEchoesRound(ctx);
+        } finally {
+            if (owner && activeRoundByChatId.get(ctx.chatId) === ctx) {
+                activeRoundByChatId.delete(ctx.chatId);
+            }
+        }
+    }
+
+    function getExplicitStateForCharacter(parsed, chat, characterId, fallbackSenderProfile = null) {
+        const id = normalizeCharacterIdForChat(chat, characterId, fallbackSenderProfile);
+        return (parsed?.states || []).find(item => {
+            const stateId = typeof normalizeEchoesResponseCharacterId === 'function'
+                ? normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile)
+                : normalizeCharacterIdForChat(chat, item.characterId || item.id || item.name, fallbackSenderProfile);
+            return stateId === id;
+        }) || null;
+    }
+
+    async function renderEchoesJsonResponses(parsed, chat, fallbackSenderProfile = null, options = {}) {
+        const begin = beginEchoesRound(chat, options.source || (chat?.isGroup ? 'group-json' : 'private-json'), options);
+        const ctx = begin.ctx;
+        if (!ctx) return [];
+        const rendered = [];
+        try {
+            (parsed.states || []).forEach(stateItem => {
+                const stateId = typeof normalizeEchoesResponseCharacterId === 'function'
+                    ? normalizeEchoesResponseCharacterId(stateItem, chat, fallbackSenderProfile)
+                    : normalizeCharacterIdForChat(chat, stateItem.characterId || stateItem.id || stateItem.name, fallbackSenderProfile);
+                rememberExplicitState(ctx, stateId, stateItem);
+            });
+
+            let responses = parsed.responses || [];
+            if (!responses.length && (parsed.states || []).length) {
+                const firstState = parsed.states[0];
+                responses = [{
+                    characterId: firstState.characterId || firstState.id || firstState.name || fallbackSenderProfile?.id || chat.id,
+                    content: '我刚才没把话说清楚，等我重新组织一下。'
+                }];
+            }
+
+            for (const response of responses) {
+                const characterId = typeof normalizeEchoesResponseCharacterId === 'function'
+                    ? normalizeEchoesResponseCharacterId(response, chat, fallbackSenderProfile)
+                    : normalizeCharacterIdForChat(chat, response.characterId || response.id || response.name || response.speaker, fallbackSenderProfile);
+                if (!characterId || isUserSender(characterId)) continue;
+                const speaker = chat.isGroup ? getProfile(chat, characterId) : (fallbackSenderProfile || chat);
+                const content = stripEchoesJsonFromVisibleText(response.content || response.text || response.message || '').trim();
+                if (!content) continue;
+                const beforeLength = Array.isArray(chat.history) ? chat.history.length : 0;
+                const explicitState = getExplicitStateForCharacter(parsed, chat, characterId, fallbackSenderProfile);
+                if (originalProcessAndDisplayAiResponse) {
+                    await originalProcessAndDisplayAiResponse(content, speaker, chat, 'chat', {
+                        ...options,
+                        skipHeartVoiceFallback: true,
+                        forceShowAvatar: true
+                    });
+                } else if (typeof createAndAddMessage === 'function') {
+                    await createAndAddMessage({
+                        type: 'text',
+                        sender: speaker.id || characterId,
+                        senderId: speaker.id || characterId,
+                        content,
+                        forceAvatar: true
+                    }, speaker.id || characterId, chat, true, 'chat');
+                }
+                collectRoundMessagesFromHistory(ctx, beforeLength, characterId, explicitState);
+                rendered.push(...(chat.history || []).slice(beforeLength).filter(isStateVisibleMessage));
+            }
+
+            await finishEchoesRound(ctx, begin.owner);
+            return rendered;
+        } catch (error) {
+            if (begin.owner && activeRoundByChatId.get(ctx.chatId) === ctx) {
+                activeRoundByChatId.delete(ctx.chatId);
+            }
+            throw error;
+        }
+    }
+
+    async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null, options = {}) {
+        const parsed = tryParseEchoesJson(rawResponse);
+        if (!parsed) return false;
+        if (options.requestId && chat?.id && typeof isLatestAiRequest === 'function' && !isLatestAiRequest(chat.id, options.requestId)) {
+            console.warn('[ECHOES_STYLE_DISCARDED] stale generation', { chatId: chat.id, requestId: options.requestId });
+            return true;
+        }
+        await renderEchoesJsonResponses(parsed, chat, fallbackSenderProfile, options);
+        console.log('[ECHOES_JSON_HANDLED_NO_LEAK]', {
+            chatId: chat?.id,
+            responses: parsed.responses.length,
+            states: parsed.states.length
+        });
+        return true;
+    }
+
+    async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat', options = {}) {
+        const chat = originContext || senderProfile;
+        if (!chat) return null;
+        const parsed = tryParseEchoesJson(rawText);
+        if (parsed) {
+            return renderEchoesJsonResponses(parsed, chat, senderProfile, {
+                ...options,
+                source: chat.isGroup ? 'group-json' : 'private-json'
+            });
+        }
+
+        let safeText = String(rawText || '');
+        if (isRawEchoesJsonLeak(safeText)) {
+            safeText = stripEchoesJsonFromVisibleText(safeText);
+            if (!safeText) {
+                console.warn('[ECHOES_JSON_LEAK_SUPPRESSED_EMPTY]', { chatId: chat?.id });
+                return null;
+            }
+        }
+
+        const begin = beginEchoesRound(chat, chat.isGroup ? 'group-text' : 'private-text', options);
+        const ctx = begin.ctx;
+        const beforeLength = Array.isArray(chat.history) ? chat.history.length : 0;
+        try {
+            const result = originalDisplayAiTextInBubbles
+                ? await originalDisplayAiTextInBubbles(safeText, senderProfile, originContext, contextMode, options)
+                : await processAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, options);
+            if (ctx) collectRoundMessagesFromHistory(ctx, beforeLength, senderProfile?.id || chat.id);
+            if (begin.owner) await finishEchoesRound(ctx, true);
+            return result;
+        } catch (error) {
+            if (begin.owner && ctx && activeRoundByChatId.get(ctx.chatId) === ctx) {
+                activeRoundByChatId.delete(ctx.chatId);
+            }
+            throw error;
+        }
+    }
+
+    async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat', options = {}) {
+        const chat = originContext || senderProfile;
+        const parsed = tryParseEchoesJson(rawResponse);
+        if (parsed && chat) {
+            return renderEchoesJsonResponses(parsed, chat, senderProfile, options);
+        }
+        let safeText = String(rawResponse || '');
+        if (isRawEchoesJsonLeak(safeText)) {
+            safeText = stripEchoesJsonFromVisibleText(safeText);
+            if (!safeText) {
+                console.warn('[ECHOES_JSON_LEAK_SUPPRESSED_PROCESS]', { chatId: chat?.id });
+                return null;
+            }
+        }
+        return originalProcessAndDisplayAiResponse
+            ? originalProcessAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, options)
+            : null;
+    }
+
+    function splitAiTextIntoBubbles(text) {
+        const safeText = isRawEchoesJsonLeak(text) ? stripEchoesJsonFromVisibleText(text) : String(text || '');
+        if (!safeText.trim()) return [];
+        return originalSplitAiTextIntoBubbles ? originalSplitAiTextIntoBubbles(safeText) : safeText.split(/\n+/).map(item => item.trim()).filter(Boolean);
+    }
+
+    function parseEchoesStyleAiResult(rawText, chat = null, fallbackSenderProfile = null) {
+        return tryParseEchoesJson(rawText);
+    }
+
+    function parseGroupAiMessages(rawResponse, allMemberProfiles) {
+        const parsed = tryParseEchoesJson(rawResponse);
+        if (parsed) {
+            return (parsed.responses || []).map(response => {
+                const speaker = typeof resolveSpeakerProfile === 'function'
+                    ? resolveSpeakerProfile(response.characterId || response.name || response.speaker, allMemberProfiles)
+                    : (allMemberProfiles || []).find(item => normalizeId(item.id) === normalizeId(response.characterId));
+                if (!speaker) return null;
+                const heartVoice = (parsed.states || []).find(stateItem => {
+                    const rawId = stateItem.characterId || stateItem.id || stateItem.name;
+                    return normalizeId(rawId) === normalizeId(speaker.id) || rawId === speaker.name;
+                }) || null;
+                return {
+                    speaker,
+                    content: stripEchoesJsonFromVisibleText(response.content || response.text || ''),
+                    heartVoice
+                };
+            }).filter(item => item && item.content);
+        }
+        const safeText = isRawEchoesJsonLeak(rawResponse) ? stripEchoesJsonFromVisibleText(rawResponse) : rawResponse;
+        if (!String(safeText || '').trim()) return [];
+        return originalParseGroupAiMessages ? originalParseGroupAiMessages(safeText, allMemberProfiles) : [];
+    }
+
+    async function triggerGroupChatAiReply(group) {
+        if (!originalTriggerGroupChatAiReply) return null;
+        const begin = beginEchoesRound(group, 'group-reply');
+        try {
+            return await originalTriggerGroupChatAiReply(group);
+        } finally {
+            if (begin.owner) await finishEchoesRound(begin.ctx, true);
+        }
+    }
+
+    async function triggerGroupFreeChat(group) {
+        if (!originalTriggerGroupFreeChat) return null;
+        const begin = beginEchoesRound(group, 'group-free');
+        try {
+            return await originalTriggerGroupFreeChat(group);
+        } finally {
+            if (begin.owner) await finishEchoesRound(begin.ctx, true);
+        }
+    }
+
+    function getEchoesStateRecordsForPanel(chat, characterId) {
+        const id = normalizeId(characterId);
+        return (state.characterStates || [])
+            .filter(record =>
+                record &&
+                normalizeId(record.chatId) === normalizeId(chat?.id) &&
+                normalizeId(record.characterId) === id
+            )
+            .sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
+    }
+
+    function ensureEchoesStateHistoryPanelStyles() {
+        if (document.getElementById('echoes-state-history-panel-round-style')) return;
+        const style = document.createElement('style');
+        style.id = 'echoes-state-history-panel-round-style';
+        style.textContent = `
+            #echoes-state-history-panel {
+                position: fixed !important;
+                left: 50% !important;
+                bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+                transform: translateX(-50%) !important;
+                width: min(92vw, 430px) !important;
+                max-height: 82vh !important;
+                overflow-y: auto !important;
+                z-index: 2147483647 !important;
+                display: none;
+                flex-direction: column !important;
+                padding: 0 0 18px !important;
+                border-radius: 28px !important;
+                background: rgba(246, 248, 251, 0.94) !important;
+                border: 1px solid rgba(255,255,255,0.8) !important;
+                box-shadow: 0 24px 70px rgba(31, 41, 55, 0.28) !important;
+                backdrop-filter: blur(20px) !important;
+                -webkit-backdrop-filter: blur(20px) !important;
+                color: #1f2933 !important;
+            }
+            #echoes-state-history-panel .echoes-state-profile {
+                display: flex !important;
+                align-items: center !important;
+                gap: 14px !important;
+                margin: 16px 18px 4px !important;
+                padding: 14px !important;
+                border-radius: 22px !important;
+                background: rgba(255,255,255,0.62) !important;
+            }
+            #echoes-state-history-panel .echoes-state-avatar {
+                width: 58px !important;
+                height: 58px !important;
+                border-radius: 50% !important;
+                object-fit: cover !important;
+                background: #e5e7eb !important;
+            }
+            #echoes-state-history-panel .echoes-history-card {
+                margin: 12px 18px 0 !important;
+                padding: 15px !important;
+                border-radius: 20px !important;
+                background: rgba(255,255,255,0.72) !important;
+                border: 1px solid rgba(255,255,255,0.86) !important;
+                box-shadow: 0 8px 24px rgba(31, 41, 55, 0.08) !important;
+            }
+            #echoes-state-history-panel .echoes-history-card-head {
+                display: flex !important;
+                justify-content: space-between !important;
+                gap: 12px !important;
+                color: #6f8294 !important;
+                font-weight: 700 !important;
+                margin-bottom: 10px !important;
+            }
+            #echoes-state-history-panel .echoes-history-row {
+                margin-top: 9px !important;
+            }
+            #echoes-state-history-panel .echoes-history-label {
+                font-size: 12px !important;
+                font-weight: 800 !important;
+                color: #7c90a1 !important;
+                margin-bottom: 3px !important;
+            }
+            #echoes-state-history-panel .echoes-history-value {
+                font-size: 14px !important;
+                line-height: 1.65 !important;
+                color: #263238 !important;
+                white-space: pre-wrap !important;
+                word-break: break-word !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function ensureEchoesStateHistoryPanel() {
+        ensureEchoesStateHistoryPanelStyles();
+        let panel = document.getElementById('echoes-state-history-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'echoes-state-history-panel';
+            document.body.appendChild(panel);
+        }
+        panel.className = 'echoes-state-history-panel';
+        panel.innerHTML = `
+            <div class="echoes-state-header">
+                <div class="echoes-state-title" id="echoes-state-history-title">状态历史</div>
+                <button class="echoes-state-close" id="echoes-state-history-close" type="button">×</button>
+            </div>
+            <div class="echoes-state-profile">
+                <img id="echoes-state-history-avatar" class="echoes-state-avatar" alt="">
+                <div>
+                    <div id="echoes-state-history-name" class="echoes-state-name">角色</div>
+                    <div class="echoes-state-sync">过去轮次记录</div>
+                </div>
+            </div>
+            <div class="echoes-history-list" id="echoes-state-history-list"></div>
+        `;
+        panel.querySelector('#echoes-state-history-close').onclick = () => {
+            panel.style.setProperty('display', 'none', 'important');
+        };
+        return panel;
+    }
+
+    function historyRow(label, value) {
+        if (value === undefined || value === null || String(value).trim() === '') return '';
+        return `<div class="echoes-history-row"><div class="echoes-history-label">${label}</div><div class="echoes-history-value">${escapeHtml(String(value))}</div></div>`;
+    }
+
+    function renderEchoesStateHistoryPanel(chat, characterId, historyRecords = []) {
+        const panel = ensureEchoesStateHistoryPanel();
+        const profile = getProfile(chat, characterId) || {};
+        const name = profile.name || '角色';
+        const avatar = profile.avatar || `https://via.placeholder.com/80/DDD/666?text=${encodeURIComponent(name.slice(0, 1) || '角')}`;
+        panel.querySelector('#echoes-state-history-title').textContent = `${name} 的状态历史`;
+        panel.querySelector('#echoes-state-history-name').textContent = name;
+        panel.querySelector('#echoes-state-history-avatar').src = avatar;
+        const list = panel.querySelector('#echoes-state-history-list');
+        list.innerHTML = historyRecords.map((record, index) => `
+            <div class="echoes-history-card">
+                <div class="echoes-history-card-head">
+                    <span>${record.timestamp ? new Date(record.timestamp).toLocaleString() : `过去轮次 ${index + 1}`}</span>
+                    <span>${escapeHtml(`${record.favorability ?? ''}${record.favorabilityLabel ? `（${record.favorabilityLabel}）` : ''}`)}</span>
+                </div>
+                ${historyRow('轮次', record.roundId || `过去轮次 ${index + 1}`)}
+                ${historyRow('实时心情', record.mood)}
+                ${historyRow('好感度', `${record.favorability ?? ''}${record.favorabilityLabel ? `（${record.favorabilityLabel}）` : ''}`)}
+                ${historyRow('穿着', record.outfit || record.clothing)}
+                ${historyRow('动作', record.action)}
+                ${historyRow('内心想法', record.innerThoughts)}
+                ${historyRow('心率', record.heartRate)}
+                ${historyRow('嫉妒', record.jealousy)}
+                ${historyRow('source', record.source)}
+                ${historyRow('本轮用户', record.roundUserText)}
+                ${historyRow('本轮回复', record.roundAiText)}
+                ${historyRow('visibleText', record.visibleText)}
+                ${historyRow('relatedMessageId', record.relatedMessageId)}
+            </div>
+        `).join('') || '<div class="echoes-history-card"><div class="echoes-history-value">暂无过去轮次记录</div></div>';
+    }
+
+    function openEchoesStateHistoryPanel(chatId, characterId, options = {}) {
+        const chat = (state.contacts || []).find(item => item && item.id === chatId);
+        if (!chat || !characterId) return null;
+        const records = getEchoesStateRecordsForPanel(chat, characterId);
+        const historyRecords = options.includeCurrent === true ? records : records.slice(1);
+        const panel = ensureEchoesStateHistoryPanel();
+        renderEchoesStateHistoryPanel(chat, characterId, historyRecords);
+        panel.dataset.chatId = chat.id;
+        panel.dataset.characterId = characterId;
+        panel.style.setProperty('display', 'flex', 'important');
+        panel.style.setProperty('position', 'fixed', 'important');
+        panel.style.setProperty('left', '50%', 'important');
+        panel.style.setProperty('bottom', 'calc(72px + env(safe-area-inset-bottom, 0px))', 'important');
+        panel.style.setProperty('transform', 'translateX(-50%)', 'important');
+        panel.style.setProperty('width', 'min(92vw, 430px)', 'important');
+        panel.style.setProperty('max-height', '82vh', 'important');
+        panel.style.setProperty('overflow-y', 'auto', 'important');
+        panel.style.setProperty('z-index', '2147483647', 'important');
+        panel.style.setProperty('visibility', 'visible', 'important');
+        panel.style.setProperty('opacity', '1', 'important');
+        panel.style.setProperty('pointer-events', 'auto', 'important');
+        return panel;
+    }
+
+    window.createEchoesRoundId = createEchoesRoundId;
+    window.extractEchoesJsonPayload = extractEchoesJsonPayload;
+    window.tryParseEchoesJson = tryParseEchoesJson;
+    window.stripEchoesJsonFromVisibleText = stripEchoesJsonFromVisibleText;
+    window.isRawEchoesJsonLeak = isRawEchoesJsonLeak;
+    window.isGenericInnerThought = isGenericInnerThought;
+    window.isFirstPersonThought = isFirstPersonThought;
+    window.normalizeInnerThoughtsToFirstPerson = normalizeInnerThoughtsToFirstPerson;
+    window.buildFirstPersonInnerThought = buildFirstPersonInnerThought;
+    window.expandOutfitDescription = expandOutfitDescription;
+    window.expandActionDescription = expandActionDescription;
+    window.normalizeCharacterStateTransition = normalizeCharacterStateTransition;
+    window.buildNextCharacterState = buildNextCharacterState;
+    window.saveEchoesCharacterState = saveEchoesCharacterState;
+    window.ensureEchoesStateForVisibleMessage = ensureEchoesStateForVisibleMessage;
+    window.savePrivateRoundEchoesState = savePrivateRoundEchoesState;
+    window.saveGroupRoundEchoesStates = saveGroupRoundEchoesStates;
+    window.getEchoesStateRecordsForPanel = getEchoesStateRecordsForPanel;
+    window.ensureEchoesStateHistoryPanelStyles = ensureEchoesStateHistoryPanelStyles;
+    window.ensureEchoesStateHistoryPanel = ensureEchoesStateHistoryPanel;
+    window.renderEchoesStateHistoryPanel = renderEchoesStateHistoryPanel;
+    window.openEchoesStateHistoryPanel = openEchoesStateHistoryPanel;
+    window.parseEchoesStyleAiResult = parseEchoesStyleAiResult;
+    window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
+    window.displayAiTextInBubbles = displayAiTextInBubbles;
+    window.processAndDisplayAiResponse = processAndDisplayAiResponse;
+    window.splitAiTextIntoBubbles = splitAiTextIntoBubbles;
+    window.parseGroupAiMessages = parseGroupAiMessages;
+    if (originalTriggerGroupChatAiReply) window.triggerGroupChatAiReply = triggerGroupChatAiReply;
+    if (originalTriggerGroupFreeChat) window.triggerGroupFreeChat = triggerGroupFreeChat;
+
+    try { createEchoesRoundId = window.createEchoesRoundId; } catch (error) {}
+    try { parseEchoesStyleAiResult = window.parseEchoesStyleAiResult; } catch (error) {}
+    try { handleEchoesStyleAiResult = window.handleEchoesStyleAiResult; } catch (error) {}
+    try { displayAiTextInBubbles = window.displayAiTextInBubbles; } catch (error) {}
+    try { processAndDisplayAiResponse = window.processAndDisplayAiResponse; } catch (error) {}
+    try { splitAiTextIntoBubbles = window.splitAiTextIntoBubbles; } catch (error) {}
+    try { parseGroupAiMessages = window.parseGroupAiMessages; } catch (error) {}
+    try { normalizeInnerThoughtsToFirstPerson = window.normalizeInnerThoughtsToFirstPerson; } catch (error) {}
+    try { buildFirstPersonInnerThought = window.buildFirstPersonInnerThought; } catch (error) {}
+    try { expandOutfitDescription = window.expandOutfitDescription; } catch (error) {}
+    try { expandActionDescription = window.expandActionDescription; } catch (error) {}
+    try { normalizeCharacterStateTransition = window.normalizeCharacterStateTransition; } catch (error) {}
+    try { buildNextCharacterState = window.buildNextCharacterState; } catch (error) {}
+    try { saveEchoesCharacterState = window.saveEchoesCharacterState; } catch (error) {}
+    try { ensureEchoesStateForVisibleMessage = window.ensureEchoesStateForVisibleMessage; } catch (error) {}
+    try { openEchoesStateHistoryPanel = window.openEchoesStateHistoryPanel; } catch (error) {}
+    try { if (originalTriggerGroupChatAiReply) triggerGroupChatAiReply = window.triggerGroupChatAiReply; } catch (error) {}
+    try { if (originalTriggerGroupFreeChat) triggerGroupFreeChat = window.triggerGroupFreeChat; } catch (error) {}
+
+    console.log('[ECHOES ROUND STATE ENGINE READY]');
 })();
 </script>
 
