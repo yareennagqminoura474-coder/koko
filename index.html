@@ -12350,6 +12350,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 
         var trigger = event.target.closest('#test-heart-voice-btn, [data-action="open-heart-voice"], #chat-contact-name');
         if (!trigger) return;
+        if (trigger.closest && trigger.closest('#chat-messages')) return;
 
         event.preventDefault();
         event.stopPropagation();
@@ -14639,13 +14640,12 @@ function splitGroupBubbleContents(content = '') {
 
 function pushParsedGroupMessages(results, speaker, content, heartVoice = null) {
     if (!speaker) return;
-    const parts = splitGroupBubbleContents(content);
-    parts.forEach((part, index) => {
-        results.push({
-            speaker,
-            content: part,
-            heartVoice: index === 0 ? heartVoice : null
-        });
+    const cleanedContent = splitGroupBubbleContents(content).join('\n').trim();
+    if (!cleanedContent) return;
+    results.push({
+        speaker,
+        content: cleanedContent,
+        heartVoice
     });
 }
 
@@ -18656,7 +18656,10 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
         </div>
         ${replyButtonHTML} ${recallButtonHTML}
     `;
-            wrapper.addEventListener('click', () => handleMessageSelection(wrapper, message));
+            wrapper.addEventListener('click', (event) => {
+                if (event.target.closest('.message-avatar, [data-action="open-heart-voice"]')) return;
+                handleMessageSelection(wrapper, message);
+            });
             return wrapper;
         }
         
@@ -19848,15 +19851,14 @@ async function triggerGroupFreeChat(group) {
             return;
         }
 
-        for (const { speaker, content, heartVoice } of parsedMessages) {
-            if (!isLatestAiRequest(group.id, requestId)) {
-                console.warn('[GROUP FREE MESSAGE SKIPPED] stale generation', { chatId: group.id, requestId });
-                return;
-            }
-            const messageStartedAt = Date.now();
-            await sleep(800 + Math.random() * 700);
-            await processAndDisplayAiResponse(content, speaker, group, 'chat', { skipHeartVoiceFallback: true });
-            await ensureHeartVoiceForGroupMessage(content, speaker, group, messageStartedAt, heartVoice);
+        for (const parsedMessage of parsedMessages) {
+            const rendered = await renderParsedGroupMessage(
+                parsedMessage,
+                group,
+                requestId,
+                '[GROUP FREE MESSAGE SKIPPED] stale generation'
+            );
+            if (!rendered) return;
         }
 
     } catch (e) {
@@ -19873,6 +19875,39 @@ async function triggerGroupFreeChat(group) {
         }
     }
 }
+function hasSpecialGroupMessageContent(content = '') {
+    return /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar)(?:[\s:：]+([^\]]*))?\]/i.test(String(content || ''));
+}
+
+async function renderParsedGroupMessage({ speaker, content, heartVoice }, group, requestId, staleLogLabel) {
+    if (!isLatestAiRequest(group.id, requestId)) {
+        console.warn(staleLogLabel, { chatId: group.id, requestId });
+        return false;
+    }
+
+    const messageStartedAt = Date.now();
+    const text = String(content || '').trim();
+    await sleep(800 + Math.random() * 700);
+
+    if (!hasSpecialGroupMessageContent(text)) {
+        await createAndAddMessage({
+            type: 'text',
+            sender: speaker.id,
+            senderId: speaker.id,
+            content: text
+        }, speaker.id, group, true, 'chat');
+    } else {
+        await processAndDisplayAiResponse(text, speaker, group, 'chat', {
+            skipHeartVoiceFallback: true,
+            forceShowAvatar: true,
+            preserveSingleBubble: true
+        });
+    }
+
+    await ensureHeartVoiceForGroupMessage(text, speaker, group, messageStartedAt, heartVoice);
+    return true;
+}
+
 async function triggerGroupChatAiReply(group) {
     if (!group || !group.isGroup) return;
     const chatStatusEl = document.getElementById('chat-contact-status');
@@ -19915,23 +19950,25 @@ async function triggerGroupChatAiReply(group) {
             return;
         }
 
-        for (const { speaker, content, heartVoice } of parsedMessages) {
-            if (!isLatestAiRequest(group.id, requestId)) {
-                console.warn('[GROUP REPLY MESSAGE SKIPPED] stale generation', { chatId: group.id, requestId });
-                return;
-            }
-            const messageStartedAt = Date.now();
-            await sleep(800 + Math.random() * 700);
+        for (const parsedMessage of parsedMessages) {
             try {
-                await processAndDisplayAiResponse(content, speaker, group, 'chat', { skipHeartVoiceFallback: true });
-                await ensureHeartVoiceForGroupMessage(content, speaker, group, messageStartedAt, heartVoice);
+                const rendered = await renderParsedGroupMessage(
+                    parsedMessage,
+                    group,
+                    requestId,
+                    '[GROUP REPLY MESSAGE SKIPPED] stale generation'
+                );
+                if (!rendered) return;
             } catch (renderError) {
+                const { speaker, content, heartVoice } = parsedMessage;
                 console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
+                const messageStartedAt = Date.now();
                 await createAndAddMessage({
                     type: 'text',
                     sender: speaker.id,
+                    senderId: speaker.id,
                     content: String(content || '').trim()
-                }, speaker.id, group, false, 'chat');
+                }, speaker.id, group, true, 'chat');
                 await ensureHeartVoiceForGroupMessage(content, speaker, group, messageStartedAt, heartVoice);
             }
         }
@@ -23416,13 +23453,11 @@ async function saveCharacterStateRecords(states, chat, fallbackSenderProfile = n
 
 function buildFallbackStatesForEchoesResponses(responses, chat, fallbackSenderProfile, rawText = '') {
     if (!chat) return [];
-    const seen = new Set();
     const states = [];
 
     const addState = (characterId, text) => {
         const normalizedId = normalizeMessageSenderId(characterId);
-        if (!normalizedId || isCurrentUserSenderId(normalizedId) || seen.has(normalizedId)) return;
-        seen.add(normalizedId);
+        if (!normalizedId || isCurrentUserSenderId(normalizedId)) return;
         const speaker = getHeartVoiceSenderProfile(normalizedId, chat) || fallbackSenderProfile || chat;
         states.push({
             characterId: normalizedId,
@@ -24019,18 +24054,39 @@ async function commitHeartVoiceForAiTurn({
 
 async function ensureHeartVoiceForPrivateReply(rawText, visibleText, contact, originContext, roundStartedAt) {
     if (!contact || !originContext || originContext.isGroup) return null;
-    const rawHasHeartVoice = /\[(heart_voice|心声)\]/i.test(String(rawText || ''));
-    if (!rawHasHeartVoice) {
-        console.log('[HV PRIVATE EXPLICIT SKIP]', { contactId: contact?.id, chatId: originContext?.id, reason: 'no_explicit_heart_voice' });
-        return null;
-    }
     let heartVoice = extractHeartVoiceFromRaw(rawText);
     if (!heartVoice) {
-        console.warn('[HV PRIVATE EXPLICIT SKIP]', { contactId: contact?.id, chatId: originContext?.id, reason: 'parse_failed', rawText });
-        return null;
+        const fallbackText = String(visibleText || removeHeartVoiceBlocks(rawText) || rawText || '').trim()
+            || '他嘴上只回了这一句，心里其实还在观察对方的反应。';
+        heartVoice = buildFallbackHeartVoicePayload(fallbackText, contact, originContext);
+        console.log('[HV PRIVATE FALLBACK SAVE]', {
+            contactId: contact?.id,
+            chatId: originContext?.id,
+            fallbackText,
+            heartVoice
+        });
+    } else {
+        heartVoice = normalizeHeartVoiceContent(heartVoice);
+        if (!heartVoice) {
+            const fallbackText = String(visibleText || removeHeartVoiceBlocks(rawText) || rawText || '').trim()
+                || '他嘴上只回了这一句，心里其实还在观察对方的反应。';
+            heartVoice = buildFallbackHeartVoicePayload(fallbackText, contact, originContext);
+            console.warn('[HV PRIVATE EXPLICIT INVALID, FALLBACK SAVE]', {
+                contactId: contact?.id,
+                chatId: originContext?.id,
+                fallbackText,
+                rawText
+            });
+        }
+        console.log('[HV PRIVATE EXPLICIT SAVE]', {
+            contactId: contact?.id,
+            chatId: originContext?.id,
+            visibleText,
+            heartVoice
+        });
     }
     const relatedMessageId = findLatestHeartVoiceRelatedMessageId(originContext, contact.id, roundStartedAt);
-    console.log('[HV PRIVATE EXPLICIT SAVE]', {
+    console.log('[HV PRIVATE SAVE]', {
         contactId: contact?.id,
         chatId: originContext?.id,
         relatedMessageId,
@@ -24049,15 +24105,24 @@ async function ensureHeartVoiceForGroupMessage(content, speaker, group, messageS
     if (!speaker || !group || !group.isGroup) return null;
     let heartVoice = normalizeHeartVoiceContent(parsedHeartVoice);
     if (!heartVoice) {
-        console.log('[HV GROUP EXPLICIT SKIP]', {
+        heartVoice = buildFallbackHeartVoicePayload(content, speaker, group);
+        console.log('[HV GROUP FALLBACK SAVE]', {
             groupId: group?.id,
             speakerId: speaker?.id,
-            reason: 'no_explicit_heart_voice'
+            content,
+            heartVoice
         });
-        return null;
+    } else {
+        console.log('[HV GROUP EXPLICIT SAVE]', {
+            groupId: group?.id,
+            speakerId: speaker?.id,
+            content,
+            parsedHeartVoice,
+            heartVoice
+        });
     }
     const relatedMessageId = findLatestHeartVoiceRelatedMessageId(group, speaker.id, messageStartedAt);
-    console.log('[HV GROUP EXPLICIT SAVE]', {
+    console.log('[HV GROUP SAVE]', {
         groupId: group?.id,
         speakerId: speaker?.id,
         relatedMessageId,
@@ -24660,8 +24725,7 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
 
     const forceAvatarForThisReply =
         options.forceShowAvatar === true
-        && contextMode === 'chat'
-        && !effectiveChatContext.isGroup;
+        && contextMode === 'chat';
     let deferredExplicitHeartVoiceContent = null;
     const addSenderChatMessage = async (messageData, target = effectiveChatContext, mode = 'chat', forceAvatar = forceAvatarForThisReply) => {
         const addedMessage = await createAndAddMessage(messageData, senderProfile.id, target, forceAvatar, mode);
@@ -42273,7 +42337,8 @@ document.getElementById('chat-messages').addEventListener('click', async (e) => 
     const replyBtn = e.target.closest('.reply-btn');
     const quoteBox = e.target.closest('.message-quote');
     const clickedWrapper = e.target.closest('.message-wrapper');
-    const clickedAvatar = e.target.closest('.message-avatar, .message-avatar img');
+    const clickedAvatar = e.target.closest('.message-avatar');
+    const heartVoiceTrigger = e.target.closest('[data-action="open-heart-voice"]');
     // ▼▼▼ 最终修复版：读取完整数据的点击逻辑 ▼▼▼
     const cpShareCard = e.target.closest('.cp-share-card');
     if (cpShareCard) {
@@ -42354,26 +42419,76 @@ document.getElementById('chat-messages').addEventListener('click', async (e) => 
     }
 
     if (clickedAvatar) {
-        if (e.target.closest('[data-action="open-heart-voice"]')) {
-            return;
-        }
+        e.preventDefault();
+        e.stopPropagation();
         if (editModeState.active) return;
         const avatarWrapper = clickedAvatar.closest('.message-wrapper');
         const senderId = clickedAvatar.dataset.senderId
             || avatarWrapper?.dataset.senderId
             || avatarWrapper?.querySelector('.message-avatar')?.dataset.senderId;
-        if (!senderId) {
+        if (!contact || !senderId) {
             alert('未找到该角色资料或心声记录');
             return;
         }
-        e.stopPropagation();
+        let characterId = normalizeMessageSenderId(senderId);
+        if (!contact.isGroup && characterId === 'contact') {
+            characterId = normalizeMessageSenderId(contact.id);
+        }
+        if (isCurrentUserSenderId(characterId)) {
+            return;
+        }
+        if (!contact.isGroup) {
+            characterId = contact.id;
+        }
         if (chatAvatarClickTimer) {
             clearTimeout(chatAvatarClickTimer);
         }
-        chatAvatarClickTimer = setTimeout(async () => {
+        chatAvatarClickTimer = setTimeout(() => {
             chatAvatarClickTimer = null;
-            await openCharacterProfileFromSenderId(senderId, contact);
+            console.log('[AVATAR OPEN HEART VOICE]', {
+                senderId,
+                characterId,
+                chatId: contact.id,
+                isGroup: contact.isGroup
+            });
+            openHeartVoicePanelForCharacter(characterId, contact.id);
         }, 220);
+        return;
+    }
+
+    if (heartVoiceTrigger && heartVoiceTrigger.closest('#chat-messages')) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (editModeState.active) return;
+
+        const wrapper = heartVoiceTrigger.closest('.message-wrapper');
+        const senderId =
+            heartVoiceTrigger.dataset.heartVoiceCharacterId ||
+            heartVoiceTrigger.dataset.senderId ||
+            wrapper?.dataset.senderId ||
+            wrapper?.querySelector('.message-avatar')?.dataset.senderId;
+
+        if (!contact || !senderId) {
+            alert('未找到该角色资料或心声记录');
+            return;
+        }
+
+        let characterId = normalizeMessageSenderId(senderId);
+        if (!contact.isGroup && characterId === 'contact') {
+            characterId = normalizeMessageSenderId(contact.id);
+        }
+        if (isCurrentUserSenderId(characterId)) return;
+        if (!contact.isGroup) {
+            characterId = contact.id;
+        }
+
+        console.log('[MESSAGE OPEN HEART VOICE]', {
+            senderId,
+            characterId,
+            chatId: contact.id,
+            isGroup: contact.isGroup
+        });
+        openHeartVoicePanelForCharacter(characterId, contact.id);
         return;
     }
 // ... (if (quoteBox) { ... return; })
