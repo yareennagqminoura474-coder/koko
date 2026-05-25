@@ -8025,7 +8025,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
     <div id="chat-header-badges" class="chat-header-badges"></div>
     <div>
         <i class="fas fa-search action-btn" id="search-chat-btn" title="搜索聊天记录" style="margin-right: 15px; position: relative; z-index: 10000;" onclick="event.stopPropagation(); showChatSearch();"></i>
-        <i class="fas fa-heart action-btn" id="test-heart-voice-btn" title="测试心声入口" onclick="event.preventDefault(); event.stopPropagation(); window.__openHeartVoiceHard && window.__openHeartVoiceHard(null, window.state?.activeChatId);" style="margin-right: 15px;"></i>
+        <i class="fas fa-heart action-btn" id="test-heart-voice-btn" title="测试心声入口" onclick="event.preventDefault(); event.stopPropagation(); if (window.__openHeartVoiceHard) { window.__openHeartVoiceHard(null, window.state && window.state.activeChatId); } else { alert('心声基础脚本没有加载'); }" style="margin-right: 15px;"></i>
         <i class="fas fa-ellipsis-v action-btn" id="more-chat-options-btn" title="更多操作"></i>
     </div>
 </div>
@@ -12258,6 +12258,113 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
         </div>
     </div>
 </div>
+<script>
+(function () {
+    function forceShowHeartVoicePanel(title, text) {
+        var panel = document.getElementById('heart-voice-panel');
+        if (!panel) {
+            alert('心声面板不存在：#heart-voice-panel');
+            return;
+        }
+
+        if (panel.parentElement !== document.body) {
+            document.body.appendChild(panel);
+        }
+
+        var nameEl = document.getElementById('hv-character-name');
+        var emptyEl = document.getElementById('hv-empty-state');
+        var wrapEl = document.getElementById('hv-content-wrap');
+
+        if (nameEl) nameEl.textContent = title || '心声记录';
+        if (emptyEl) {
+            emptyEl.textContent = text || '心声面板已经打开。后续再接入角色心声记录。';
+            emptyEl.style.display = 'block';
+        }
+        if (wrapEl) wrapEl.style.display = 'none';
+
+        panel.classList.remove('show-history');
+        panel.style.setProperty('display', 'flex', 'important');
+        panel.style.setProperty('position', 'fixed', 'important');
+        panel.style.setProperty('left', '50%', 'important');
+        panel.style.setProperty('bottom', 'calc(82px + env(safe-area-inset-bottom, 0px))', 'important');
+        panel.style.setProperty('transform', 'translateX(-50%)', 'important');
+        panel.style.setProperty('width', 'min(92vw, 380px)', 'important');
+        panel.style.setProperty('max-height', '65vh', 'important');
+        panel.style.setProperty('overflow-y', 'auto', 'important');
+        panel.style.setProperty('z-index', '2147483647', 'important');
+        panel.style.setProperty('background', 'rgba(255, 250, 248, 0.98)', 'important');
+        panel.style.setProperty('border', '1px solid rgba(240, 220, 216, 0.95)', 'important');
+        panel.style.setProperty('border-radius', '22px', 'important');
+        panel.style.setProperty('box-shadow', '0 16px 48px rgba(80, 60, 56, 0.28)', 'important');
+        panel.style.setProperty('padding', '14px', 'important');
+        panel.style.setProperty('flex-direction', 'column', 'important');
+        panel.style.setProperty('gap', '10px', 'important');
+        panel.style.setProperty('pointer-events', 'auto', 'important');
+        panel.style.setProperty('visibility', 'visible', 'important');
+        panel.style.setProperty('opacity', '1', 'important');
+
+        console.log('[HV BASIC PANEL OPENED]');
+    }
+
+    window.__openHeartVoiceBasic = forceShowHeartVoicePanel;
+
+    window.__openHeartVoiceHard = function (characterId, chatId) {
+        console.log('[HV HARD ENTRY]', { characterId: characterId, chatId: chatId });
+
+        forceShowHeartVoicePanel('心声记录', '心声面板已打开。如果这里还没有角色心声，说明后续角色记录读取逻辑还没接上。');
+
+        try {
+            if (typeof window.openHeartVoicePanelForCharacter === 'function') {
+                var finalChatId = chatId;
+                var finalCharacterId = characterId;
+
+                if (!finalChatId && window.state && window.state.activeChatId) {
+                    finalChatId = window.state.activeChatId;
+                }
+
+                if (!finalCharacterId && window.state && Array.isArray(window.state.contacts)) {
+                    var chat = window.state.contacts.find(function (c) { return c.id === finalChatId; });
+                    if (chat && !chat.isGroup) {
+                        finalCharacterId = chat.id;
+                    }
+                }
+
+                if (finalCharacterId && finalChatId) {
+                    window.openHeartVoicePanelForCharacter(finalCharacterId, finalChatId);
+                }
+            }
+        } catch (err) {
+            console.warn('[HV ADVANCED OPEN FAILED, BASIC PANEL KEPT]', err);
+        }
+    };
+
+    document.addEventListener('click', function (event) {
+        var closeBtn = event.target.closest('#close-heart-voice-panel');
+        if (closeBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            var panel = document.getElementById('heart-voice-panel');
+            if (panel) panel.style.setProperty('display', 'none', 'important');
+            return;
+        }
+
+        var trigger = event.target.closest('#test-heart-voice-btn, [data-action="open-heart-voice"], #chat-contact-name');
+        if (!trigger) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+
+        var characterId = trigger.dataset ? trigger.dataset.heartVoiceCharacterId : null;
+        var chatId = trigger.dataset ? trigger.dataset.heartVoiceChatId : null;
+
+        if (!chatId && window.state) chatId = window.state.activeChatId;
+
+        console.log('[HV BASIC CLICK]', { characterId: characterId, chatId: chatId, trigger: trigger });
+        window.__openHeartVoiceHard(characterId, chatId);
+    }, true);
+})();
+</script>
 <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
 <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
 <script>
@@ -23389,160 +23496,8 @@ function openHeartVoicePanel(characterId, chatContext) {
     openHeartVoicePanelForCharacter(characterId, chatId);
 }
 
-window.__openHeartVoiceHard = function(characterId, chatId) {
-    console.log('[HV HARD OPEN START]', { characterId, chatId });
-
-    const panel = document.getElementById('heart-voice-panel');
-    if (!panel) {
-        alert('心声面板 DOM 不存在：#heart-voice-panel');
-        console.warn('[HV HARD FAILED] missing panel');
-        return;
-    }
-
-    if (panel.parentElement !== document.body) {
-        document.body.appendChild(panel);
-    }
-
-    const activeChatId = chatId || state.activeChatId;
-    let chat = state.contacts.find(c => c.id === activeChatId) || null;
-
-    if (!chat) {
-        const nameEl = document.getElementById('hv-character-name');
-        const empty = document.getElementById('hv-empty-state');
-        const wrap = document.getElementById('hv-content-wrap');
-        if (nameEl) nameEl.textContent = '心声记录';
-        if (empty) {
-            empty.textContent = '还没有进入私聊或群聊，但心声面板已经能打开。';
-            empty.style.display = 'block';
-        }
-        if (wrap) wrap.style.display = 'none';
-
-        panel.style.setProperty('display', 'flex', 'important');
-        panel.style.setProperty('position', 'fixed', 'important');
-        panel.style.setProperty('z-index', '2147483647', 'important');
-        panel.style.pointerEvents = 'auto';
-
-        console.log('[HV HARD OPEN DONE EMPTY]');
-        return;
-    }
-
-    let targetCharacterId = characterId;
-    if (!targetCharacterId && !chat.isGroup) {
-        targetCharacterId = chat.id;
-    }
-
-    if (!targetCharacterId && chat.isGroup) {
-        const nameEl = document.getElementById('hv-character-name');
-        const empty = document.getElementById('hv-empty-state');
-        const wrap = document.getElementById('hv-content-wrap');
-        if (nameEl) nameEl.textContent = `${chat.name} · 群聊心声`;
-        if (empty) {
-            empty.textContent = '群聊里请点击某个角色头像或角色名查看心声。';
-            empty.style.display = 'block';
-        }
-        if (wrap) wrap.style.display = 'none';
-
-        panel.style.setProperty('display', 'flex', 'important');
-        panel.style.setProperty('position', 'fixed', 'important');
-        panel.style.setProperty('z-index', '2147483647', 'important');
-        panel.style.pointerEvents = 'auto';
-
-        console.log('[HV HARD OPEN DONE GROUP EMPTY]');
-        return;
-    }
-
-    openHeartVoicePanelForCharacter(targetCharacterId, chat.id);
-
-    panel.style.setProperty('display', 'flex', 'important');
-    panel.style.setProperty('position', 'fixed', 'important');
-    panel.style.setProperty('z-index', '2147483647', 'important');
-    panel.style.pointerEvents = 'auto';
-
-    console.log('[HV HARD OPEN DONE]', { targetCharacterId, chatId: chat.id });
-};
-
 window.openHeartVoicePanelForCharacter = openHeartVoicePanelForCharacter;
 window.state = state;
-
-if (!window.__heartVoiceHardBound) {
-    document.addEventListener('click', function(event) {
-        const trigger = event.target.closest('[data-action="open-heart-voice"], #test-heart-voice-btn, #chat-contact-name');
-        if (!trigger) return;
-
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
-
-        let characterId = trigger.dataset.heartVoiceCharacterId || null;
-        let chatId = trigger.dataset.heartVoiceChatId || state.activeChatId || null;
-
-        if (trigger.id === 'test-heart-voice-btn') {
-            const chat = state.contacts.find(c => c.id === state.activeChatId);
-            if (chat && !chat.isGroup) {
-                characterId = chat.id;
-                chatId = chat.id;
-            }
-            console.log('[HV TEST BUTTON CLICK]', { characterId, chatId });
-            window.__openHeartVoiceHard(characterId, chatId);
-            return;
-        }
-
-        if (trigger.id === 'chat-contact-name') {
-            const chat = state.contacts.find(c => c.id === state.activeChatId);
-            if (chat && !chat.isGroup) {
-                characterId = chat.id;
-                chatId = chat.id;
-            }
-            console.log('[HV HEADER CLICK]', { characterId, chatId });
-            window.__openHeartVoiceHard(characterId, chatId);
-            return;
-        }
-
-        console.log('[HV DATA ACTION CLICK]', { characterId, chatId, trigger });
-        window.__openHeartVoiceHard(characterId, chatId);
-    }, true);
-
-    window.__heartVoiceHardBound = true;
-}
-
-if (!window.__heartVoiceControlsBound) {
-    document.addEventListener('click', function(event) {
-        const closeBtn = event.target.closest('#close-heart-voice-panel');
-        if (closeBtn) {
-            event.preventDefault();
-            event.stopPropagation();
-            closeHeartVoicePanel();
-            return;
-        }
-
-        const toggleBtn = event.target.closest('#hv-toggle-history-btn');
-        if (toggleBtn) {
-            event.preventDefault();
-            event.stopPropagation();
-            const panel = document.getElementById('heart-voice-panel');
-            if (!panel) return;
-            const shouldShowHistory = !panel.classList.contains('show-history');
-            panel.classList.toggle('show-history', shouldShowHistory);
-            toggleBtn.textContent = shouldShowHistory ? '收起心声记录' : '查看全部心声记录';
-        }
-    }, true);
-
-    window.__heartVoiceControlsBound = true;
-}
-
-if (!window.__heartVoiceCloseBound) {
-    document.addEventListener('click', function(e) {
-        const panel = document.getElementById('heart-voice-panel');
-        if (!panel || panel.style.display !== 'flex') return;
-
-        if (e.target.closest('#heart-voice-panel')) return;
-        if (e.target.closest('[data-action="open-heart-voice"], #test-heart-voice-btn, #chat-contact-name')) return;
-
-        closeHeartVoicePanel();
-    }, false);
-
-    window.__heartVoiceCloseBound = true;
-}
 
 async function cleanBadHeartVoices() {
     for (const contact of state.contacts) {
