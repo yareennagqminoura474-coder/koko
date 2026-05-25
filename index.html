@@ -23208,8 +23208,9 @@ function getHeartVoiceSenderId(message, chatContext) {
 
 async function saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVoiceContent, options = {}) {
     if (!senderProfile || !effectiveChatContext || !heartVoiceContent) return;
-    if (senderProfile.id === 'myProfile' || senderProfile.id === 'user') return;
-    if (senderProfile.id === 'system') return;
+    const normalizedSenderProfileId = normalizeMessageSenderId(senderProfile.id);
+    if (senderProfile.id === state.myProfile?.id || normalizedSenderProfileId === 'myProfile' || normalizedSenderProfileId === 'user') return;
+    if (normalizedSenderProfileId === 'system' || normalizedSenderProfileId === 'system_instruction') return;
 
     const normalized = normalizeHeartVoiceContent(heartVoiceContent);
     if (!normalized || !normalized.thoughts) {
@@ -23254,13 +23255,16 @@ async function saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVo
 
     liveChat.history.push(heartVoiceRecord);
     await kokoMemory.put('contacts', liveChat);
+    window.state = state;
 
     const openedPanel = document.getElementById('heart-voice-panel');
     if (openedPanel && openedPanel.style.display === 'flex') {
         const openedCharacterId = openedPanel.dataset.characterId;
         const openedChatId = openedPanel.dataset.chatId;
-        if (openedCharacterId && openedChatId === liveChat.id) {
-            renderHeartVoicePanelRecords(getHeartVoiceRecords(liveChat, openedCharacterId));
+        const characterIdForRefresh = openedCharacterId || (!liveChat.isGroup ? liveChat.id : null);
+        const chatIdForRefresh = openedChatId || (!liveChat.isGroup ? liveChat.id : null);
+        if (characterIdForRefresh && chatIdForRefresh === liveChat.id) {
+            renderHeartVoicePanelRecords(getHeartVoiceRecords(liveChat, characterIdForRefresh));
         }
     }
 
@@ -23360,6 +23364,7 @@ function getHeartVoiceRecords(chatContext, characterId) {
                 .map(message => ({
                     sender: message.sender,
                     senderId: message.senderId,
+                    characterId: message.characterId,
                     content: message.content
                 }))
         });
@@ -23453,12 +23458,16 @@ function openHeartVoicePanelForCharacter(characterId, chatId) {
     const chat = state.contacts.find(item => item.id === requestedChatId)
         || state.contacts.find(item => item.id === state.activeChatId)
         || null;
-    if (!panel || !nameEl || !toggleBtn || !chat || !characterId || !requestedChatId) {
+    let targetCharacterId = characterId;
+    if (!targetCharacterId && chat && !chat.isGroup) {
+        targetCharacterId = chat.id;
+    }
+    if (!panel || !nameEl || !toggleBtn || !chat || !targetCharacterId || !requestedChatId) {
         console.warn('[HV OPEN FAILED]', { characterId, chatId, panel, chat });
         return;
     }
 
-    let normalizedCharacterId = normalizeMessageSenderId(characterId);
+    let normalizedCharacterId = normalizeMessageSenderId(targetCharacterId);
     if (!chat.isGroup && normalizedCharacterId === 'contact') {
         normalizedCharacterId = normalizeMessageSenderId(chat.id);
     }
@@ -23499,6 +23508,42 @@ function openHeartVoicePanel(characterId, chatContext) {
 window.openHeartVoicePanelForCharacter = openHeartVoicePanelForCharacter;
 window.state = state;
 
+window.__testGenerateHeartVoice = async function() {
+    const chat = state.contacts.find(c => c.id === state.activeChatId);
+    if (!chat) {
+        alert('请先进入一个聊天');
+        return;
+    }
+
+    if (!chat.isGroup) {
+        await saveHeartVoiceRecord(chat, chat, {
+            emotion: '在意',
+            thoughts: '这是测试生成的心声记录，用来确认保存和显示链路已经打通。',
+            heartRate: '偏快',
+            jealousy: '无'
+        });
+        openHeartVoicePanelForCharacter(chat.id, chat.id);
+        alert('已生成一条测试心声');
+        return;
+    }
+
+    const firstMemberId = (chat.members || [])[0];
+    const member = state.contacts.find(c => c.id === firstMemberId);
+    if (!member) {
+        alert('群聊里没有找到可测试角色');
+        return;
+    }
+
+    await saveHeartVoiceRecord(member, chat, {
+        emotion: '在意',
+        thoughts: '这是群聊角色测试生成的心声记录，用来确认群聊心声链路。',
+        heartRate: '偏快',
+        jealousy: '无'
+    });
+    openHeartVoicePanelForCharacter(member.id, chat.id);
+    alert('已生成一条群聊测试心声');
+};
+
 async function cleanBadHeartVoices() {
     for (const contact of state.contacts) {
         if (!contact || !Array.isArray(contact.history)) continue;
@@ -23527,20 +23572,14 @@ async function cleanBadHeartVoices() {
 // ===== END 心声辅助函数 =====
 
 async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat') {
-    const shouldHandleHeartVoice =
+    const roundStartedAt = Date.now();
+    const isPrivateChat =
         contextMode === 'chat'
         && senderProfile
         && senderProfile.id !== 'myProfile'
         && senderProfile.id !== 'user'
         && originContext
         && !originContext.isGroup;
-
-    let roundHeartVoice = null;
-    const roundStartedAt = Date.now();
-
-    if (shouldHandleHeartVoice) {
-        roundHeartVoice = extractHeartVoiceFromRaw(rawText);
-    }
 
     // 移除 heart_voice 标签，避免作为普通气泡显示
     const visibleText = removeHeartVoiceBlocks(rawText);
@@ -23561,7 +23600,7 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
         }
     }
 
-    if (shouldHandleHeartVoice) {
+    if (isPrivateChat && String(rawText || '').trim()) {
         await ensureHeartVoiceForPrivateReply(
             rawText,
             visibleText,
@@ -23569,10 +23608,6 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
             originContext,
             roundStartedAt
         );
-    } else if (roundHeartVoice) {
-        await saveHeartVoiceRecord(senderProfile, originContext, roundHeartVoice, {
-            sinceTimestamp: roundStartedAt
-        });
     }
 }
 
