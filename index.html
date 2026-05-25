@@ -18629,12 +18629,24 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
 }
 // ▲▲▲ 修改结束 ▲▲▲
 
-            let normalizedSenderId = normalizeMessageSenderId(message.senderId || message.sender);
+            const resolvedSenderIdForState = getHeartVoiceSenderId(message, contact)
+                || normalizeMessageSenderId(message.senderId || message.sender || '');
+            let normalizedSenderId = resolvedSenderIdForState;
+            const normalizedContactIdForState = normalizeMessageSenderId(contact.id || '');
             // Legacy compatibility: old private messages used sender = 'contact'
             if (!contact.isGroup && normalizedSenderId === 'contact') {
                 normalizedSenderId = normalizeMessageSenderId(contact.id);
             }
+            if (contact.isGroup && (!normalizedSenderId || normalizedSenderId === 'contact' || normalizedSenderId === normalizedContactIdForState)) {
+                const groupSenderFallback = normalizeMessageSenderId(message.characterId || finalSenderInfo?.id || '');
+                if (groupSenderFallback && groupSenderFallback !== normalizedContactIdForState) {
+                    normalizedSenderId = groupSenderFallback;
+                }
+            }
+            normalizedSenderId = normalizeMessageSenderId(normalizedSenderId);
+            wrapper.dataset.messageId = message.id || '';
             wrapper.dataset.senderId = normalizedSenderId;
+            wrapper.dataset.sender = normalizedSenderId;
             wrapper.dataset.chatId = contact.id || '';
             wrapper.dataset.messageType = message.type || 'text';
 
@@ -18643,8 +18655,11 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
                 && message.sender !== 'myProfile'
                 && message.sender !== 'system'
                 && message.sender !== 'system_instruction'
-                ? (contact.isGroup ? normalizedSenderId : contact.id)
+                ? (contact.isGroup
+                    ? (normalizedSenderId && normalizedSenderId !== 'contact' && normalizedSenderId !== normalizedContactIdForState ? normalizedSenderId : '')
+                    : contact.id)
                 : '';
+            const avatarHeartVoiceCharacterId = heartVoiceCharacterId || (!contact.isGroup ? normalizedSenderId : '');
             const avatarDataAttrs = normalizedSenderId
                 ? `data-sender-id="${normalizedSenderId}" data-chat-id="${contact.id || ''}"`
                 : '';
@@ -18667,6 +18682,77 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
         </div>
         ${replyButtonHTML} ${recallButtonHTML}
     `;
+            const avatarEl = wrapper.querySelector('.message-avatar');
+            const authorNameEl = wrapper.querySelector('.message-author-name[data-heart-voice-character-id]');
+            if (avatarEl) {
+                avatarEl.dataset.senderId = normalizedSenderId;
+                avatarEl.dataset.heartVoiceCharacterId = avatarHeartVoiceCharacterId;
+            }
+
+            const openStateFromThisMessage = async (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+
+                const activeChat = state.contacts.find(c => c.id === state.activeChatId) || contact;
+                if (!activeChat) {
+                    alert('没有当前聊天');
+                    return;
+                }
+
+                let characterId =
+                    avatarEl?.dataset.heartVoiceCharacterId ||
+                    avatarEl?.dataset.senderId ||
+                    authorNameEl?.dataset.heartVoiceCharacterId ||
+                    wrapper.dataset.senderId ||
+                    wrapper.dataset.sender ||
+                    message.senderId ||
+                    message.sender ||
+                    '';
+
+                characterId = normalizeMessageSenderId(characterId);
+
+                if (!characterId || characterId === 'system' || characterId === 'system_instruction') {
+                    alert('未找到该角色资料或状态记录');
+                    return;
+                }
+
+                if (isCurrentUserSenderId(characterId)) {
+                    return;
+                }
+
+                if (activeChat.isGroup && (characterId === 'contact' || characterId === normalizeMessageSenderId(activeChat.id))) {
+                    alert('未找到该角色资料或状态记录');
+                    return;
+                }
+
+                if (!activeChat.isGroup) {
+                    characterId = normalizeMessageSenderId(activeChat.id);
+                }
+
+                console.log('[DIRECT AVATAR OPEN ECHOES STATE]', {
+                    chatId: activeChat.id,
+                    isGroup: activeChat.isGroup,
+                    messageId: message.id,
+                    sender: message.sender,
+                    senderId: message.senderId,
+                    characterId
+                });
+
+                await openEchoesStatePanel(activeChat.id, characterId, {
+                    createFallbackIfEmpty: true
+                });
+            };
+
+            if (avatarEl) {
+                avatarEl.addEventListener('click', openStateFromThisMessage);
+                avatarEl.addEventListener('pointerup', openStateFromThisMessage);
+            }
+
+            if (authorNameEl) {
+                authorNameEl.addEventListener('click', openStateFromThisMessage);
+            }
+
             wrapper.addEventListener('click', (event) => {
                 if (event.target.closest('.message-avatar, [data-action="open-heart-voice"]')) return;
                 handleMessageSelection(wrapper, message);
@@ -25359,6 +25445,12 @@ async function openEchoesStatePanel(chatId, characterId, options = {}) {
         hasSnapshot: !!snapshot,
         historyCount: historyRecords.length
     });
+    console.log('[ECHOES STATE PANEL OPEN DONE]', {
+        chatId: chat.id,
+        characterId: normalizedCharacterId,
+        display: panel.style.display,
+        rect: panel.getBoundingClientRect()
+    });
     return snapshot;
 }
 
@@ -25394,6 +25486,10 @@ async function handleEchoesStateAvatarClick(e) {
     const authorName = clickTarget?.closest('#chat-messages .message-author-name[data-heart-voice-character-id]');
     const trigger = avatar || authorName;
     if (!trigger) return;
+
+    // Message avatars have direct listeners bound in createMessageElement.
+    // Let the target-level handler own opening the Echoes state panel.
+    return;
 
     e.preventDefault();
     e.stopPropagation();
@@ -43454,6 +43550,10 @@ document.getElementById('attachment-btn').addEventListener('click', (e) => {
 document.getElementById('chat-messages').addEventListener('click', async (e) => {
     const contact = state.contacts.find(c => c.id === state.activeChatId);
     if (!contact) return;
+
+    if (e.target.closest('.message-avatar, .message-author-name[data-heart-voice-character-id]')) {
+        return;
+    }
 
     // 逻辑1：处理回复按钮和引用跳转 (保持不变)
     const replyBtn = e.target.closest('.reply-btn');
