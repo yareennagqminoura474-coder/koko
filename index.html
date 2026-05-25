@@ -19071,6 +19071,14 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 5. 将消息添加到正确的历史记录数组
     contact[historyArray].push(fullMessage);
 
+    if (shouldAutoCreateHeartVoiceForMessage(fullMessage, contact, sender, effectiveMode, historyArray)) {
+        setTimeout(() => {
+            autoCreateHeartVoiceForAddedMessage(fullMessage, contact).catch(error => {
+                console.error('[HV AUTO CREATE FAILED]', error, { fullMessage, contact });
+            });
+        }, 0);
+    }
+
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
         createAiRequestId(contact.id);
     }
@@ -23206,6 +23214,100 @@ function getHeartVoiceSenderId(message, chatContext) {
     return senderId;
 }
 
+function shouldAutoCreateHeartVoiceForMessage(fullMessage, contact, sender, effectiveMode, historyArray) {
+    if (!fullMessage || !contact) return false;
+    if (effectiveMode !== 'chat') return false;
+    if (historyArray !== 'history') return false;
+
+    if (fullMessage.type === 'heart_voice') return false;
+    if (fullMessage.type === 'system_notification') return false;
+    if (fullMessage.sender === 'user') return false;
+    if (fullMessage.sender === 'myProfile') return false;
+    if (fullMessage.sender === 'system') return false;
+    if (fullMessage.sender === 'system_instruction') return false;
+
+    const senderId = normalizeMessageSenderId(fullMessage.senderId || fullMessage.sender || sender);
+    if (!senderId || senderId === 'user' || senderId === 'myProfile' || senderId === 'system' || senderId === 'system_instruction') {
+        return false;
+    }
+
+    const text = getMessageTextContent(fullMessage);
+    if (!text || !String(text).trim()) return false;
+
+    const ignoredTypes = new Set([
+        'recall_ai',
+        'diary',
+        'system',
+        'system_instruction',
+        'heart_voice'
+    ]);
+    if (ignoredTypes.has(fullMessage.type)) return false;
+
+    return true;
+}
+
+function getHeartVoiceSenderProfileFromMessage(fullMessage, contact) {
+    const senderId = normalizeMessageSenderId(fullMessage.senderId || fullMessage.sender);
+    if (!senderId) return null;
+
+    if (contact?.isGroup) {
+        return getProfileInGroupContext(contact, senderId)
+            || state.contacts.find(item => normalizeMessageSenderId(item.id) === senderId)
+            || { id: senderId, name: senderId };
+    }
+
+    return state.contacts.find(item => normalizeMessageSenderId(item.id) === senderId)
+        || contact;
+}
+
+async function autoCreateHeartVoiceForAddedMessage(fullMessage, contact) {
+    if (!fullMessage || !contact || !Array.isArray(contact.history)) return;
+
+    const senderId = normalizeMessageSenderId(fullMessage.senderId || fullMessage.sender);
+    if (!senderId || senderId === 'user' || senderId === 'myProfile') return;
+
+    const exists = contact.history.some(message =>
+        message
+        && message.type === 'heart_voice'
+        && message.relatedMessageId === fullMessage.id
+    );
+    if (exists) {
+        console.log('[HV AUTO SKIP DUPLICATE]', { messageId: fullMessage.id });
+        return;
+    }
+
+    const senderProfile = getHeartVoiceSenderProfileFromMessage(fullMessage, contact);
+    if (!senderProfile || !senderProfile.id) {
+        console.warn('[HV AUTO NO SENDER PROFILE]', { fullMessage, contact });
+        return;
+    }
+
+    const visibleText = getMessageTextContent(fullMessage);
+    const payload = buildFallbackHeartVoicePayload(visibleText, senderProfile, contact);
+
+    console.log('[HV AUTO CREATE]', {
+        chatId: contact.id,
+        senderId: senderProfile.id,
+        relatedMessageId: fullMessage.id,
+        payload
+    });
+
+    await saveHeartVoiceRecord(senderProfile, contact, payload, {
+        relatedMessageId: fullMessage.id,
+        sinceTimestamp: fullMessage.timestamp || Date.now()
+    });
+
+    const panel = document.getElementById('heart-voice-panel');
+    if (panel && panel.style.display === 'flex') {
+        const openedCharacterId = panel.dataset.characterId;
+        const openedChatId = panel.dataset.chatId;
+
+        if (openedChatId === contact.id && openedCharacterId === normalizeMessageSenderId(senderProfile.id)) {
+            renderHeartVoicePanelRecords(getHeartVoiceRecords(contact, openedCharacterId));
+        }
+    }
+}
+
 async function saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVoiceContent, options = {}) {
     if (!senderProfile || !effectiveChatContext || !heartVoiceContent) return;
     const normalizedSenderProfileId = normalizeMessageSenderId(senderProfile.id);
@@ -23235,6 +23337,25 @@ async function saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVo
         liveChat.history = [];
     }
 
+    const relatedMessageId = options.relatedMessageId || findLatestHeartVoiceRelatedMessageId(liveChat, senderProfile.id, options.sinceTimestamp);
+    if (relatedMessageId) {
+        const duplicate = liveChat.history.some(message =>
+            message
+            && message.type === 'heart_voice'
+            && message.relatedMessageId === relatedMessageId
+            && getHeartVoiceSenderId(message, liveChat) === normalizeMessageSenderId(senderProfile.id)
+        );
+
+        if (duplicate) {
+            console.log('[HV SAVE SKIPPED DUPLICATE]', {
+                chatId: liveChat.id,
+                senderId: senderProfile.id,
+                relatedMessageId
+            });
+            return;
+        }
+    }
+
     const heartVoiceRecord = {
         id: `heart_voice_${Date.now()}_${Math.random()}`,
         type: 'heart_voice',
@@ -23244,7 +23365,7 @@ async function saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVo
         characterId: senderProfile.id,
         chatId: liveChat.id,
         relatedChatId: liveChat.id,
-        relatedMessageId: options.relatedMessageId || findLatestHeartVoiceRelatedMessageId(liveChat, senderProfile.id, options.sinceTimestamp),
+        relatedMessageId,
         content: normalized,
         text: normalized.thoughts,
         timestamp: Date.now(),
