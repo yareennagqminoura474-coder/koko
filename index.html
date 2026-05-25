@@ -18108,6 +18108,14 @@ if (message.isRecalled === true) {
 
             const wrapper = document.createElement('div');
             wrapper.className = `message-wrapper ${message.sender === 'user' ? 'sent' : 'received'}`;
+            const shouldKeepAvatarClickable =
+                message.sender !== 'user'
+                && message.sender !== 'myProfile'
+                && message.sender !== 'system'
+                && message.sender !== 'system_instruction'
+                && message.type !== 'heart_voice'
+                && message.type !== 'system_notification'
+                && !contact.isAvatarHidden;
             // ✨ 这是修改后的正确代码 ✨
 if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender === contact.id)) {
     wrapper.classList.add('contact-avatar-hidden');
@@ -18687,6 +18695,10 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
             if (avatarEl) {
                 avatarEl.dataset.senderId = normalizedSenderId;
                 avatarEl.dataset.heartVoiceCharacterId = avatarHeartVoiceCharacterId;
+                if (shouldKeepAvatarClickable) {
+                    avatarEl.style.setProperty('display', 'block', 'important');
+                    avatarEl.style.setProperty('visibility', 'visible', 'important');
+                }
             }
 
             const openStateFromThisMessage = async (event) => {
@@ -18746,7 +18758,6 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
 
             if (avatarEl) {
                 avatarEl.addEventListener('click', openStateFromThisMessage);
-                avatarEl.addEventListener('pointerup', openStateFromThisMessage);
             }
 
             if (authorNameEl) {
