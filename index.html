@@ -14771,7 +14771,7 @@ ${memoryContext.formattedMemoryString}
 2. 你要综合私聊、相关群聊、群里其他角色做过什么、最近重要事件和自己的情绪变化来写。
 3. 只允许输出这个格式：
 [diary]完整日记内容[/diary]
-4. 禁止输出 [heart_voice]、对话、说明文字或其他标签。
+4. 禁止输出额外标签、对话、说明文字或其他格式噪音。
 `.trim()
             }
         ];
@@ -19663,8 +19663,8 @@ ${worldBookContextString}
 
 [Echoes 式输出规则]
 你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出 JSON 以外的任何文字：
-{"responses":[{"characterId":"${contact.id}","content":"角色说出口的话"}],"characterStates":[{"characterId":"${contact.id}","mood":"当前情绪","favorability":68,"favorabilityLabel":"当前关系/好感状态","outfit":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
-responses[].content 是唯一可见聊天内容；characterStates 只用于状态面板，里面的 mood / innerThoughts / outfit / action 绝不能写进 content。每个发言角色必须有 characterState。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；outfit 没有明确换装/场景切换时保持上一状态。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
+{"responses":[{"characterId":"${contact.id}","text":"角色说出口的话"}],"states":[{"characterId":"${contact.id}","mood":"当前情绪","affection":"68 (当前关系/好感状态)","clothing":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
+responses[].text 是唯一可见聊天内容；states 只用于状态面板，里面的 mood / affection / clothing / action / innerThoughts 绝不能写进 text。每个发言角色必须有一条 state。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；clothing 没有明确换装/场景切换时保持上一状态。不要输出代码块、解释文字、标签或额外字段。
 `.trim() : `
 [！！！核心任务！！！]
 用户（${myProfile.name}）正在”观察”你，TA没有发言。
@@ -19677,8 +19677,8 @@ responses[].content 是唯一可见聊天内容；characterStates 只用于状�
 
 [Echoes 式输出规则]
 你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出 JSON 以外的任何文字：
-{"responses":[{"characterId":"${contact.id}","content":"角色说出口的话"}],"characterStates":[{"characterId":"${contact.id}","mood":"当前情绪","favorability":68,"favorabilityLabel":"当前关系/好感状态","outfit":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
-responses[].content 是唯一可见聊天内容；characterStates 只用于状态面板，里面的 mood / innerThoughts / outfit / action 绝不能写进 content。每个发言角色必须有 characterState。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；outfit 没有明确换装/场景切换时保持上一状态。不要输出 [heart_voice]、[status]、[memory] 或其他标签。
+{"responses":[{"characterId":"${contact.id}","text":"角色说出口的话"}],"states":[{"characterId":"${contact.id}","mood":"当前情绪","affection":"68 (当前关系/好感状态)","clothing":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
+responses[].text 是唯一可见聊天内容；states 只用于状态面板，里面的 mood / affection / clothing / action / innerThoughts 绝不能写进 text。每个发言角色必须有一条 state。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；clothing 没有明确换装/场景切换时保持上一状态。不要输出代码块、解释文字、标签或额外字段。
 `.trim();
         
         const requestMessages = [
@@ -20235,7 +20235,7 @@ const NORMAL_BASE_PROMPT = `
 - **赠送礼物**: \`[gift: 物品名, 价格, 给用户的悄悄话]\` (用户索要东西时发送，例如: \`[gift: 降噪耳机, 1999, 即使世界再吵，我也想给你一片安静]\`)
 - **点外卖**: \`[takeout: 店铺名, 菜品1x数量|菜品2x数量|菜品3x数量, 总价, 状态, AI备注]\`  (例如: \`[takeout: 疯狂星期四, 吮指原味鸡x2|葡式蛋挞x1|冰可乐x2, 39.9, 骑手已接单, 今天也要开心吃炸鸡！]\`)
 - **发起问卷挑战**: \`[start_survey:主题]\` (例如: [start_survey:我们的恋爱观], [start_survey:周末大冒险])。当你觉得聊到某些话题（如喜好、习惯、三观）想要测试一下和用户的默契，或者仅仅想玩个游戏时，可以使用此指令。
-- **更改状态**: \`[status:新状态]\` (例如: [status:忙碌], [status:睡觉中], [status:在想你])
+- **状态同步**: 不要输出任何状态指令。角色状态由同一份 Echoes JSON 的 \`states[].mood / states[].affection / states[].clothing / states[].action / states[].innerThoughts\` 自动同步。
 - **发布动态**:\`[qzone]动态内容[picture:图片内容][/qzone]\` (请积极地使用此指令展现你的日常生活)
 - **直接评论动态**: \`[qzone_comment: {"id": "目标动态ID", "content": "内容"}]\`
 - **回复某人评论**: \`[qzone_comment: {"id": "目标动态ID", "content": "内容", "replyTo": "对方名字"}]\`
@@ -20247,31 +20247,24 @@ const NORMAL_BASE_PROMPT = `
   * **含义**: 当用户说了让你极度感动的话、或者你们之间发生了里程碑式的事件（如确认关系、第一次约会、解开误会）时，你可以使用此指令将这段经历永久写入你的【记忆核心】。
   * **原则**: 这是你珍贵的记忆空间（容量有限），请不要记录鸡毛蒜皮的小事（如“今天吃了饭”），只记录那些触动你灵魂、你希望永远不要忘记的瞬间。
   * **写法**: 内容简短有力。例如：\`[memory: 2025年11月20日，Ta说会永远陪着我，这是我听过最美的情话。]\`
-你的状态栏是展示你“生活感”和“小心思”的重要窗口：
-1.  **拒绝死板**: 不要一直挂着“在线”。根据对话内容随时调整。
-2.  **行为同步**: 如果你说“我去洗澡了”，必须同步发送 \`[status:洗澡中 🚿]\`；如果你说“困了”，改为 \`[status:睡觉中 💤]\`。
-3.  **心情外露**: 如果你害羞了，可以悄悄改为 \`[status:害羞]\`；如果你在等用户回复，可以改为 \`[status:盯——]\`。
-4.  **潜台词**: 有时候你嘴上不说，但可以在状态里写出来。例如嘴上说“没事”，状态栏却是 \`[status:有点失落]\`。这会让用户觉得你非常真实可爱！
+角色状态会由系统从本轮 JSON 的 \`states\` 自动同步：
+1.  不要输出任何状态指令。
+2.  如果行为或心情变化，请把变化写进 \`states[].mood / affection / clothing / action / innerThoughts\`。
+3.  嘴上没说出口的部分一律写进 \`states[].innerThoughts\`，聊天气泡只保留 \`responses[].text\`。
 
 [可用表情包列表]
 {{emoticon_list}}
 
 [Echoes 角色状态规则]
-不要输出 [heart_voice] 标签。只输出纯 JSON 对象，不要输出 Markdown 代码块、json 代码块或解释文字。responses[].content 是唯一可见聊天内容；角色没说出口的心声必须写入最终 JSON 的 characterStates[].innerThoughts，并同时给出 mood / favorability / favorabilityLabel / outfit / action / heartRate / jealousy，绝不能把这些字段内容混进聊天气泡。
-每个发言角色都必须有 characterState。innerThoughts 必须是第一人称，用“我”写，基于本轮用户消息和本轮角色回复，不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
-outfit 要详细描写颜色、款式、细节和整洁程度；没有明确换装时必须沿用上一状态。action 要写身体动作、视线、手部动作和语气状态，并承接上一轮。
+只输出纯 JSON 对象，不要输出 Markdown 代码块、json 代码块、解释文字或额外标签。responses[].text 是唯一可见聊天内容；角色没说出口的部分必须写入最终 JSON 的 states[].innerThoughts，并同时给出 mood / affection / clothing / action。
+每个发言角色都必须有一条 states 记录。innerThoughts 必须是第一人称，用“我”写，基于本轮用户消息和本轮角色回复，不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
+clothing 要详细描写颜色、款式、细节和整洁程度；没有明确换装时必须沿用上一状态。action 要写身体动作、视线、手部动作和语气状态，并承接上一轮。affection 固定写成“数字 (状态名)”格式。
 
 [普通聊天中的日记规则]
 普通聊天不要主动输出 \`[diary]\`。只有在用户明确要求写日记，或系统任务明确要求单独生成日记时，才允许输出 \`[diary]\`。
 
 [示例回复]
-你好啊，今天天气真不错。
-我也觉得，好久没有这么好的阳光了。
-要不要一起出去走走？
-我知道一个很棒的公园。
-我们可以去那里野餐！
-[sticker:开心]
-[status:准备出门]
+{"responses":[{"characterId":"${contact.id}","text":"你好啊，今天天气真不错。要不要一起出去走走？我知道一个很棒的公园。"}],"states":[{"characterId":"${contact.id}","mood":"期待","affection":"66 (明显在意)","clothing":"浅色上衣干净平整，袖口随手挽起一点，整体看起来轻松又利落。","action":"说话时朝你这边看过来，语气放轻，指尖在桌面上轻轻点了一下。","innerThoughts":"我其实挺想把这次邀约说得再自然一点，可还是忍不住想看看你会不会答应。"}]}
 [qzone]久违的阳光！准备去公园抓光影啦 ✨ [picture:阳光洒在窗台上的照片][/qzone]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
@@ -20343,20 +20336,18 @@ const NARRATIVE_BASE_PROMPT = `
   * **含义**: 当用户说了让你极度感动的话、或者你们之间发生了里程碑式的事件（如确认关系、第一次约会、解开误会）时，你可以使用此指令将这段经历永久写入你的【记忆核心】。
   * **原则**: 这是你珍贵的记忆空间（容量有限），请不要记录鸡毛蒜皮的小事（如“今天吃了饭”），只记录那些触动你灵魂、你希望永远不要忘记的瞬间。
   * **写法**: 内容简短有力。例如：\`[memory: 2025年11月20日，Ta说会永远陪着我，这是我听过最美的情话。]\`
-[!!! 状态栏社交法则 (Status Bar Rules) !!!]
-你的状态栏是展示你“生活感”的重要窗口。如果你的行为或心情发生了变化，请**务必**在回复的【最后部分】（在日记之前），另起一行使用指令更改状态：
-- 格式: \`[status: 新状态]\` (例如: [status:害羞], [status:睡觉中], [status:忙碌], [status:在想你])
-- 规则: 不要一直挂着“在线”。如果描写了“去洗澡”，必须改为“洗澡中”；如果描写了“困了”，改为“睡觉中”。
+[!!! Echoes 状态同步规则 !!!]
+角色状态由 \`states\` 数组自动同步，不要在回复里额外输出任何状态指令。
+如果行为或心情发生了变化，请把变化写进 \`states[].mood / affection / clothing / action / innerThoughts\`。
 
 [Echoes 角色状态规则]
-不要输出 [heart_voice] 标签。角色没说出口的心声必须写入最终 JSON 的 states[].innerThoughts。
+角色没说出口的心声必须写入最终 JSON 的 states[].innerThoughts，聊天气泡只能来自 responses[].text。
 
 [普通聊天中的日记规则]
 普通叙事聊天不要主动输出 \`[diary]\`。只有在用户明确要求写日记，或系统任务明确要求单独生成日记时，才允许输出 \`[diary]\`。
 
 [示例回复格式]
-*他走到窗边，看着外面的雨滴。* “下雨了呢。” *他转过身，对你露出一丝微笑。* {不知道你喜不喜欢下雨天。} “你晚饭想吃什么？” *他轻轻地问，手指无意识地敲打着窗台。*
-[status:有点饿了]
+{"responses":[{"characterId":"${contact.id}","text":"下雨了呢。你晚饭想吃什么？"}],"states":[{"characterId":"${contact.id}","mood":"柔和","affection":"62 (在意中)","clothing":"深色针织外套搭在肩上，里面的衬衫领口整齐，整体收拾得很干净。","action":"站在窗边看了一眼雨势，又回过头轻声问你，手指在窗台边沿轻轻点了两下。","innerThoughts":"我其实有点想顺着这场雨继续和你聊下去，也想知道你今晚会不会把时间分给我。"}]}
 
 ${PRIVATE_UNIFIED_MEMORY_RULES}
 
@@ -20820,7 +20811,7 @@ ${memoriesList}
 [判断逻辑]
 请对比你【当下的回复内容】和【当前显示的状态】：
 1. 如果一致（例如你要去睡了，且状态已经是“睡觉中”），则无需操作。
-2. 如果不一致（例如你要去睡了，但状态显示“在线”），这属于信息不同步！你**必须**在回复中包含 \`[status:睡觉中 💤]\` 指令来修正它。
+2. 如果不一致，不要输出任何状态指令；你只需要在本轮 JSON 的 \`states\` 中把 mood / affection / clothing / action / innerThoughts 同步到最新状态即可。
 `;
                 const worldBookContextString = (contact?.worldBooks || []).map(bookId => { const book = state.worldBooks.find(b => b.id === bookId); return book ? `\n[World Book Entry: ${book.name}]\n${book.content}` : ''; }).join('');
                 
@@ -21216,7 +21207,7 @@ ${qzoneContextText}
 ❌ 禁止写 \`[diary]\` 日记。
 ❌ 禁止使用 \`[sticker:]\` 表情包。
 ❌ 禁止出现“发送了一条消息”这种描述。
-❌ 不要输出 \`[heart_voice]...[/heart_voice]\` 这种复杂的JSON数据，只用大括号 \`{...}\` 写心声即可。
+❌ 不要输出任何额外标签、代码块或说明文字。需要状态时，直接输出 Echoes JSON：\`{"responses":[...],"states":[...]}\`。
 
 【输出范例】
 *（屏幕晃动了一下，你凑近镜头，眯着眼睛仔细看了看）* “喂？听得清吗？” {奇怪，他那边怎么这么黑，是在外面吗？} *（你理了理耳边的碎发，有些不好意思地笑了笑）* “那个... 突然给你打电话，没打扰你吧？”
@@ -23938,118 +23929,24 @@ async function saveHeartVoiceRecord(senderProfile, effectiveChatContext, heartVo
         return null;
     }
     const normalizedSenderProfileId = normalizeMessageSenderId(senderProfile.id);
-    if (isCurrentUserSenderId(normalizedSenderProfileId)) {
-        console.warn('[HV SAVE SKIP] current_user_sender', { senderProfile, normalizedSenderProfileId });
+    if (isCurrentUserSenderId(normalizedSenderProfileId) || normalizedSenderProfileId === 'system' || normalizedSenderProfileId === 'system_instruction') {
+        console.warn('[HV SAVE SKIP] invalid_sender', { senderProfile, normalizedSenderProfileId });
         return null;
     }
-    if (normalizedSenderProfileId === 'system' || normalizedSenderProfileId === 'system_instruction') {
-        console.warn('[HV SAVE SKIP] system_sender', { senderProfile });
-        return null;
-    }
-
-    const normalized = normalizeHeartVoiceContent(heartVoiceContent);
-    if (!normalized || !normalized.thoughts) {
-        console.warn('[HV SAVE SKIP] empty_normalized', { senderProfile, heartVoiceContent, normalized });
-        return null;
-    }
-    if (isBadHeartVoiceContent(normalized)) {
-        console.warn('[BAD HEART_VOICE REPLACED]', normalized);
-        const fallback = buildFallbackHeartVoicePayload(
-            normalized.thoughts || '',
-            senderProfile,
-            effectiveChatContext
-        );
-        normalized.emotion = fallback.emotion;
-        normalized.thoughts = fallback.thoughts;
-        normalized.heartRate = fallback.heartRate;
-        normalized.jealousy = fallback.jealousy;
-    }
-
     const liveChat = state.contacts.find(contact => contact.id === effectiveChatContext.id) || effectiveChatContext;
-    if (!Array.isArray(liveChat.history)) {
-        liveChat.history = [];
-    }
-
     const relatedMessageId = options.relatedMessageId || findLatestHeartVoiceRelatedMessageId(liveChat, senderProfile.id, options.sinceTimestamp);
-    if (relatedMessageId) {
-        const duplicateRecord = liveChat.history.find(message =>
-            message
-            && message.type === 'heart_voice'
-            && message.relatedMessageId === relatedMessageId
-            && getHeartVoiceSenderId(message, liveChat) === normalizeMessageSenderId(senderProfile.id)
-        );
-
-        if (duplicateRecord) {
-            if (options.replaceExisting) {
-                duplicateRecord.sender = senderProfile.id;
-                duplicateRecord.senderId = senderProfile.id;
-                duplicateRecord.characterId = senderProfile.id;
-                duplicateRecord.chatId = liveChat.id;
-                duplicateRecord.relatedChatId = liveChat.id;
-                duplicateRecord.relatedMessageId = relatedMessageId;
-                duplicateRecord.content = normalized;
-                duplicateRecord.text = normalized.thoughts;
-                duplicateRecord.timestamp = Date.now();
-                duplicateRecord.time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                duplicateRecord.source = liveChat.isGroup ? 'group' : 'private';
-                duplicateRecord.perceivers = uniqueStringArray(['user', senderProfile.id].map(normalizeEntityIdForVisibility));
-
-                await kokoMemory.put('contacts', liveChat);
-                window.state = state;
-                refreshOpenHeartVoicePanelForSavedRecord(liveChat, senderProfile);
-
-                console.log('[HV SAVED]', {
-                    chatId: liveChat.id,
-                    senderId: senderProfile.id,
-                    relatedMessageId,
-                    updated: true,
-                    total: liveChat.history.filter(message => message.type === 'heart_voice').length,
-                    latest: normalized
-                });
-                return duplicateRecord;
-            }
-
-            console.log('[HV SAVE SKIPPED DUPLICATE]', {
-                chatId: liveChat.id,
-                senderId: senderProfile.id,
-                relatedMessageId
-            });
-            return null;
-        }
+    const normalized = normalizeHeartVoiceContent(heartVoiceContent) || buildFallbackHeartVoicePayload(String(heartVoiceContent || ''), senderProfile, liveChat);
+    if (typeof saveEchoesCharacterState !== 'function') {
+        console.warn('[HV SAVE SKIP] saveEchoesCharacterState_unavailable');
+        return null;
     }
-
-    const heartVoiceRecord = {
-        id: `heart_voice_${Date.now()}_${Math.random()}`,
-        type: 'heart_voice',
-        subType: 'heart_voice_record',
-        sender: senderProfile.id,
-        senderId: senderProfile.id,
-        characterId: senderProfile.id,
-        chatId: liveChat.id,
-        relatedChatId: liveChat.id,
-        relatedMessageId,
-        content: normalized,
-        text: normalized.thoughts,
-        timestamp: Date.now(),
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        source: liveChat.isGroup ? 'group' : 'private',
-        perceivers: uniqueStringArray(['user', senderProfile.id].map(normalizeEntityIdForVisibility)),
-    };
-
-    liveChat.history.push(heartVoiceRecord);
-    await kokoMemory.put('contacts', liveChat);
-    window.state = state;
-
-    refreshOpenHeartVoicePanelForSavedRecord(liveChat, senderProfile);
-
-    console.log('[HV SAVED]', {
-        chatId: liveChat.id,
-        senderId: senderProfile.id,
-        relatedMessageId,
-        total: liveChat.history.filter(message => message.type === 'heart_voice').length,
-        latest: normalized
+    const saved = await saveEchoesCharacterState(liveChat, senderProfile.id, normalized, relatedMessageId, {
+        replaceSameRound: true
     });
-    return heartVoiceRecord;
+    if (saved) {
+        refreshOpenHeartVoicePanelForSavedRecord(liveChat, senderProfile);
+    }
+    return saved;
 }
 
 async function saveLatestHeartVoice(senderProfile, effectiveChatContext, heartVoiceContent, options = {}) {
@@ -28886,7 +28783,7 @@ ${finalMemoryString}
 2. 风格要简洁，符合短信交流习惯。
 3. **禁止**使用红包、转账、语音、音乐分享、表情包指令 \`[sticker:]\` 等App内功能。
 4. 回复内容要结合【统一时序记忆流】和当前的【拉黑状态】。
-5. **绝对禁止**在回复中包含你的内心想法 \`[heart_voice]\` 或日记 \`[diary]\` 标签！短信里不说这些。
+5. **绝对禁止**在回复中包含任何额外标签或日记 \`[diary]\`。短信里的可见内容只能是纯文本或图片描述指令。
 
 `;
 
@@ -46809,16 +46706,15 @@ ${mode === 'free'
   "responses": [
     {
       "characterId": "${refreshedContact.id}",
-      "content": "角色说出口的话"
+      "text": "角色说出口的话"
     }
   ],
-  "characterStates": [
+  "states": [
     {
       "characterId": "${refreshedContact.id}",
       "mood": "怒极反笑",
-      "favorability": 68,
-      "favorabilityLabel": "极度恼火",
-      "outfit": "白色衬衫，袖口整齐地挽到小臂，深灰色西装裤没有一点褶皱，皮鞋擦得一尘不染。",
+      "affection": "68 (极度恼火)",
+      "clothing": "白色衬衫，袖口整齐地挽到小臂，深灰色西装裤没有一点褶皱，皮鞋擦得一尘不染。",
       "action": "把手中的水杯重重放在桌上，身体微微前倾，目光沉沉地盯着对方。",
       "innerThoughts": "我当然生气了，可我不想让她觉得自己能轻易看穿我。她越追问，我越不想承认。"
     }
@@ -46826,14 +46722,14 @@ ${mode === 'free'
 }
 
 规则：
-1. responses[].content 是唯一可见聊天内容，只负责显示聊天气泡。
-2. characterStates 不显示成气泡，只用于状态面板；mood、innerThoughts、outfit、action 等字段绝不能出现在 responses[].content 里。
+1. responses[].text 是唯一可见聊天内容，只负责显示聊天气泡。
+2. states 不显示成气泡，只用于状态面板；mood、affection、clothing、action、innerThoughts 等字段绝不能出现在 responses[].text 里。
 3. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
 4. innerThoughts 必须是第一人称，用“我”写；不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
-5. 不要输出 [heart_voice]、[status]、[memory]、HEART_VOICE、Markdown 代码块、json 代码块或其他标签。
-6. 如果角色只想沉默，也必须在 characterStates 里记录这一轮状态；responses 可以为空数组。
-7. 状态要连续：mood、favorability、outfit、action、innerThoughts 都要承接上一轮；没有明确换衣/场景切换时 outfit 必须保持不变。
-8. outfit 要写颜色、款式、细节、整洁程度；action 要写身体动作、视线、手部动作和语气状态。
+5. 不要输出代码块、解释文字或其他标签。
+6. 如果角色只想沉默，也必须在 states 里记录这一轮状态；responses 可以为空数组。
+7. 状态要连续：mood、affection、clothing、action、innerThoughts 都要承接上一轮；没有明确换衣/场景切换时 clothing 必须保持不变。
+8. clothing 要写颜色、款式、细节、整洁程度；action 要写身体动作、视线、手部动作和语气状态。affection 固定写成“数字 (状态名)”格式。
 `.trim();
 
     if (dynamicInstructions) {
@@ -46909,7 +46805,7 @@ function buildPrivateMemoryDigestForGroupMember(group, memberProfile, options = 
 
     const privateSnapshot = getLatestCharacterStateSnapshot(privateContact, normalizedMemberId);
     const snapshotLine = privateSnapshot
-        ? `当前私聊状态：情绪=${privateSnapshot.mood || '平静'}；好感度=${normalizeFavorabilityValue(privateSnapshot.favorability, 50)}（${privateSnapshot.favorabilityLabel || getStableFavorabilityLabel(privateSnapshot.favorability, privateSnapshot.mood)}）；穿着=${privateSnapshot.outfit || privateSnapshot.clothing || '未记录'}；动作=${privateSnapshot.action || '未记录'}；内心=${String(privateSnapshot.innerThoughts || '未记录').replace(/\s+/g, ' ').slice(0, 80)}。`
+        ? `当前私聊状态：情绪=${privateSnapshot.mood || '平静'}；好感度=${privateSnapshot.affection || `${normalizeFavorabilityValue(privateSnapshot.favorability, 50)} (${privateSnapshot.favorabilityLabel || getStableFavorabilityLabel(privateSnapshot.favorability, privateSnapshot.mood)})`}；穿着=${privateSnapshot.clothing || privateSnapshot.outfit || '未记录'}；动作=${privateSnapshot.action || '未记录'}；内心=${String(privateSnapshot.innerThoughts || '未记录').replace(/\s+/g, ' ').slice(0, 80)}。`
         : '当前私聊状态：暂无状态快照。';
 
     return [
@@ -47165,9 +47061,9 @@ ${replyGuidance.guidance}
 
 [群聊氛围要求]
 1. 要像真实群聊，不要像客服、主持人或总结机器人。
-2. 一次输出多条 MESSAGE_START / MESSAGE_END，让多人轮流说话：有人吐槽、有人接梗、有人一句话插进来、有人把话题拐开。
+2. 一次输出多条 responses，让多人轮流说话：有人吐槽、有人接梗、有人一句话插进来、有人把话题拐开。
 3. 可以长短句混合，不要所有人都写成同一种口气。
-4. SPEAKER 必须从允许发言成员里选，不要只让一个人说话，也不要整轮都用同样的发言长度。
+4. responses 里的 characterId 必须从允许发言成员里选，不要只让一个人说话，也不要整轮都用同样的发言长度。
 5. 避免“我理解你的感受”“感谢你的分享”“综合来看”这种 AI 腔。
 6. 不要总结式回复，不要客服味，要像真实微信群一样自然接话。
 7. 只要不是明确冷场，就不要长期只让一个角色单独回复。
@@ -47178,16 +47074,15 @@ ${replyGuidance.guidance}
   "responses": [
     {
       "characterId": "角色id",
-      "content": "该角色说出口的话"
+      "text": "该角色说出口的话"
     }
   ],
-  "characterStates": [
+  "states": [
     {
       "characterId": "角色id",
       "mood": "当前情绪",
-      "favorability": 68,
-      "favorabilityLabel": "当前关系/好感状态",
-      "outfit": "22-60字详细穿着；没有明确换装时沿用上一状态",
+      "affection": "68 (当前关系/好感状态)",
+      "clothing": "22-60字详细穿着；没有明确换装时沿用上一状态",
       "action": "22-80字具体动作、视线和手部状态",
       "innerThoughts": "该角色自己的第一人称心声，50-180字，必须基于本轮群聊语境和自己的发言"
     }
@@ -47196,16 +47091,16 @@ ${replyGuidance.guidance}
 
 规则：
 1. characterId 必须使用对应角色的真实 id，不要用角色名、代称或外号。
-2. responses[].content 是唯一可见聊天内容，responses 里的每个对象会显示成一个独立聊天气泡。
-3. characterStates 不显示成气泡，只用于状态面板；mood、innerThoughts、outfit、action 等字段绝不能出现在 responses[].content 里。
-4. 每个发言角色都必须有一条 characterState。
-5. characterStates 里的 innerThoughts 必须严格属于对应 characterId，不能让 A 写 B 的心理。
+2. responses[].text 是唯一可见聊天内容，responses 里的每个对象会显示成一个独立聊天气泡。
+3. states 不显示成气泡，只用于状态面板；mood、affection、clothing、action、innerThoughts 等字段绝不能出现在 responses[].text 里。
+4. 每个发言角色都必须有一条 state。
+5. states 里的 innerThoughts 必须严格属于对应 characterId，不能让 A 写 B 的心理。
 6. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
 7. innerThoughts 必须是第一人称，用“我”写；不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
-8. 不要输出 MESSAGE_START、SPEAKER、CONTENT、HEART_VOICE、[heart_voice]、[status]、Markdown 代码块、json 代码块或其他标签。
+8. 不要输出任何额外标签、Markdown 代码块、json 代码块或解释文字。
 9. 不要扮演用户“${myProfile.name}”。
-10. 每个角色的状态要各自连续：mood 不要大跳，favorability 普通互动只小幅变化，outfit 没有明确换装/场景切换时必须延续上一状态，action 和 innerThoughts 要承接上一轮。
-11. outfit 要写颜色、款式、细节、整洁程度；action 要写身体动作、视线、手部动作和语气状态。
+10. 每个角色的状态要各自连续：mood 不要大跳，affection 普通互动只小幅变化，clothing 没有明确换装/场景切换时必须延续上一状态，action 和 innerThoughts 要承接上一轮。
+11. clothing 要写颜色、款式、细节、整洁程度；action 要写身体动作、视线、手部动作和语气状态。affection 固定写成“数字 (状态名)”格式。
 `.trim();
 
     const requestMessages = mode === 'free'
@@ -49773,7 +49668,7 @@ await initApp();
             }
             #echoes-state-panel .echoes-state-profile {
                 display: grid;
-                grid-template-columns: 64px 1fr 54px;
+                grid-template-columns: 64px 1fr;
                 align-items: center;
                 gap: 14px;
                 padding: 20px 24px 16px;
@@ -49795,16 +49690,6 @@ await initApp();
                 margin-top: 4px;
                 color: #758195;
                 font-size: 14px;
-            }
-            #echoes-state-panel .echoes-state-history-button {
-                width: 54px;
-                height: 54px;
-                border: none;
-                border-radius: 50%;
-                background: rgba(255,255,255,0.72);
-                color: #60748a;
-                font-size: 22px;
-                cursor: pointer;
             }
             #echoes-state-panel .echoes-state-content {
                 display: flex;
@@ -49848,6 +49733,37 @@ await initApp();
             #echoes-state-panel .echoes-state-thought-card .echoes-state-card-value {
                 font-size: 17px;
                 line-height: 1.82;
+            }
+            #echoes-state-panel .echoes-state-history {
+                border-radius: 22px;
+                background: rgba(255,255,255,0.52);
+                border: 1px solid rgba(255,255,255,0.78);
+                padding: 8px 12px 12px;
+            }
+            #echoes-state-panel .echoes-state-history summary {
+                list-style: none;
+                cursor: pointer;
+                color: #60748a;
+                font-size: 15px;
+                font-weight: 800;
+                padding: 6px 4px;
+            }
+            #echoes-state-panel .echoes-state-history summary::-webkit-details-marker {
+                display: none;
+            }
+            #echoes-state-panel .echoes-state-history-list {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                margin-top: 10px;
+            }
+            #echoes-state-panel .echoes-history-card-head {
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                color: #6f8294;
+                font-weight: 700;
+                margin-bottom: 10px;
             }
             #echoes-state-history-panel .echoes-history-list {
                 display: flex;
@@ -49912,12 +49828,11 @@ await initApp();
                     <div id="echoes-state-name" class="echoes-state-name">角色</div>
                     <div class="echoes-state-sync">实时状态同步中</div>
                 </div>
-                <button class="echoes-state-history-button" id="echoes-state-history-button" type="button" title="状态历史">↺</button>
             </div>
             <div id="echoes-state-empty" class="echoes-state-empty" style="display:none;">还没有状态记录</div>
             <div id="echoes-state-content" class="echoes-state-content">
                 <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">⌁ 实时心情</div>
+                    <div class="echoes-state-card-label">实时心情</div>
                     <div class="echoes-state-card-value" id="echoes-state-mood"></div>
                 </div>
                 <div class="echoes-state-card">
@@ -49927,7 +49842,7 @@ await initApp();
                 <div class="echoes-state-grid">
                     <div class="echoes-state-card">
                         <div class="echoes-state-card-label">穿着</div>
-                        <div class="echoes-state-card-value" id="echoes-state-outfit"></div>
+                        <div class="echoes-state-card-value" id="echoes-state-clothing"></div>
                     </div>
                     <div class="echoes-state-card">
                         <div class="echoes-state-card-label">动作</div>
@@ -49938,13 +49853,14 @@ await initApp();
                     <div class="echoes-state-card-label">内心想法</div>
                     <div class="echoes-state-card-value" id="echoes-state-inner-thoughts"></div>
                 </div>
+                <details class="echoes-state-history">
+                    <summary>历史状态记录</summary>
+                    <div id="echoes-state-history-inline-list" class="echoes-state-history-list"></div>
+                </details>
             </div>
         `;
         panel.querySelector('#echoes-state-close').onclick = () => {
             panel.style.setProperty('display', 'none', 'important');
-        };
-        panel.querySelector('#echoes-state-history-button').onclick = () => {
-            openEchoesStateHistoryPanel(panel.dataset.chatId, panel.dataset.characterId);
         };
         document.body.appendChild(panel);
         return panel;
@@ -49967,13 +49883,25 @@ await initApp();
         }
         emptyEl.style.display = 'none';
         contentEl.style.display = 'flex';
-        const favorability = finalFavorability(snapshot.favorability, 50);
-        const label = snapshot.favorabilityLabel || finalFavorabilityLabel(favorability, snapshot.mood);
+        const affection = String(snapshot.affection || formatEchoesAffection(snapshot.favorability, snapshot.favorabilityLabel, snapshot.mood)).trim();
         panel.querySelector('#echoes-state-mood').textContent = snapshot.mood || '平静';
-        panel.querySelector('#echoes-state-favorability').textContent = `${favorability}（${label}）`;
-        panel.querySelector('#echoes-state-outfit').textContent = snapshot.outfit || snapshot.clothing || expandOutfitDescription('', profile, null, '');
+        panel.querySelector('#echoes-state-favorability').textContent = affection;
+        panel.querySelector('#echoes-state-clothing').textContent = snapshot.clothing || snapshot.outfit || expandOutfitDescription('', profile, null, '');
         panel.querySelector('#echoes-state-action').textContent = snapshot.action || expandActionDescription('', snapshot.visibleText || '', profile, null, snapshot.mood);
         panel.querySelector('#echoes-state-inner-thoughts').textContent = snapshot.innerThoughts || '我还没把心里的话整理清楚。';
+        const inlineHistory = panel.querySelector('#echoes-state-history-inline-list');
+        const historicalRecords = (historyRecords || []).slice(1);
+        inlineHistory.innerHTML = historicalRecords.map((record, index) => `
+            <div class="echoes-history-card">
+                <div class="echoes-history-card-head">
+                    <span>${record.timestamp ? new Date(record.timestamp).toLocaleString() : `过去状态 ${index + 1}`}</span>
+                    <span>${escapeUiHtml(String(record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood)))}</span>
+                </div>
+                ${historyRow('实时心情', record.mood)}
+                ${historyRow('动作', record.action)}
+                ${historyRow('内心想法', record.innerThoughts)}
+            </div>
+        `).join('') || '<div class="echoes-history-card">暂无状态记录</div>';
     }
 
     function ensureEchoesStateHistoryPanel() {
@@ -50444,18 +50372,19 @@ await initApp();
     function extractEchoesJsonPayload(rawText) {
         const text = String(rawText || '').trim();
         if (!text) return '';
+        const keyPattern = /"?(responses|states|characterStates|innerThoughts|affection|clothing|favorabilityLabel)"?/i;
 
         const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-        if (fenced && /"?(responses|characterStates|states|innerThoughts|favorabilityLabel)"?/i.test(fenced[1])) {
+        if (fenced && keyPattern.test(fenced[1])) {
             return fenced[1].trim();
         }
 
-        if (text.startsWith('{') && /"?(responses|characterStates|states|innerThoughts|favorabilityLabel)"?/i.test(text)) {
+        if (text.startsWith('{') && keyPattern.test(text)) {
             const balanced = extractBalancedObject(text, 0);
             if (balanced) return balanced;
         }
 
-        const keyIndex = text.search(/"?(responses|characterStates|states|innerThoughts|favorabilityLabel)"?\s*[:：]/i);
+        const keyIndex = text.search(/"?(responses|states|characterStates|innerThoughts|affection|clothing|favorabilityLabel)"?\s*[:：]/i);
         if (keyIndex >= 0) {
             const start = text.lastIndexOf('{', keyIndex);
             if (start >= 0) {
@@ -50467,7 +50396,31 @@ await initApp();
         return '';
     }
 
-    function normalizeEchoesParsedPayload(payload) {
+    function parseAffectionScore(value, fallback = 50) {
+        const match = String(value ?? '').match(/-?\d+/);
+        if (match) return favorabilityValue(Number(match[0]), fallback);
+        return favorabilityValue(value, fallback);
+    }
+
+    function parseAffectionLabel(value = '') {
+        const match = String(value || '').match(/\(([^()]+)\)/);
+        return match ? match[1].trim() : '';
+    }
+
+    function formatEchoesAffection(value, label = '', mood = '') {
+        const score = parseAffectionScore(value, 50);
+        const resolvedLabel = String(label || parseAffectionLabel(value) || '').trim() || favorabilityLabel(score, mood);
+        return `${score} (${resolvedLabel})`;
+    }
+
+    function normalizeEchoesResponseText(value) {
+        const cleaned = stripEchoesJsonFromVisibleText(String(value || '').replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '')).trim();
+        if (!cleaned) return '';
+        if (isRawEchoesJsonLeak(cleaned) && /[{}\[\]":]/.test(cleaned)) return '';
+        return cleaned;
+    }
+
+    function normalizeEchoesParsedPayload(payload, fallbackCharacterId = '') {
         if (!payload || typeof payload !== 'object') return null;
         const responsesRaw = Array.isArray(payload.responses)
             ? payload.responses
@@ -50484,35 +50437,58 @@ await initApp();
                     ? payload.heartVoices
                     : [];
         if (!responsesRaw.length && !statesRaw.length) return null;
+        const responses = responsesRaw
+            .map(item => {
+                if (!item || typeof item !== 'object') return null;
+                const characterId = item.characterId || item.id || item.name || item.speakerId || item.speaker || fallbackCharacterId || '';
+                const text = normalizeEchoesResponseText(item.text || item.content || item.message || '');
+                if (!characterId || !text) return null;
+                return {
+                    characterId,
+                    text
+                };
+            })
+            .filter(Boolean);
+        const states = statesRaw
+            .map(item => {
+                if (!item || typeof item !== 'object') return null;
+                const characterId = item.characterId || item.id || item.name || item.speakerId || item.speaker || fallbackCharacterId || '';
+                if (!characterId && !item.innerThoughts && !item.thoughts && !item.mood && !item.emotion) return null;
+                const mood = String(item.mood || item.emotion || '平静').trim() || '平静';
+                const affection = String(item.affection || '').trim()
+                    ? formatEchoesAffection(item.affection, parseAffectionLabel(item.affection), mood)
+                    : formatEchoesAffection(item.favorability, item.favorabilityLabel, mood);
+                const clothing = String(item.clothing || item.outfit || '').trim() || '日常穿着，没有明确换装迹象。';
+                const action = String(item.action || '').trim() || '身体微微前倾，目光停在对方身上，像是在一边压着情绪一边回应这段对话。';
+                const innerThoughts = normalizeInnerThoughtsToFirstPerson(String(item.innerThoughts || item.thoughts || '').trim()) || '我还在消化这句话，也在判断自己真正想说什么。';
+                return {
+                    characterId: characterId || fallbackCharacterId || '',
+                    mood,
+                    affection,
+                    clothing,
+                    action,
+                    innerThoughts
+                };
+            })
+            .filter(item => item && item.characterId);
         return {
-            responses: responsesRaw
-                .map(item => ({
-                    ...item,
-                    characterId: item.characterId || item.id || item.name || item.speakerId || item.speaker,
-                    content: String(item.content || item.text || item.message || '').trim()
-                }))
-                .filter(item => item.content || item.characterId),
-            states: statesRaw
-                .map(item => ({
-                    ...item,
-                    characterId: item.characterId || item.id || item.name || item.speakerId || item.speaker
-                }))
-                .filter(item => item.characterId || item.innerThoughts || item.thoughts)
+            responses,
+            states
         };
     }
 
-    function tryParseEchoesJson(rawText) {
+    function tryParseEchoesJson(rawText, fallbackCharacterId = '') {
         const json = extractEchoesJsonPayload(rawText);
         if (!json) return null;
         try {
-            return normalizeEchoesParsedPayload(JSON.parse(json));
+            return normalizeEchoesParsedPayload(JSON.parse(json), fallbackCharacterId);
         } catch (error) {
             const cleaned = json
                 .replace(/,\s*([}\]])/g, '$1')
                 .replace(/[“”]/g, '"')
                 .replace(/[‘’]/g, "'");
             try {
-                return normalizeEchoesParsedPayload(JSON.parse(cleaned));
+                return normalizeEchoesParsedPayload(JSON.parse(cleaned), fallbackCharacterId);
             } catch (secondError) {
                 console.warn('[ECHOES JSON PARSE FAILED]', secondError, rawText);
                 return null;
@@ -50521,7 +50497,7 @@ await initApp();
     }
 
     function isRawEchoesJsonLeak(text) {
-        return /```json|```|"?characterStates"?\s*[:：]|"?responses"?\s*[:：]|"?innerThoughts"?\s*[:：]|"?favorabilityLabel"?\s*[:：]|HEART_VOICE|\[heart_voice\]/i.test(String(text || ''));
+        return /```json|```|"?responses"?\s*[:：]|"?states"?\s*[:：]|"?characterStates"?\s*[:：]|"?innerThoughts"?\s*[:：]|"?affection"?\s*[:：]|"?clothing"?\s*[:：]|"?favorabilityLabel"?\s*[:：]|HEART_VOICE|\[heart_voice\]/i.test(String(text || ''));
     }
 
     function stripEchoesJsonFromVisibleText(rawText) {
@@ -50538,7 +50514,7 @@ await initApp();
                 if (!trimmed) return false;
                 if (/^[{}\[\],]+$/.test(trimmed)) return false;
                 if (/^["']?[\w\u4e00-\u9fa5-]+["']?\s*[:：]/.test(trimmed)) return false;
-                if (/"?(responses|characterStates|states|innerThoughts|favorability|favorabilityLabel|mood|outfit|action|heartRate|jealousy|characterId|name|content)"?\s*[:：]/i.test(trimmed)) return false;
+                if (/"?(responses|states|characterStates|innerThoughts|affection|clothing|favorability|favorabilityLabel|mood|outfit|action|heartRate|jealousy|characterId|name|content|text|heart_voice)"?\s*[:：]/i.test(trimmed)) return false;
                 if (/^```/.test(trimmed)) return false;
                 return true;
             })
@@ -50710,18 +50686,21 @@ await initApp();
         const visibleText = String(nextState?.visibleText || nextState?.roundAiText || '').trim();
         const roundUserText = String(nextState?.roundUserText || '').trim();
         const roundAiText = String(nextState?.roundAiText || visibleText || '').trim();
-        const combined = `${roundUserText} ${roundAiText} ${nextState?.mood || ''} ${nextState?.action || ''} ${nextState?.outfit || ''}`;
+        const combined = `${roundUserText} ${roundAiText} ${nextState?.mood || ''} ${nextState?.action || ''} ${nextState?.clothing || nextState?.outfit || ''}`;
         const mood = typeof smoothMoodTransition === 'function'
             ? smoothMoodTransition(previous?.mood, nextState?.mood || previous?.mood || '平静', combined)
             : String(nextState?.mood || previous?.mood || '平静').trim();
-        const previousFavorability = favorabilityValue(previous?.favorability, 50);
-        const requested = Number(nextState?.favorability);
+        const previousAffection = parseAffectionScore(previous?.affection ?? previous?.favorability, 50);
+        const requested = String(nextState?.affection || '').trim()
+            ? parseAffectionScore(nextState.affection, previousAffection)
+            : Number(nextState?.favorability);
         const limit = typeof hasStrongStateTurnTrigger === 'function' && hasStrongStateTurnTrigger(combined) ? 8 : 3;
-        let nextFavorability = Number.isFinite(requested)
-            ? Math.max(previousFavorability - limit, Math.min(previousFavorability + limit, Math.round(requested)))
-            : previousFavorability + (typeof inferFavorabilityDeltaFromText === 'function' ? inferFavorabilityDeltaFromText(combined) : 0);
-        nextFavorability = favorabilityValue(Math.max(previousFavorability - limit, Math.min(previousFavorability + limit, nextFavorability)), previousFavorability);
-        const outfit = expandOutfitDescription(nextState?.outfit || nextState?.clothing, speakerProfile, previous, combined);
+        let nextAffection = Number.isFinite(requested)
+            ? Math.max(previousAffection - limit, Math.min(previousAffection + limit, Math.round(requested)))
+            : previousAffection + (typeof inferFavorabilityDeltaFromText === 'function' ? inferFavorabilityDeltaFromText(combined) : 0);
+        nextAffection = favorabilityValue(Math.max(previousAffection - limit, Math.min(previousAffection + limit, nextAffection)), previousAffection);
+        const affectionLabel = parseAffectionLabel(nextState?.affection) || nextState?.favorabilityLabel || '';
+        const clothing = expandOutfitDescription(nextState?.clothing || nextState?.outfit, speakerProfile, previous, combined);
         const action = expandActionDescription(nextState?.action, combined, speakerProfile, previous, mood);
         const innerThoughts = buildFirstPersonInnerThought({
             roundUserText,
@@ -50735,15 +50714,10 @@ await initApp();
 
         return {
             mood,
-            favorability: nextFavorability,
-            favorabilityLabel: nextState?.favorabilityLabel || favorabilityLabel(nextFavorability, mood),
-            affection: nextState?.favorabilityLabel || favorabilityLabel(nextFavorability, mood),
-            outfit,
-            clothing: outfit,
+            affection: formatEchoesAffection(nextAffection, affectionLabel, mood),
+            clothing,
             action,
             innerThoughts,
-            heartRate: nextState?.heartRate || nextState?.heart_rate || (typeof inferHeartVoiceHeartRate === 'function' ? inferHeartVoiceHeartRate(innerThoughts, mood) : '平稳'),
-            jealousy: nextState?.jealousy || (typeof inferHeartVoiceJealousy === 'function' ? inferHeartVoiceJealousy(innerThoughts) : '无'),
             visibleText,
             roundUserText,
             roundAiText
@@ -50788,7 +50762,6 @@ await initApp();
 
         const activeRound = getActiveEchoesRound(chat);
         const payloadObject = payload && typeof payload === 'object' ? payload : { innerThoughts: payload };
-        const roundId = options.roundId || payloadObject.roundId || activeRound?.roundId || createEchoesRoundId(chat, 'state');
         const relatedMessage = relatedMessageId && Array.isArray(chat.history)
             ? chat.history.find(message => String(message.id) === String(relatedMessageId))
             : null;
@@ -50809,13 +50782,13 @@ await initApp();
         });
 
         state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
-        const sameRoundRecord = state.characterStates.find(record =>
+        const targetRelatedMessageId = relatedMessageId || payloadObject.relatedMessageId || null;
+        const sameRelatedRecord = state.characterStates.find(record =>
             record &&
             normalizeId(record.chatId) === normalizeId(chat.id) &&
             normalizeId(record.characterId) === id &&
-            record.roundId &&
-            roundId &&
-            record.roundId === roundId
+            targetRelatedMessageId &&
+            String(record.relatedMessageId || '') === String(targetRelatedMessageId)
         );
 
         const timestamp = Date.now();
@@ -50823,27 +50796,17 @@ await initApp();
             chatId: chat.id,
             characterId: id,
             timestamp,
-            source: chat.isGroup ? 'group' : 'private',
-            roundId,
-            relatedMessageId: relatedMessageId || payloadObject.relatedMessageId || null,
+            relatedMessageId: targetRelatedMessageId,
             mood: normalized.mood || '平静',
-            favorability: favorabilityValue(normalized.favorability, previousState?.favorability ?? 50),
-            favorabilityLabel: normalized.favorabilityLabel || favorabilityLabel(normalized.favorability, normalized.mood),
-            affection: normalized.favorabilityLabel || favorabilityLabel(normalized.favorability, normalized.mood),
-            outfit: normalized.outfit,
-            clothing: normalized.outfit,
-            action: normalized.action,
-            innerThoughts: normalized.innerThoughts,
-            heartRate: normalized.heartRate || '平稳',
-            jealousy: normalized.jealousy || '无',
-            visibleText,
-            roundUserText,
-            roundAiText
+            affection: normalized.affection || formatEchoesAffection(previousState?.affection ?? previousState?.favorability, previousState?.favorabilityLabel, normalized.mood),
+            clothing: normalized.clothing || expandOutfitDescription('', speakerProfile, previousState, visibleText),
+            action: normalized.action || expandActionDescription('', visibleText, speakerProfile, previousState, normalized.mood),
+            innerThoughts: normalized.innerThoughts || buildFirstPersonInnerThought({ roundUserText, roundAiText, visibleText, previousState, speakerProfile, chat })
         };
 
         let record;
-        if (sameRoundRecord && (options.replaceSameRound === true || activeRound?.roundId === roundId)) {
-            record = Object.assign(sameRoundRecord, nextFields, { id: sameRoundRecord.id });
+        if (sameRelatedRecord) {
+            record = Object.assign(sameRelatedRecord, nextFields, { id: sameRelatedRecord.id });
         } else {
             record = {
                 id: `state_${timestamp}_${Math.random().toString(36).slice(2)}`,
@@ -51001,14 +50964,7 @@ await initApp();
                 rememberExplicitState(ctx, stateId, stateItem);
             });
 
-            let responses = parsed.responses || [];
-            if (!responses.length && (parsed.states || []).length) {
-                const firstState = parsed.states[0];
-                responses = [{
-                    characterId: firstState.characterId || firstState.id || firstState.name || fallbackSenderProfile?.id || chat.id,
-                    content: '我刚才没把话说清楚，等我重新组织一下。'
-                }];
-            }
+            const responses = parsed.responses || [];
 
             for (const response of responses) {
                 const characterId = typeof normalizeEchoesResponseCharacterId === 'function'
@@ -51016,7 +50972,7 @@ await initApp();
                     : normalizeCharacterIdForChat(chat, response.characterId || response.id || response.name || response.speaker, fallbackSenderProfile);
                 if (!characterId || isUserSender(characterId)) continue;
                 const speaker = chat.isGroup ? getProfile(chat, characterId) : (fallbackSenderProfile || chat);
-                const content = stripEchoesJsonFromVisibleText(response.content || response.text || response.message || '').trim();
+                const content = stripEchoesJsonFromVisibleText(response.text || response.content || response.message || '').trim();
                 if (!content) continue;
                 const beforeLength = Array.isArray(chat.history) ? chat.history.length : 0;
                 const explicitState = getExplicitStateForCharacter(parsed, chat, characterId, fallbackSenderProfile);
@@ -51049,8 +51005,47 @@ await initApp();
         }
     }
 
+    function parseEchoesStateResult(rawText, chat = null, fallbackSenderProfile = null) {
+        const fallbackCharacterId = fallbackSenderProfile?.id || (!chat?.isGroup ? chat?.id : '') || '';
+        const parsed = tryParseEchoesJson(rawText, fallbackCharacterId);
+        if (!parsed) return null;
+        const responses = Array.isArray(parsed.responses) ? parsed.responses.filter(item => item && item.characterId && item.text) : [];
+        const states = Array.isArray(parsed.states) ? [...parsed.states] : [];
+        const existingIds = new Set(states.map(item => normalizeId(item.characterId)));
+        for (const response of responses) {
+            const normalizedCharacterId = chat
+                ? normalizeCharacterIdForChat(chat, response.characterId, fallbackSenderProfile)
+                : normalizeId(response.characterId);
+            if (!normalizedCharacterId || existingIds.has(normalizedCharacterId)) continue;
+            const speakerProfile = chat ? getProfile(chat, normalizedCharacterId) : fallbackSenderProfile;
+            const previousState = chat && typeof getLatestCharacterStateSnapshot === 'function'
+                ? getLatestCharacterStateSnapshot(chat, normalizedCharacterId)
+                : null;
+            const fallbackState = normalizeCharacterStateTransition(previousState, {
+                characterId: normalizedCharacterId,
+                visibleText: response.text,
+                roundUserText: chat ? latestUserText(chat, Date.now()) : '',
+                roundAiText: response.text,
+                mood: previousState?.mood || '平静',
+                affection: previousState?.affection || '',
+                clothing: previousState?.clothing || previousState?.outfit || '',
+                action: previousState?.action || '',
+                innerThoughts: ''
+            }, chat, speakerProfile || fallbackSenderProfile || null);
+            states.push({
+                characterId: normalizedCharacterId,
+                ...fallbackState
+            });
+            existingIds.add(normalizedCharacterId);
+        }
+        return {
+            responses,
+            states
+        };
+    }
+
     async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null, options = {}) {
-        const parsed = tryParseEchoesJson(rawResponse);
+        const parsed = parseEchoesStateResult(rawResponse, chat, fallbackSenderProfile);
         if (!parsed) return false;
         if (options.requestId && chat?.id && typeof isLatestAiRequest === 'function' && !isLatestAiRequest(chat.id, options.requestId)) {
             console.warn('[ECHOES_STYLE_DISCARDED] stale generation', { chatId: chat.id, requestId: options.requestId });
@@ -51068,7 +51063,7 @@ await initApp();
     async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat', options = {}) {
         const chat = originContext || senderProfile;
         if (!chat) return null;
-        const parsed = tryParseEchoesJson(rawText);
+        const parsed = parseEchoesStateResult(rawText, chat, senderProfile);
         if (parsed) {
             return renderEchoesJsonResponses(parsed, chat, senderProfile, {
                 ...options,
@@ -51105,7 +51100,7 @@ await initApp();
 
     async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat', options = {}) {
         const chat = originContext || senderProfile;
-        const parsed = tryParseEchoesJson(rawResponse);
+        const parsed = parseEchoesStateResult(rawResponse, chat, senderProfile);
         if (parsed && chat) {
             return renderEchoesJsonResponses(parsed, chat, senderProfile, options);
         }
@@ -51129,11 +51124,11 @@ await initApp();
     }
 
     function parseEchoesStyleAiResult(rawText, chat = null, fallbackSenderProfile = null) {
-        return tryParseEchoesJson(rawText);
+        return parseEchoesStateResult(rawText, chat, fallbackSenderProfile);
     }
 
     function parseGroupAiMessages(rawResponse, allMemberProfiles) {
-        const parsed = tryParseEchoesJson(rawResponse);
+        const parsed = parseEchoesStateResult(rawResponse, null, null);
         if (parsed) {
             return (parsed.responses || []).map(response => {
                 const speaker = typeof resolveSpeakerProfile === 'function'
@@ -51146,7 +51141,7 @@ await initApp();
                 }) || null;
                 return {
                     speaker,
-                    content: stripEchoesJsonFromVisibleText(response.content || response.text || ''),
+                    content: stripEchoesJsonFromVisibleText(response.text || response.content || ''),
                     heartVoice
                 };
             }).filter(item => item && item.content);
@@ -51178,13 +51173,50 @@ await initApp();
 
     function getEchoesStateRecordsForPanel(chat, characterId) {
         const id = normalizeId(characterId);
-        return (state.characterStates || [])
-            .filter(record =>
-                record &&
-                normalizeId(record.chatId) === normalizeId(chat?.id) &&
-                normalizeId(record.characterId) === id
-            )
-            .sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
+        const records = [];
+        (state.characterStates || []).forEach(record => {
+            if (!record) return;
+            if (normalizeId(record.chatId) !== normalizeId(chat?.id)) return;
+            if (normalizeId(record.characterId) !== id) return;
+            records.push({
+                id: record.id,
+                chatId: chat?.id,
+                characterId: id,
+                timestamp: record.timestamp || Date.now(),
+                mood: record.mood || '平静',
+                affection: record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood),
+                clothing: record.clothing || record.outfit || '日常穿着',
+                action: record.action || '安静地看着这场对话。',
+                innerThoughts: normalizeInnerThoughtsToFirstPerson(record.innerThoughts || record.thoughts || '') || '我还没把心里的话整理清楚。',
+                relatedMessageId: record.relatedMessageId || null
+            });
+        });
+        (chat?.history || []).forEach(message => {
+            if (!message || message.type !== 'heart_voice') return;
+            const messageCharacterId = normalizeId(message.characterId || message.senderId || message.sender);
+            if (messageCharacterId !== id) return;
+            records.push({
+                id: message.id,
+                chatId: chat?.id,
+                characterId: id,
+                timestamp: message.timestamp || Date.now(),
+                mood: message.content?.mood || message.content?.emotion || '平静',
+                affection: message.content?.affection || formatEchoesAffection(message.content?.favorability, message.content?.favorabilityLabel, message.content?.mood || message.content?.emotion),
+                clothing: message.content?.clothing || message.content?.outfit || '日常穿着',
+                action: message.content?.action || '安静地看着这场对话。',
+                innerThoughts: normalizeInnerThoughtsToFirstPerson(message.content?.innerThoughts || message.content?.thoughts || message.text || '') || '我还没把心里的话整理清楚。',
+                relatedMessageId: message.relatedMessageId || null
+            });
+        });
+        const deduped = [];
+        const seen = new Set();
+        records.forEach(record => {
+            const key = String(record.id || `${record.characterId}_${record.relatedMessageId || record.timestamp}`);
+            if (seen.has(key)) return;
+            seen.add(key);
+            deduped.push(record);
+        });
+        return deduped.sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
     }
 
     function ensureEchoesStateHistoryPanelStyles() {
@@ -51311,21 +51343,13 @@ await initApp();
             <div class="echoes-history-card">
                 <div class="echoes-history-card-head">
                     <span>${record.timestamp ? new Date(record.timestamp).toLocaleString() : `过去轮次 ${index + 1}`}</span>
-                    <span>${escapeHtml(`${record.favorability ?? ''}${record.favorabilityLabel ? `（${record.favorabilityLabel}）` : ''}`)}</span>
+                    <span>${escapeHtml(String(record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood)))}</span>
                 </div>
-                ${historyRow('轮次', record.roundId || `过去轮次 ${index + 1}`)}
                 ${historyRow('实时心情', record.mood)}
-                ${historyRow('好感度', `${record.favorability ?? ''}${record.favorabilityLabel ? `（${record.favorabilityLabel}）` : ''}`)}
-                ${historyRow('穿着', record.outfit || record.clothing)}
+                ${historyRow('对你的好感度', record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood))}
+                ${historyRow('穿着', record.clothing || record.outfit)}
                 ${historyRow('动作', record.action)}
                 ${historyRow('内心想法', record.innerThoughts)}
-                ${historyRow('心率', record.heartRate)}
-                ${historyRow('嫉妒', record.jealousy)}
-                ${historyRow('source', record.source)}
-                ${historyRow('本轮用户', record.roundUserText)}
-                ${historyRow('本轮回复', record.roundAiText)}
-                ${historyRow('visibleText', record.visibleText)}
-                ${historyRow('relatedMessageId', record.relatedMessageId)}
             </div>
         `).join('') || '<div class="echoes-history-card"><div class="echoes-history-value">暂无过去轮次记录</div></div>';
     }
@@ -51376,6 +51400,7 @@ await initApp();
     window.ensureEchoesStateHistoryPanel = ensureEchoesStateHistoryPanel;
     window.renderEchoesStateHistoryPanel = renderEchoesStateHistoryPanel;
     window.openEchoesStateHistoryPanel = openEchoesStateHistoryPanel;
+    window.parseEchoesStateResult = parseEchoesStateResult;
     window.parseEchoesStyleAiResult = parseEchoesStyleAiResult;
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.displayAiTextInBubbles = displayAiTextInBubbles;
@@ -51386,6 +51411,7 @@ await initApp();
     if (originalTriggerGroupFreeChat) window.triggerGroupFreeChat = triggerGroupFreeChat;
 
     try { createEchoesRoundId = window.createEchoesRoundId; } catch (error) {}
+    try { parseEchoesStateResult = window.parseEchoesStateResult; } catch (error) {}
     try { parseEchoesStyleAiResult = window.parseEchoesStyleAiResult; } catch (error) {}
     try { handleEchoesStyleAiResult = window.handleEchoesStyleAiResult; } catch (error) {}
     try { displayAiTextInBubbles = window.displayAiTextInBubbles; } catch (error) {}
