@@ -12078,6 +12078,13 @@ window.addEventListener('unhandledrejection', event => {
     });
 });
 
+function withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(label + ' timeout after ' + ms + 'ms')), ms))
+    ]);
+}
+
 (function () {
     window.__openHeartVoiceBasic = null;
     window.__openHeartVoiceHard = null;
@@ -19837,6 +19844,12 @@ async function handleGeminiTranslation(openAiRequestBody, apiKey) {
     // ▲▲▲ 新增结束 ▲▲▲
     // 2. [发送请求] (这部分不变)
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    console.log('[API STEP 2] before fetch Gemini generateContent', {
+        chatEndpoint: geminiUrl,
+        model,
+        messagesCount: openAiRequestBody?.messages?.length,
+        hasResponseFormat: !!openAiRequestBody?.response_format
+    });
     const geminiResponse = await fetch(geminiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -19846,6 +19859,10 @@ async function handleGeminiTranslation(openAiRequestBody, apiKey) {
             generationConfig: generationConfig 
             // ▲▲▲
         })
+    });
+    console.log('[API STEP 3] after fetch Gemini generateContent', {
+        ok: geminiResponse.ok,
+        status: geminiResponse.status
     });
 
     if (!geminiResponse.ok) {
@@ -20052,6 +20069,15 @@ ${RELATIONSHIP_ADDRESSING_PRIORITY_RULES}
         async function generateAiResponse(contact, history, customSystemPrompt, forceDiary = false, apiType = 'chat', forceMessages = null) { //  1. 新增 forceMessages 参数
             const apiConfig = getApiFor(apiType);
             const { apiKey, model, endpoint, contextLength, longTermMemoryLength } = apiConfig;
+            let requestMessages;
+
+            console.log('[API STEP 1] generateAiResponse entered', {
+                apiType,
+                hasForceMessages: Array.isArray(forceMessages),
+                messagesCount: Array.isArray(forceMessages) ? forceMessages.length : requestMessages?.length,
+                endpoint,
+                model
+            });
 
             if (!apiKey || !endpoint || !model) {
                 const errorMsg = `错误：${apiType === 'square' ? '论坛' : (apiType === 'snoop' ? '窥探' : '聊天')}API未配置。请前往“发现-API设置”进行配置。`;
@@ -20062,8 +20088,6 @@ ${RELATIONSHIP_ADDRESSING_PRIORITY_RULES}
             let chatEndpoint = endpoint;
             if (!chatEndpoint.endsWith('/')) chatEndpoint += '/';
             chatEndpoint += 'v1/chat/completions';
-
-            let requestMessages; // 2. 把 'let' 提到最外面
 
             // ▼▼▼ 3. 这里是新增的核心 "后门" 逻辑 ▼▼▼
             if (forceMessages) {
@@ -21115,10 +21139,20 @@ ${qzoneContextText}
                 }
                 const cleanEndpoint = normalizeApiEndpoint(endpoint); 
                 const chatEndpoint = `${cleanEndpoint}/v1/chat/completions`;
+                console.log('[API STEP 2] before fetch chat completion', {
+                    chatEndpoint,
+                    model: payload?.model,
+                    messagesCount: payload?.messages?.length,
+                    hasResponseFormat: !!payload?.response_format
+                });
                 const response = await fetch(chatEndpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
                     body: JSON.stringify(payload)
+                });
+                console.log('[API STEP 3] after fetch chat completion', {
+                    ok: response.ok,
+                    status: response.status
                 });
                 if (!response.ok) {
                     const errorData = await response.json();
@@ -46260,6 +46294,7 @@ function buildGroupChatOpenAiMessages(group, history = []) {
 }
 
 async function buildGroupChatRequestContext(group, mode = 'reply') {
+    console.log('[GROUP CTX STEP 1] entered', { groupId: group?.id, mode });
     const liveGroup = state.contacts.find(item => item.id === group?.id) || group;
     if (!liveGroup) {
         return {
@@ -46271,10 +46306,14 @@ async function buildGroupChatRequestContext(group, mode = 'reply') {
         };
     }
 
-    await maybeRecapChatKnowledge(liveGroup);
+    console.log('[GROUP CTX STEP 2] before maybeRecapChatKnowledge');
+    console.log('[GROUP CTX TEMP] skip maybeRecapChatKnowledge');
+    /* await maybeRecapChatKnowledge(liveGroup); */
+    console.log('[GROUP CTX STEP 3] after maybeRecapChatKnowledge');
     const refreshedGroup = state.contacts.find(item => item.id === liveGroup.id) || liveGroup;
     const myProfile = state.myProfile;
     const allMemberProfiles = getActiveGroupAiProfiles(refreshedGroup);
+    console.log('[GROUP CTX STEP 4] active profiles', allMemberProfiles.map(p => ({ id: p.id, name: p.name })));
     const aiMemberNames = allMemberProfiles.map(profile => profile.name);
     const allowedSpeakerList = aiMemberNames.join('、');
     const allowedSpeakerIdList = allMemberProfiles.map(profile => `${profile.name}: ${profile.id}`).join('\n') || '（暂无）';
@@ -46327,7 +46366,9 @@ async function buildGroupChatRequestContext(group, mode = 'reply') {
         characters: allMemberProfiles,
         users: [myProfile]
     });
+    console.log('[GROUP CTX STEP 5] before buildPrivateMemoryDigestForGroup');
     const privateMemoryDigestString = buildPrivateMemoryDigestForGroup(refreshedGroup, allMemberProfiles);
+    console.log('[GROUP CTX STEP 6] after buildPrivateMemoryDigestForGroup');
     const groupRecentStatesPromptBlock = buildGroupEchoesRecentStatesPromptBlock(
         refreshedGroup,
         allMemberProfiles,
@@ -46464,6 +46505,12 @@ ${replyGuidance.guidance}
             { role: 'system', content: finalSystemPrompt },
             ...recentOpenAiMessages
         ];
+
+    console.log('[GROUP CTX STEP 7] return requestMessages', {
+        count: requestMessages.length,
+        firstRole: requestMessages[0]?.role,
+        lastRole: requestMessages[requestMessages.length - 1]?.role
+    });
 
     return {
         requestMessages,
@@ -49331,9 +49378,19 @@ await initApp();
     }
 
     async function requestEchoesMainResponseWithRetry({ chat, requestMessages, fallbackSenderProfile = null, requestId = null, source = 'echoes-main', maxAttempts = 2 }) {
+        console.log('[ECHOES MAIN STEP 1] entered requestEchoesMainResponseWithRetry', {
+            chatId: chat?.id,
+            source,
+            requestMessagesCount: requestMessages?.length
+        });
         let lastError = null;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            console.log('[ECHOES MAIN STEP 2] before generateAiResponse', { attempt });
             const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+            console.log('[ECHOES MAIN STEP 3] after generateAiResponse', {
+                attempt,
+                rawPreview: String(rawResponse || '').slice(0, 200)
+            });
             if (requestId && chat?.id && typeof isLatestAiRequest === 'function' && !isLatestAiRequest(chat.id, requestId)) {
                 console.warn('[ECHOES REQUEST DISCARDED] stale generation', { chatId: chat.id, requestId, source, attempt });
                 return null;
@@ -49893,6 +49950,7 @@ await initApp();
     }
 
     async function triggerGroupChatAiReply(group) {
+        console.log('[GROUP REPLY STEP 1] entered triggerGroupChatAiReply', { groupId: group?.id, name: group?.name });
         if (!group || !group.isGroup) return null;
         const chatStatusEl = document.getElementById('chat-contact-status');
         state.aiTypingStatus[group.id] = true;
@@ -49902,16 +49960,27 @@ await initApp();
         const requestId = createAiRequestId(group.id);
         try {
             const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
+            console.log('[GROUP REPLY STEP 2] before buildGroupChatRequestContext');
             const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContextFn(group, 'reply');
-            if (!allMemberProfiles.length) return null;
-            const requestResult = await requestEchoesMainResponseWithRetry({
-                chat: group,
-                requestMessages,
-                fallbackSenderProfile: allMemberProfiles[0] || null,
-                requestId,
-                source: 'group-reply',
-                maxAttempts: 2
+            console.log('[GROUP REPLY STEP 3] after buildGroupChatRequestContext', {
+                requestMessagesCount: requestMessages?.length,
+                allMemberProfilesCount: allMemberProfiles?.length
             });
+            if (!allMemberProfiles.length) return null;
+            console.log('[GROUP REPLY STEP 4] before requestEchoesMainResponseWithRetry');
+            const requestResult = await withTimeout(
+                requestEchoesMainResponseWithRetry({
+                    chat: group,
+                    requestMessages,
+                    fallbackSenderProfile: allMemberProfiles[0] || null,
+                    requestId,
+                    source: 'group-reply',
+                    maxAttempts: 2
+                }),
+                60000,
+                'group-reply requestEchoesMainResponseWithRetry'
+            );
+            console.log('[GROUP REPLY STEP 5] after requestEchoesMainResponseWithRetry', requestResult);
             if (!requestResult) return null;
             const { rawResponse, parsed, statesMissing, plainText } = requestResult;
             if (!isLatestAiRequest(group.id, requestId)) {
