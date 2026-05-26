@@ -12055,9 +12055,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-3</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-7</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-echoes-group-fix-3';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-7';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -12084,6 +12084,98 @@ function withTimeout(promise, ms, label) {
         new Promise((_, reject) => setTimeout(() => reject(new Error(label + ' timeout after ' + ms + 'ms')), ms))
     ]);
 }
+
+(function installKokoDebugPanel() {
+    const MAX_LOGS = 80;
+    const state = window.__kokoDebugState || (window.__kokoDebugState = { logs: [] });
+    const nativeConsole = window.__kokoNativeConsole || (window.__kokoNativeConsole = {
+        log: console.log.bind(console),
+        warn: console.warn.bind(console),
+        error: console.error.bind(console)
+    });
+
+    function safeSerialize(value) {
+        if (value instanceof Error) {
+            return { message: value.message, name: value.name, stack: value.stack };
+        }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            return String(value);
+        }
+    }
+
+    function renderDebugPanel() {
+        const body = document.body;
+        if (!body) return;
+        let panel = document.getElementById('koko-debug-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'koko-debug-panel';
+            panel.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:999998;background:#050505;color:#d7ffd7;font:11px/1.35 Consolas,monospace;max-height:34vh;border-top:1px solid #333;box-shadow:0 -4px 16px rgba(0,0,0,.35);';
+            panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid #222;color:#fff;"><strong>DEBUG</strong><button id="koko-debug-copy" type="button">复制</button><button id="koko-debug-clear" type="button">清空</button><button id="koko-debug-hide" type="button">隐藏</button></div><pre id="koko-debug-lines" style="margin:0;padding:6px 8px;white-space:pre-wrap;word-break:break-word;overflow:auto;max-height:calc(34vh - 30px);"></pre>';
+            body.appendChild(panel);
+            document.getElementById('koko-debug-copy')?.addEventListener('click', () => {
+                navigator.clipboard?.writeText(state.logs.join('\n')).catch(() => {});
+            });
+            document.getElementById('koko-debug-clear')?.addEventListener('click', () => {
+                state.logs.length = 0;
+                renderDebugPanel();
+            });
+            document.getElementById('koko-debug-hide')?.addEventListener('click', () => {
+                panel.style.display = 'none';
+            });
+        }
+        const lines = document.getElementById('koko-debug-lines');
+        if (lines) lines.textContent = state.logs.join('\n');
+    }
+
+    function appendDebugLog(label, data) {
+        const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        const detail = data === undefined ? '' : ' ' + JSON.stringify(safeSerialize(data));
+        state.logs.push(`${time} ${label}${detail}`);
+        if (state.logs.length > MAX_LOGS) state.logs.splice(0, state.logs.length - MAX_LOGS);
+        renderDebugPanel();
+    }
+
+    window.kokoDebugLog = function kokoDebugLog(label, data) {
+        appendDebugLog(label, data);
+        nativeConsole.log(label, data);
+    };
+
+    ['log', 'warn', 'error'].forEach(level => {
+        if (console[level]?.__kokoDebugWrapped) return;
+        console[level] = function(...args) {
+            nativeConsole[level](...args);
+            const label = typeof args[0] === 'string' ? args[0] : '';
+            if (/\b(?:GROUP|ECHOES|API|FETCH)\b/.test(label)) {
+                appendDebugLog(label, args.length > 2 ? args.slice(1) : args[1]);
+            }
+        };
+        console[level].__kokoDebugWrapped = true;
+    });
+
+    if (!window.__kokoDebugFetchWrapped) {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = async function(input, init) {
+            const url = typeof input === 'string' ? input : input?.url;
+            const method = init?.method || input?.method || 'GET';
+            window.kokoDebugLog('[FETCH START]', { url, method });
+            try {
+                const response = await originalFetch(input, init);
+                window.kokoDebugLog('[FETCH END]', { url, ok: response.ok, status: response.status });
+                return response;
+            } catch (error) {
+                window.kokoDebugLog('[FETCH ERROR]', { url, message: error?.message, stack: error?.stack });
+                throw error;
+            }
+        };
+        window.__kokoDebugFetchWrapped = true;
+    }
+
+    if (document.body) renderDebugPanel();
+    else document.addEventListener('DOMContentLoaded', renderDebugPanel);
+})();
 
 (function () {
     window.__openHeartVoiceBasic = null;
@@ -19844,7 +19936,7 @@ async function handleGeminiTranslation(openAiRequestBody, apiKey) {
     // ▲▲▲ 新增结束 ▲▲▲
     // 2. [发送请求] (这部分不变)
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    console.log('[API STEP 2] before fetch Gemini generateContent', {
+    kokoDebugLog('[API STEP 2] before fetch', {
         chatEndpoint: geminiUrl,
         model,
         messagesCount: openAiRequestBody?.messages?.length,
@@ -20071,7 +20163,7 @@ ${RELATIONSHIP_ADDRESSING_PRIORITY_RULES}
             const { apiKey, model, endpoint, contextLength, longTermMemoryLength } = apiConfig;
             let requestMessages;
 
-            console.log('[API STEP 1] generateAiResponse entered', {
+            kokoDebugLog('[API STEP 1] generateAiResponse entered', {
                 apiType,
                 hasForceMessages: Array.isArray(forceMessages),
                 messagesCount: Array.isArray(forceMessages) ? forceMessages.length : requestMessages?.length,
@@ -21139,7 +21231,7 @@ ${qzoneContextText}
                 }
                 const cleanEndpoint = normalizeApiEndpoint(endpoint); 
                 const chatEndpoint = `${cleanEndpoint}/v1/chat/completions`;
-                console.log('[API STEP 2] before fetch chat completion', {
+                kokoDebugLog('[API STEP 2] before fetch', {
                     chatEndpoint,
                     model: payload?.model,
                     messagesCount: payload?.messages?.length,
@@ -41341,7 +41433,12 @@ document.getElementById('request-reply-btn').addEventListener('click', () => {
             // 2a. 如果是群聊，调用【群聊】自由聊天
             console.log("群聊：用户未发言，触发AI自由聊天...");
             if (typeof window.triggerGroupFreeChat === 'function') {
-                window.triggerGroupFreeChat( contact );
+                window.triggerGroupFreeChat(contact).catch(error => {
+                    kokoDebugLog('[GROUP FREE BUTTON FAILED]', {
+                        message: error?.message,
+                        stack: error?.stack
+                    });
+                });
             } else {
                 console.error('window.triggerGroupFreeChat 未安装');
             }
@@ -46128,10 +46225,17 @@ ${mode === 'free'
 
 function getActiveGroupAiProfiles(group) {
     if (!group || !group.isGroup) return [];
+    const muted = new Set((group.mutedMembers || []).map(id => normalizeMessageSenderId(id)));
+
     return (group.members || [])
-        .filter(memberId => normalizeEntityIdForVisibility(memberId) !== 'user')
-        .filter(memberId => !(group.mutedMembers || []).includes(memberId))
-        .map(memberId => getProfileInGroupContext(group, memberId))
+        .map(member => {
+            const memberId = typeof member === 'object'
+                ? (member.id || member.characterId || member.contactId)
+                : member;
+            return normalizeMessageSenderId(memberId);
+        })
+        .filter(id => id && !isCurrentUserSenderId(id) && id !== 'user' && !muted.has(id))
+        .map(id => getProfileInGroupContext(group, id) || (state.contacts || []).find(c => normalizeMessageSenderId(c.id) === id))
         .filter(Boolean);
 }
 
@@ -47611,7 +47715,7 @@ await initApp();
 </script>
 <script>
   (function() {
-    const BUILD_VERSION = '20260526-echoes-group-fix-3';
+    const BUILD_VERSION = '20260526-fix-7';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -47634,7 +47738,7 @@ await initApp();
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      const SW_VERSION = '20260526-echoes-group-fix-3';
+      const SW_VERSION = '20260526-fix-7';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -49950,7 +50054,7 @@ await initApp();
     }
 
     async function triggerGroupChatAiReply(group) {
-        console.log('[GROUP REPLY STEP 1] entered triggerGroupChatAiReply', { groupId: group?.id, name: group?.name });
+        kokoDebugLog('[GROUP REPLY STEP 1]', { groupId: group?.id, members: group?.members, mutedMembers: group?.mutedMembers });
         if (!group || !group.isGroup) return null;
         const chatStatusEl = document.getElementById('chat-contact-status');
         state.aiTypingStatus[group.id] = true;
@@ -49960,14 +50064,31 @@ await initApp();
         const requestId = createAiRequestId(group.id);
         try {
             const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
-            console.log('[GROUP REPLY STEP 2] before buildGroupChatRequestContext');
-            const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContextFn(group, 'reply');
-            console.log('[GROUP REPLY STEP 3] after buildGroupChatRequestContext', {
+            kokoDebugLog('[GROUP REPLY STEP 2] before context');
+            const { requestMessages, allMemberProfiles } = await withTimeout(
+                buildGroupChatRequestContextFn(group, 'reply'),
+                20000,
+                'buildGroupChatRequestContext'
+            );
+            kokoDebugLog('[GROUP REPLY STEP 3] after context', {
                 requestMessagesCount: requestMessages?.length,
-                allMemberProfilesCount: allMemberProfiles?.length
+                allMemberProfilesCount: allMemberProfiles?.length,
+                allMemberProfiles: allMemberProfiles?.map(p => ({ id: p.id, name: p.name }))
             });
-            if (!allMemberProfiles.length) return null;
-            console.log('[GROUP REPLY STEP 4] before requestEchoesMainResponseWithRetry');
+            if (!allMemberProfiles.length) {
+                kokoDebugLog('[GROUP REPLY NO AI MEMBERS]', {
+                    members: group?.members,
+                    mutedMembers: group?.mutedMembers,
+                    allMemberProfiles
+                });
+                await createAndAddMessage({
+                    type: 'system_notification',
+                    sender: 'system',
+                    content: '群聊没有可发言的 AI 成员，请检查群成员是否为空、是否全被禁言、或成员 ID 是否无法匹配。'
+                }, 'system', group, false, 'chat');
+                return null;
+            }
+            kokoDebugLog('[GROUP REPLY STEP 4] before main request');
             const requestResult = await withTimeout(
                 requestEchoesMainResponseWithRetry({
                     chat: group,
@@ -49980,7 +50101,7 @@ await initApp();
                 60000,
                 'group-reply requestEchoesMainResponseWithRetry'
             );
-            console.log('[GROUP REPLY STEP 5] after requestEchoesMainResponseWithRetry', requestResult);
+            kokoDebugLog('[GROUP REPLY STEP 5] after requestEchoesMainResponseWithRetry', requestResult);
             if (!requestResult) return null;
             const { rawResponse, parsed, statesMissing, plainText } = requestResult;
             if (!isLatestAiRequest(group.id, requestId)) {
@@ -50013,10 +50134,13 @@ await initApp();
                 name: error?.name,
                 stack: error?.stack
             });
+            const content = String(error?.message || '').includes('buildGroupChatRequestContext timeout')
+                ? '群聊上下文构建超时，还没有进入 API 调用。'
+                : `群聊AI回复生成失败: ${error?.message || error?.name || '未知错误'}`;
             await createAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
-                content: `群聊AI回复生成失败: ${error?.message || error?.name || '未知错误'}`
+                content
             }, 'system', group, false, 'chat');
             return null;
         } finally {
@@ -50028,31 +50152,85 @@ await initApp();
     }
 
     async function triggerGroupFreeChat(group) {
+        kokoDebugLog('[GROUP FREE STEP 1]', {
+            groupId: group?.id,
+            members: group?.members,
+            mutedMembers: group?.mutedMembers
+        });
+
         if (!group || !group.isGroup) return null;
+
         const chatStatusEl = document.getElementById('chat-contact-status');
         state.aiTypingStatus[group.id] = true;
+
         if (chatStatusEl && state.activeChatId === group.id) {
             chatStatusEl.textContent = '群成员正在热烈讨论中...';
         }
+
         const requestId = createAiRequestId(group.id);
+
         try {
             const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
-            const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContextFn(group, 'free');
-            if (!allMemberProfiles.length) return null;
-            const requestResult = await requestEchoesMainResponseWithRetry({
-                chat: group,
-                requestMessages,
-                fallbackSenderProfile: allMemberProfiles[0] || null,
-                requestId,
-                source: 'group-free',
-                maxAttempts: 2
+
+            kokoDebugLog('[GROUP FREE STEP 2] before context');
+
+            const { requestMessages, allMemberProfiles } = await withTimeout(
+                buildGroupChatRequestContextFn(group, 'free'),
+                20000,
+                'buildGroupChatRequestContext free'
+            );
+
+            kokoDebugLog('[GROUP FREE STEP 3] after context', {
+                requestMessagesCount: requestMessages?.length,
+                allMemberProfilesCount: allMemberProfiles?.length,
+                allMemberProfiles: allMemberProfiles?.map(p => ({ id: p.id, name: p.name }))
             });
-            if (!requestResult) return null;
-            const { rawResponse, parsed, statesMissing, plainText } = requestResult;
-            if (!isLatestAiRequest(group.id, requestId)) {
-                console.warn('[GROUP FREE RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
+
+            if (!allMemberProfiles.length) {
+                kokoDebugLog('[GROUP FREE NO AI MEMBERS]', {
+                    members: group?.members,
+                    mutedMembers: group?.mutedMembers,
+                    allMemberProfiles
+                });
+
+                await createAndAddMessage({
+                    type: 'system_notification',
+                    sender: 'system',
+                    content: '群聊没有可发言的 AI 成员，请检查群成员是否为空、是否全被禁言、或成员 ID 是否无法匹配。'
+                }, 'system', group, false, 'chat');
+
                 return null;
             }
+
+            kokoDebugLog('[GROUP FREE STEP 4] before main request');
+
+            const requestResult = await withTimeout(
+                requestEchoesMainResponseWithRetry({
+                    chat: group,
+                    requestMessages,
+                    fallbackSenderProfile: allMemberProfiles[0] || null,
+                    requestId,
+                    source: 'group-free',
+                    maxAttempts: 2
+                }),
+                60000,
+                'group-free requestEchoesMainResponseWithRetry'
+            );
+
+            kokoDebugLog('[GROUP FREE STEP 5] after requestEchoesMainResponseWithRetry', requestResult);
+
+            if (!requestResult) return null;
+
+            const { rawResponse, parsed, statesMissing, plainText } = requestResult;
+
+            if (!isLatestAiRequest(group.id, requestId)) {
+                console.warn('[GROUP FREE RESPONSE DISCARDED] not latest request', {
+                    chatId: group.id,
+                    requestId
+                });
+                return null;
+            }
+
             if (statesMissing) {
                 console.warn('[ECHOES STATES MISSING]', {
                     chatId: group.id,
@@ -50060,6 +50238,7 @@ await initApp();
                     requestId
                 });
             }
+
             if (plainText || !parsed) {
                 return await renderLegacyGroupResponses(
                     rawResponse,
@@ -50069,20 +50248,34 @@ await initApp();
                     '[GROUP FREE MESSAGE SKIPPED] stale generation'
                 );
             }
+
             return await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
                 requestId,
                 source: 'group-json'
             });
+
         } catch (error) {
-            console.error('群聊自由聊天执行失败:', error);
+            console.error('[FINAL GROUP FREE FAILED]', {
+                message: error?.message,
+                name: error?.name,
+                stack: error?.stack
+            });
+
+            const content = String(error?.message || '').includes('buildGroupChatRequestContext free timeout')
+                ? '群聊自由聊天上下文构建超时，还没有进入 API 调用。'
+                : `群聊自由聊天失败: ${error?.message || error?.name || '未知错误'}`;
+
             await createAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
-                content: `群聊自由聊天失败: ${error.message || error.name || '未知错误'}`
+                content
             }, 'system', group, false, 'chat');
+
             return null;
+
         } finally {
             state.aiTypingStatus[group.id] = false;
+
             if (chatStatusEl && state.activeChatId === group.id) {
                 chatStatusEl.textContent = '在线';
             }

@@ -1,4 +1,4 @@
-const SW_VERSION = '20260526-echoes-group-fix-3';
+const SW_VERSION = '20260526-fix-7';
 
 self.addEventListener('install', event => {
     event.waitUntil(self.skipWaiting());
