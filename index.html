@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="manifest.json?v=20260526-fix-11">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -283,9 +283,6 @@
             text-overflow: ellipsis;
             letter-spacing: 0.2px;
         }
-        #chat-screen > .chat-header .chat-name[data-heart-voice-character-id] {
-            cursor: pointer;
-        }
         #chat-screen > .chat-header .chat-status {
             font-size: 12px;
             color: rgba(40, 72, 43, 0.72);
@@ -406,9 +403,6 @@
         }
         .message-avatar,
         .message-avatar img {
-            cursor: pointer;
-        }
-        .message-author-name[data-heart-voice-character-id] {
             cursor: pointer;
         }
         @media (max-width: 420px) {
@@ -12055,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-10</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-11</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-10';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-11';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -18592,11 +18586,27 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
         ${replyButtonHTML} ${recallButtonHTML}
     `;
             const avatarEl = wrapper.querySelector('.message-avatar');
-            const authorNameEl = wrapper.querySelector('.message-author-name');
             if (avatarEl) {
+                const characterId = heartVoiceCharacterId || '';
                 avatarEl.dataset.senderId = resolvedStateCharacterId || '';
-                avatarEl.dataset.heartVoiceCharacterId = resolvedStateCharacterId || '';
                 avatarEl.dataset.chatId = contact.id || '';
+                if (characterId && !isCurrentUserSenderId(characterId)) {
+                    avatarEl.dataset.heartVoiceCharacterId = characterId;
+                    avatarEl.dataset.heartVoiceChatId = contact.id || '';
+                    avatarEl.onclick = event => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+                        if (event.detail && event.detail > 1) return;
+                        openEchoesStatePanel(contact.id, characterId, {
+                            createFallbackIfEmpty: true
+                        });
+                    };
+                } else {
+                    delete avatarEl.dataset.heartVoiceCharacterId;
+                    delete avatarEl.dataset.heartVoiceChatId;
+                    avatarEl.onclick = null;
+                }
                 if (isVisibleAiMessageForState && !contact.isAvatarHidden) {
                     avatarEl.style.setProperty('display', 'block', 'important');
                     avatarEl.style.setProperty('visibility', 'visible', 'important');
@@ -23404,7 +23414,7 @@ function refreshHeartVoicePanelIfOpen(chat) {
     if (!openedCharacterId || openedChatId !== chat.id) return;
 
     if (panel.classList.contains('echoes-state-panel')) {
-        openEchoesStatePanel(chat.id, openedCharacterId);
+        window.__openEchoesOriginalStatePanel?.(chat.id, openedCharacterId, { createFallbackIfEmpty: false });
         return;
     }
 
@@ -23753,7 +23763,7 @@ function refreshOpenHeartVoicePanelForSavedRecord(liveChat, senderProfile) {
         const chatIdForRefresh = openedChatId || (!liveChat.isGroup ? liveChat.id : null);
         if (characterIdForRefresh && chatIdForRefresh === liveChat.id) {
             if (openedPanel.classList.contains('echoes-state-panel')) {
-                openEchoesStatePanel(liveChat.id, characterIdForRefresh);
+                window.__openEchoesOriginalStatePanel?.(liveChat.id, characterIdForRefresh, { createFallbackIfEmpty: false });
                 return;
             }
             renderHeartVoicePanelRecords(getHeartVoiceRecords(liveChat, characterIdForRefresh));
@@ -23878,7 +23888,7 @@ async function commitHeartVoiceForAiTurn({
         const openedChatId = panel.dataset.chatId;
         if (openedChatId === chatContext.id && openedCharacterId === senderId) {
             if (panel.classList.contains('echoes-state-panel')) {
-                openEchoesStatePanel(chatContext.id, senderId);
+                window.__openEchoesOriginalStatePanel?.(chatContext.id, senderId, { createFallbackIfEmpty: false });
             } else {
             renderHeartVoicePanelRecords(getHeartVoiceRecords(chatContext, senderId));
             }
@@ -24621,94 +24631,36 @@ async function openEchoesStatePanel(chatId, characterId, options = {}) {
 }
 
 async function openEchoesHeartVoicePanel(chatId, characterId, options = {}) {
-    return openEchoesStatePanel(chatId || state.activeChatId, characterId, {
+    return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, {
         createFallbackIfEmpty: true,
         ...options
-    });
+    }) || null;
 }
 
 function openHeartVoicePanelForCharacter(characterId, chatId) {
-    return openEchoesStatePanel(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true });
+    return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true }) || null;
 }
 
 function openHeartVoicePanel(characterId, chatContext) {
     const chatId = typeof chatContext === 'string' ? chatContext : chatContext?.id;
-    return openEchoesStatePanel(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true });
+    return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true }) || null;
 }
 
 window.openHeartVoicePanelForCharacter = openHeartVoicePanelForCharacter;
 window.openEchoesHeartVoicePanel = openEchoesHeartVoicePanel;
 window.state = state;
 function setupEchoesStateAvatarClick() {
-    if (window.__echoesStateAvatarClickBound) {
-        document.removeEventListener('click', handleEchoesStateAvatarClick, true);
+    document.removeEventListener('click', handleEchoesStateAvatarClick, true);
+    if (typeof window.handleEchoesStateBridgeClick === 'function') {
+        document.removeEventListener('click', window.handleEchoesStateBridgeClick, true);
     }
-
-    document.addEventListener('click', handleEchoesStateAvatarClick, true);
-
-    window.__echoesStateAvatarClickBound = true;
-    window.__echoesHvAvatarClickBound = true;
-    window.__echoesHeartVoiceAvatarClickBound = true;
+    window.__echoesStateAvatarClickBound = false;
+    window.__echoesHvAvatarClickBound = false;
+    window.__echoesHeartVoiceAvatarClickBound = false;
 }
 
 async function handleEchoesStateAvatarClick(event) {
-    const trigger = event.target.closest(
-        '#chat-messages .message-avatar, ' +
-        '#chat-messages .message-avatar img'
-    );
-
-    if (!trigger) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.stopImmediatePropagation) event.stopImmediatePropagation();
-
-    const chat = state.contacts.find(c => c.id === state.activeChatId);
-    if (!chat) {
-        alert('没有当前聊天');
-        return;
-    }
-
-    const wrapper = trigger.closest('.message-wrapper');
-
-    let characterId =
-        trigger.dataset.heartVoiceCharacterId ||
-        trigger.dataset.senderId ||
-        wrapper?.dataset.senderId ||
-        wrapper?.dataset.sender ||
-        '';
-
-    characterId = normalizeMessageSenderId(characterId);
-
-    if (!characterId || characterId === 'system' || characterId === 'system_instruction') {
-        alert('未找到该角色状态');
-        return;
-    }
-
-    if (isCurrentUserSenderId(characterId)) {
-        return;
-    }
-
-    if (!chat.isGroup) {
-        characterId = normalizeMessageSenderId(chat.id);
-    }
-
-    if (chat.isGroup && (characterId === 'contact' || characterId === normalizeMessageSenderId(chat.id))) {
-        alert('未找到该角色状态');
-        return;
-    }
-
-    console.log('[ECHOES STATE AVATAR CLICK]', {
-        chatId: chat.id,
-        isGroup: chat.isGroup,
-        characterId,
-        senderId: wrapper?.dataset.senderId,
-        triggerClass: trigger.className
-    });
-
-    await openEchoesStatePanel(chat.id, characterId, {
-        createFallbackIfEmpty: true
-    });
+    return null;
 }
 
 function handleEchoesHeartVoiceAvatarClick(event) {
@@ -24716,7 +24668,11 @@ function handleEchoesHeartVoiceAvatarClick(event) {
 }
 
 function setupEchoesHeartVoiceAvatarClick() {
-    return setupEchoesStateAvatarClick();
+    document.removeEventListener('click', handleEchoesStateAvatarClick, true);
+    if (typeof window.handleEchoesStateBridgeClick === 'function') {
+        document.removeEventListener('click', window.handleEchoesStateBridgeClick, true);
+    }
+    return null;
 }
 
 setupEchoesStateAvatarClick();
@@ -25213,7 +25169,7 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
                         openedCharacterId === normalizeMessageSenderId(senderProfile.id)
                     ) {
                         if (panel.classList.contains('echoes-state-panel')) {
-                            openEchoesStatePanel(effectiveChatContext.id, normalizeMessageSenderId(senderProfile.id));
+                            window.__openEchoesOriginalStatePanel?.(effectiveChatContext.id, normalizeMessageSenderId(senderProfile.id), { createFallbackIfEmpty: false });
                         } else {
                         renderHeartVoicePanelRecords(
                             getHeartVoiceRecords(effectiveChatContext, normalizeMessageSenderId(senderProfile.id))
@@ -26747,53 +26703,82 @@ async function renderApiPresetsList() {
 }
 // --- 新增：回溯功能核心函数 ---
 async function handleRewind() {
-    if (!state.activeChatId) return;
-    const contact = state.contacts.find(c => c.id === state.activeChatId);
-    if (!contact || !contact.history || contact.history.length === 0) return;
+    if (!state.activeChatId) {
+        alert('当前没有打开聊天，无法回溯。');
+        return;
+    }
 
-    // 1. 从后往前，找到你（用户）发送的最后一条消息的索引
+    const contact = state.contacts.find(c => c.id === state.activeChatId);
+    if (!contact) {
+        alert('找不到当前聊天。');
+        return;
+    }
+
+    if (!Array.isArray(contact.history) || contact.history.length === 0) {
+        alert('当前没有聊天记录可回溯。');
+        return;
+    }
+
+    console.log('[REWIND START]', {
+        chatId: contact.id,
+        historyLength: contact.history.length
+    });
+
     let lastUserMessageIndex = -1;
     for (let i = contact.history.length - 1; i >= 0; i--) {
-        if (contact.history[i].sender === 'user') {
+        const sender = normalizeMessageSenderId(contact.history[i].senderId || contact.history[i].sender);
+        if (sender === 'user' || sender === 'myProfile' || isCurrentUserSenderId(sender)) {
             lastUserMessageIndex = i;
             break;
         }
     }
 
-    // 2. 处理边界情况
     if (lastUserMessageIndex === -1) {
-        alert("聊天记录中没有你的消息，无法回溯。");
+        alert('聊天记录中没有你的消息，无法回溯。');
         return;
     }
 
-    // 如果最后一条消息就是用户发的，说明AI还没回复，也无需回溯
     if (lastUserMessageIndex === contact.history.length - 1) {
-        alert("AI 还未回复，无需回溯。");
+        alert('AI 还未回复，无需回溯。');
         return;
     }
 
-    // 3. 弹窗向用户确认，防止误触
     const confirmed = await showCustomConfirm(
         '确认回溯',
-        '这将清除AI的最后一次回复，并让它重新生成一次。确定要继续吗？',
-        false // false 表示这不是一个危险的红色按钮
+        '这将清除 AI 的最后一次回复，并让它重新生成一次。确定继续吗？',
+        false
     );
 
-    if (confirmed) {
-        const removedMessageIds = contact.history
-            .slice(lastUserMessageIndex + 1)
-            .map(message => message.id)
-            .filter(Boolean);
-        // 4. 截取历史记录，保留到用户最后一条消息
-        contact.history = contact.history.slice(0, lastUserMessageIndex + 1);
+    console.log('[REWIND CONFIRM RESULT]', confirmed);
+
+    if (!confirmed) return;
+
+    const removedMessages = contact.history.slice(lastUserMessageIndex + 1);
+    const removedMessageIds = removedMessages.map(message => message.id).filter(Boolean);
+
+    contact.history = contact.history.slice(0, lastUserMessageIndex + 1);
+
+    if (typeof removeKokoStatesForMessageIds === 'function') {
         await removeKokoStatesForMessageIds(contact, removedMessageIds);
+    }
 
-        // 5. 保存修改并刷新聊天界面
-        await kokoMemory.put('contacts', contact);
-        await openChat(contact.id); // 这会用截断后的历史记录重新渲染聊天界面
+    await kokoMemory.put('contacts', contact);
 
-        // 6. 重新请求AI回复
+    const index = state.contacts.findIndex(item => item.id === contact.id);
+    if (index !== -1) state.contacts[index] = contact;
+
+    await openChat(contact.id);
+
+    console.log('[REWIND REQUEST AI]', {
+        chatId: contact.id,
+        isGroup: contact.isGroup
+    });
+
+    try {
         await requestAiReply(null, contact.id);
+    } catch (error) {
+        console.error('[REWIND REQUEST AI FAILED]', error);
+        alert('回溯成功，但重新生成回复失败：' + (error?.message || error));
     }
 }
 // --- 手动总结聊天记录功能核心函数 (V10 - 包含视频通话内容版) ---
@@ -41399,38 +41384,59 @@ document.getElementById('refresh-post-comments-btn').addEventListener('click', a
     document.getElementById('send-btn').addEventListener('click', sendMessage);
 // (V5 - 最终版：支持私聊+群聊的自由聊天)
 // 粘贴到 attachEventListeners() 函数内部
-document.getElementById('request-reply-btn').addEventListener('click', async () => {
-    const contact = state.contacts.find(c => c.id === state.activeChatId);
-    if (!contact) return; 
+const requestReplyBtn = document.getElementById('request-reply-btn');
+if (requestReplyBtn && requestReplyBtn.parentNode) {
+    const newRequestReplyBtn = requestReplyBtn.cloneNode(true);
+    requestReplyBtn.parentNode.replaceChild(newRequestReplyBtn, requestReplyBtn);
+    newRequestReplyBtn.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
 
-    // 1. 找到最后一条“真实”消息
-    const lastRealMessage = contact.history.slice().reverse().find(m => 
-        m.sender !== 'system' && 
-        m.sender !== 'system_instruction' &&
-        m.type !== 'system_notification'
-    );
-
-    // 2. 检查是不是用户最后发言
-    const userSpokeLast = lastRealMessage && (lastRealMessage.sender === 'user' || lastRealMessage.sender === 'myProfile');
-
-    if (userSpokeLast) {
-        // --- Case 1: 用户刚说完 (无论私聊还是群聊) ---
-        // 100% 执行“回复你”的逻辑
-        console.log("用户刚发言，触发AI回复用户...");
-        await requestAiReply(null, contact.id);
-    } else {
-        // --- Case 2: 用户没说话 (AI说的，或没记录) ---
-        if (contact.isGroup) {
-            // 2a. 如果是群聊，调用【群聊】自由聊天
-            console.log("群聊：用户未发言，触发AI自由聊天...");
-            await triggerGroupFreeChat(contact);
-        } else {
-            // 2b. 如果是私聊，调用【私聊】自由聊天 (新功能!)
-            console.log("私聊：用户未发言，触发AI自由聊天...");
-            await triggerPrivateFreeChat(contact);
+        const contact = state.contacts.find(c => c.id === state.activeChatId);
+        if (!contact) {
+            alert('当前没有打开聊天。');
+            return;
         }
-    }
-});
+
+        console.log('[REQUEST REPLY CLICK]', {
+            chatId: contact.id,
+            isGroup: contact.isGroup,
+            historyLength: contact.history?.length || 0
+        });
+
+        try {
+            const lastRealMessage = (contact.history || []).slice().reverse().find(message =>
+                message.sender !== 'system' &&
+                message.sender !== 'system_instruction' &&
+                message.type !== 'system_notification'
+            );
+
+            const sender = normalizeMessageSenderId(lastRealMessage?.senderId || lastRealMessage?.sender);
+            const userSpokeLast = lastRealMessage && (
+                sender === 'user' ||
+                sender === 'myProfile' ||
+                isCurrentUserSenderId(sender)
+            );
+
+            if (userSpokeLast) {
+                await requestAiReply(null, contact.id);
+            } else if (contact.isGroup) {
+                if (typeof triggerGroupFreeChat !== 'function') {
+                    throw new Error('triggerGroupFreeChat 未定义');
+                }
+                await triggerGroupFreeChat(contact);
+            } else {
+                if (typeof triggerPrivateFreeChat !== 'function') {
+                    throw new Error('triggerPrivateFreeChat 未定义');
+                }
+                await triggerPrivateFreeChat(contact);
+            }
+        } catch (error) {
+            console.error('[REQUEST REPLY FAILED]', error);
+            alert('请求回复失败：' + (error?.message || error));
+        }
+    });
+}
     document.getElementById('message-input').addEventListener('keypress', e => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -47835,7 +47841,29 @@ if (moreOptionsBtn) {
     });
 
     // --- 重新绑定事件到新菜单项 ---
-    document.getElementById('rewind-btn-menu').addEventListener('click', handleRewind);
+    const rewindBtn = document.getElementById('rewind-btn-menu');
+    if (rewindBtn && rewindBtn.parentNode) {
+        const newRewindBtn = rewindBtn.cloneNode(true);
+        rewindBtn.parentNode.replaceChild(newRewindBtn, rewindBtn);
+        newRewindBtn.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const menu = document.getElementById('chat-options-menu');
+            if (menu) menu.style.display = 'none';
+
+            console.log('[REWIND CLICK]', {
+                activeChatId: state.activeChatId
+            });
+
+            try {
+                await handleRewind();
+            } catch (error) {
+                console.error('[REWIND FAILED]', error);
+                alert('回溯失败：' + (error?.message || error));
+            }
+        });
+    }
     document.getElementById('summarize-chat-btn-menu').addEventListener('click', handleChatSummarization);
     document.getElementById('contact-settings-btn-menu').addEventListener('click', showCharProfileScreen);
     document.getElementById('diary-btn-menu').addEventListener('click', () => {
@@ -48178,20 +48206,20 @@ await initApp();
 </script>
 <script>
   (function() {
-const BUILD_VERSION = '20260526-fix-10';
+const BUILD_VERSION = '20260526-fix-11';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
       const currentVersion = localStorage.getItem(BUILD_KEY);
-      const reloadVersion = sessionStorage.getItem(RELOAD_KEY);
+      const url = new URL(window.location.href);
+      const currentUrlVersion = url.searchParams.get('v');
       if (currentVersion !== BUILD_VERSION) {
         localStorage.setItem(BUILD_KEY, BUILD_VERSION);
-        if (reloadVersion !== BUILD_VERSION) {
-          sessionStorage.setItem(RELOAD_KEY, BUILD_VERSION);
-          const url = new URL(window.location.href);
-          url.searchParams.set('v', BUILD_VERSION);
-          window.location.replace(url.toString());
-        }
+      }
+      if (currentUrlVersion !== BUILD_VERSION) {
+        sessionStorage.setItem(RELOAD_KEY, BUILD_VERSION);
+        url.searchParams.set('v', BUILD_VERSION);
+        window.location.replace(url.toString());
       }
     } catch (error) {
       console.log('BUILD 版本刷新检查失败: ', error);
@@ -48201,7 +48229,7 @@ const BUILD_VERSION = '20260526-fix-10';
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-const SW_VERSION = '20260526-fix-10';
+const SW_VERSION = '20260526-fix-11';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -48489,101 +48517,30 @@ const SW_VERSION = '20260526-fix-10';
         };
     }
 
-    function resolveEchoesStateClickTarget(event) {
-        const target = event.target;
-        if (!target || !target.closest) return null;
-
-        return target.closest(
-            '#chat-messages .message-avatar, ' +
-            '#chat-messages .message-avatar img'
-        );
+function resolveEchoesStateClickTarget(event) {
+        return null;
     }
 
     async function handleEchoesStateBridgeClick(event) {
-        const trigger = resolveEchoesStateClickTarget(event);
-        if (!trigger) return;
-
-        const { chat, characterId, message, wrapper } = resolveEchoesCharacterFromTrigger(trigger);
-
-        if (!chat) {
-            console.warn('[ECHOES STATE CLICK FAILED] no active chat');
-            return;
-        }
-
-        if (!characterId || characterId === 'system' || characterId === 'system_instruction' || isUserId(characterId)) {
-            return;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.stopImmediatePropagation) {
-            event.stopImmediatePropagation();
-        }
-
-        console.log('[ECHOES STATE AVATAR CLICK]', {
-            chatId: chat.id,
-            isGroup: chat.isGroup,
-            characterId,
-            messageId: message?.id,
-            wrapperSenderId: wrapper?.dataset?.senderId,
-            triggerClass: trigger.className
-        });
-
-        await openEchoesStatePanel(chat.id, characterId, {
-            createFallbackIfEmpty: true,
-            sourceMessage: message
-        });
+        return null;
     }
 
     function setupEchoesStateBridge() {
+        document.removeEventListener('click', handleEchoesStateBridgeClick, true);
         if (typeof window.handleEchoesStateAvatarClick === 'function') {
             document.removeEventListener('click', window.handleEchoesStateAvatarClick, true);
         }
         if (typeof window.handleEchoesHeartVoiceAvatarClick === 'function') {
             document.removeEventListener('click', window.handleEchoesHeartVoiceAvatarClick, true);
         }
-
-        document.removeEventListener('click', handleEchoesStateBridgeClick, true);
-        document.addEventListener('click', handleEchoesStateBridgeClick, true);
-        window.__echoesStateAvatarClickBound = true;
-        window.__echoesHvAvatarClickBound = true;
-        window.__echoesHeartVoiceAvatarClickBound = true;
-        console.log('[ECHOES STATE BRIDGE READY]');
+        window.__echoesStateAvatarClickBound = false;
+        window.__echoesHvAvatarClickBound = false;
+        window.__echoesHeartVoiceAvatarClickBound = false;
+        console.log('[ECHOES STATE BRIDGE DISABLED]');
     }
 
     function markExistingMessagesEchoesStateClickable() {
-        const chat = getActiveEchoesChat();
-        if (!chat) return;
-
-        document.querySelectorAll('#chat-messages .message-wrapper').forEach(wrapper => {
-            const message = findMessageByWrapper(chat, wrapper);
-            if (!message) return;
-
-            const sender = safeNormalizeId(message.senderId || message.sender);
-            if (!sender || isUserId(sender) || sender === 'system' || sender === 'system_instruction') {
-                return;
-            }
-
-            if (SPECIAL_STATE_SKIP_TYPES.has(message.type)) {
-                return;
-            }
-
-            let characterId = sender;
-            if (!chat.isGroup) characterId = safeNormalizeId(chat.id);
-            if (chat.isGroup && (characterId === 'contact' || characterId === safeNormalizeId(chat.id))) return;
-
-            wrapper.dataset.senderId = characterId;
-            wrapper.dataset.sender = characterId;
-            wrapper.dataset.chatId = chat.id;
-            wrapper.dataset.messageType = message.type || 'text';
-
-            const avatar = wrapper.querySelector('.message-avatar');
-            if (avatar) {
-                avatar.dataset.senderId = characterId;
-                avatar.dataset.heartVoiceCharacterId = characterId;
-                avatar.dataset.chatId = chat.id;
-            }
-        });
+        return null;
     }
 
     const originalRenderChatMessages = window.renderChatMessages;
@@ -48633,26 +48590,15 @@ const SW_VERSION = '20260526-fix-10';
     window.resolveEchoesStateClickTarget = resolveEchoesStateClickTarget;
     window.resolveEchoesCharacterFromTrigger = resolveEchoesCharacterFromTrigger;
 
-    window.setupEchoesStateAvatarClick = function() {
-        return setupEchoesStateBridge();
-    };
-
-    window.setupEchoesHeartVoiceAvatarClick = function() {
-        return setupEchoesStateBridge();
-    };
-
-    window.handleEchoesStateAvatarClick = function(event) {
-        return handleEchoesStateBridgeClick(event);
-    };
-
-    window.handleEchoesHeartVoiceAvatarClick = function(event) {
-        return handleEchoesStateBridgeClick(event);
-    };
+    window.setupEchoesStateAvatarClick = function() { return null; };
+    window.setupEchoesHeartVoiceAvatarClick = function() { return null; };
+    window.handleEchoesStateAvatarClick = function() { return null; };
+    window.handleEchoesHeartVoiceAvatarClick = function() { return null; };
 
     window.openHeartVoicePanelForCharacter = function(characterId, chatId) {
-        return openEchoesStatePanel(chatId || state.activeChatId, characterId, {
+        return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, {
             createFallbackIfEmpty: true
-        });
+        }) || null;
     };
 
     window.openHeartVoicePanel = function(characterId, chatContext) {
@@ -48660,16 +48606,16 @@ const SW_VERSION = '20260526-fix-10';
             ? chatContext
             : chatContext?.id || state.activeChatId;
 
-        return openEchoesStatePanel(chatId, characterId, {
+        return window.__openEchoesOriginalStatePanel?.(chatId, characterId, {
             createFallbackIfEmpty: true
-        });
+        }) || null;
     };
 
     window.openEchoesHeartVoicePanel = function(chatId, characterId, options = {}) {
-        return openEchoesStatePanel(chatId || state.activeChatId, characterId, {
+        return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, {
             createFallbackIfEmpty: true,
             ...options
-        });
+        }) || null;
     };
 
     window.__openHeartVoiceBasic = null;
@@ -48677,7 +48623,6 @@ const SW_VERSION = '20260526-fix-10';
     window.forceShowHeartVoicePanel = null;
 
     setupEchoesStateBridge();
-    setTimeout(markExistingMessagesEchoesStateClickable, 0);
 })();
 </script>
 
@@ -49091,9 +49036,9 @@ const SW_VERSION = '20260526-fix-10';
             currentPanel.style.display === 'flex' &&
             currentPanel.dataset.chatId === chat.id &&
             currentPanel.dataset.characterId === normalizedCharacterId &&
-            typeof window.openEchoesStatePanel === 'function'
+            typeof window.__openEchoesOriginalStatePanel === 'function'
         ) {
-            window.openEchoesStatePanel(chat.id, normalizedCharacterId, { createFallbackIfEmpty: false });
+            window.__openEchoesOriginalStatePanel(chat.id, normalizedCharacterId, { createFallbackIfEmpty: false });
         }
 
         console.log('[ECHOES STATE SAVED]', record);
@@ -49151,42 +49096,21 @@ const SW_VERSION = '20260526-fix-10';
     }
 
     function markExistingMessagesEchoesStateClickable() {
-        const chat = finalGetActiveChat();
-        if (!chat) return;
-        document.querySelectorAll('#chat-messages .message-wrapper').forEach(wrapper => {
-            const message = finalFindMessageByWrapper(chat, wrapper);
-            if (!message || STATE_SKIP_TYPES.has(message.type)) return;
-            let sender = finalNormalizeId(message.senderId || message.sender);
-            if (!sender || finalIsUserId(sender) || sender === 'system' || sender === 'system_instruction') return;
-            if (!chat.isGroup) sender = finalNormalizeId(chat.id);
-            if (chat.isGroup && (sender === 'contact' || sender === finalNormalizeId(chat.id))) return;
-            wrapper.dataset.senderId = sender;
-            wrapper.dataset.sender = sender;
-            wrapper.dataset.chatId = chat.id;
-            wrapper.dataset.messageType = message.type || 'text';
-            const avatar = wrapper.querySelector('.message-avatar');
-            if (avatar) {
-                avatar.dataset.senderId = sender;
-                avatar.dataset.heartVoiceCharacterId = sender;
-                avatar.dataset.chatId = chat.id;
-            }
-        });
+        return null;
     }
 
     function setupEchoesStateBridge() {
+        document.removeEventListener('click', handleEchoesStateBridgeClick, true);
         if (typeof window.handleEchoesStateBridgeClick === 'function') {
             document.removeEventListener('click', window.handleEchoesStateBridgeClick, true);
         }
         if (typeof window.handleEchoesStateAvatarClick === 'function') {
             document.removeEventListener('click', window.handleEchoesStateAvatarClick, true);
         }
-        document.removeEventListener('click', handleEchoesStateBridgeClick, true);
-        document.addEventListener('click', handleEchoesStateBridgeClick, true);
-        window.__echoesStateAvatarClickBound = true;
-        window.__echoesHvAvatarClickBound = true;
-        window.__echoesHeartVoiceAvatarClickBound = true;
-        setTimeout(markExistingMessagesEchoesStateClickable, 0);
-        console.log('[ECHOES STATE BRIDGE READY]');
+        window.__echoesStateAvatarClickBound = false;
+        window.__echoesHvAvatarClickBound = false;
+        window.__echoesHeartVoiceAvatarClickBound = false;
+        console.log('[ECHOES STATE BRIDGE DISABLED]');
     }
 
     window.normalizeInnerThoughtsToFirstPerson = normalizeInnerThoughtsToFirstPerson;
@@ -49196,13 +49120,13 @@ const SW_VERSION = '20260526-fix-10';
     window.setupEchoesStateBridge = setupEchoesStateBridge;
     window.handleEchoesStateBridgeClick = handleEchoesStateBridgeClick;
 
-    window.openHeartVoicePanelForCharacter = (characterId, chatId) => openEchoesStatePanel(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true });
-    window.openHeartVoicePanel = (characterId, chatContext) => openEchoesStatePanel((typeof chatContext === 'string' ? chatContext : chatContext?.id) || state.activeChatId, characterId, { createFallbackIfEmpty: true });
-    window.openEchoesHeartVoicePanel = (chatId, characterId, options = {}) => openEchoesStatePanel(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true, ...options });
-    window.setupEchoesStateAvatarClick = () => setupEchoesStateBridge();
-    window.setupEchoesHeartVoiceAvatarClick = () => setupEchoesStateBridge();
-    window.handleEchoesStateAvatarClick = event => handleEchoesStateBridgeClick(event);
-    window.handleEchoesHeartVoiceAvatarClick = event => handleEchoesStateBridgeClick(event);
+    window.openHeartVoicePanelForCharacter = (characterId, chatId) => window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true }) || null;
+    window.openHeartVoicePanel = (characterId, chatContext) => window.__openEchoesOriginalStatePanel?.((typeof chatContext === 'string' ? chatContext : chatContext?.id) || state.activeChatId, characterId, { createFallbackIfEmpty: true }) || null;
+    window.openEchoesHeartVoicePanel = (chatId, characterId, options = {}) => window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true, ...options }) || null;
+    window.setupEchoesStateAvatarClick = () => null;
+    window.setupEchoesHeartVoiceAvatarClick = () => null;
+    window.handleEchoesStateAvatarClick = () => null;
+    window.handleEchoesHeartVoiceAvatarClick = () => null;
     window.__openHeartVoiceBasic = null;
     window.__openHeartVoiceHard = null;
     window.forceShowHeartVoicePanel = null;
@@ -49215,7 +49139,6 @@ const SW_VERSION = '20260526-fix-10';
     try { ensureEchoesStateForVisibleMessage = window.ensureEchoesStateForVisibleMessage = ensureEchoesStateForVisibleMessage; } catch (error) {}
 
     setupEchoesStateBridge();
-    setTimeout(markExistingMessagesEchoesStateClickable, 0);
 })();
 </script>
 
