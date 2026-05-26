@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-12">
+<link rel="manifest" href="manifest.json?v=20260526-fix-13">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-12</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-13</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-12';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-13';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -48186,7 +48186,7 @@ await initApp();
 </script>
 <script>
   (function() {
-const BUILD_VERSION = '20260526-fix-12';
+const BUILD_VERSION = '20260526-fix-13';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -48209,7 +48209,7 @@ const BUILD_VERSION = '20260526-fix-12';
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-const SW_VERSION = '20260526-fix-12';
+const SW_VERSION = '20260526-fix-13';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -49157,6 +49157,7 @@ function resolveEchoesStateClickTarget(event) {
     const originalParseGroupAiMessages = window.parseGroupAiMessages || (typeof parseGroupAiMessages === 'function' ? parseGroupAiMessages : null);
 
     const activeRoundByChatId = window.__echoesActiveRoundByChatId || (window.__echoesActiveRoundByChatId = new Map());
+    const pendingEchoesAutoRounds = window.__pendingEchoesAutoRounds || (window.__pendingEchoesAutoRounds = new Map());
 
     function normalizeId(value) {
         if (typeof normalizeMessageSenderId === 'function') return normalizeMessageSenderId(value);
@@ -49243,6 +49244,10 @@ function resolveEchoesStateClickTarget(event) {
         return getText(found);
     }
 
+    function getEchoesAutoRoundKey(chat, roundId) {
+        return `${chat?.id || 'unknown'}::${roundId || 'auto'}`;
+    }
+
     function createEchoesRoundId(chat, source = 'chat') {
         const chatId = String(chat?.id || 'unknown').replace(/[^\w-]/g, '_');
         return `round_${chatId}_${source}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -49290,6 +49295,95 @@ function resolveEchoesStateClickTarget(event) {
 
     function getActiveEchoesRound(chat) {
         return chat?.id ? activeRoundByChatId.get(chat.id) || null : null;
+    }
+
+    function scheduleEchoesAutoFinalize({
+        chat,
+        message,
+        characterId,
+        explicitState = null,
+        parsedResponses = [],
+        parsedStates = [],
+        roundUserText = '',
+        roundId = ''
+    }) {
+        if (!chat || !message) return;
+        if (!isStateVisibleMessage(message)) return;
+
+        let id = normalizeCharacterIdForChat(
+            chat,
+            characterId || message.senderId || message.sender,
+            getProfile(chat, characterId || message.senderId || message.sender)
+        );
+        if (!chat.isGroup) id = normalizeId(chat.id);
+        if (!id || isUserSender(id) || id === 'system' || id === 'system_instruction') return;
+
+        const activeCtx = typeof getActiveEchoesRound === 'function' ? getActiveEchoesRound(chat) : null;
+        const finalRoundId = roundId || activeCtx?.roundId || createEchoesRoundId(chat, 'auto-created-message');
+        const key = getEchoesAutoRoundKey(chat, finalRoundId);
+
+        let bucket = pendingEchoesAutoRounds.get(key);
+        if (!bucket) {
+            bucket = {
+                chat,
+                roundId: finalRoundId,
+                roundUserText: roundUserText || activeCtx?.roundUserText || latestUserText(chat, Date.now()) || '',
+                aiMessages: [],
+                parsedStates: [],
+                parsedResponses: [],
+                timer: null
+            };
+            pendingEchoesAutoRounds.set(key, bucket);
+        }
+
+        if (!bucket.aiMessages.some(item => String(item?.id || '') === String(message?.id || ''))) {
+            bucket.aiMessages.push(message);
+        }
+
+        if (explicitState) {
+            bucket.parsedStates.push({ characterId: id, ...explicitState });
+        }
+        if (Array.isArray(parsedStates) && parsedStates.length) {
+            bucket.parsedStates.push(...parsedStates);
+        }
+        if (Array.isArray(parsedResponses) && parsedResponses.length) {
+            bucket.parsedResponses.push(...parsedResponses);
+        }
+
+        clearTimeout(bucket.timer);
+        bucket.timer = setTimeout(async () => {
+            try {
+                kokoDebugLog('[ECHOES AUTO FINALIZE TIMER]', {
+                    chatId: bucket.chat?.id,
+                    roundId: bucket.roundId,
+                    aiMessageCount: bucket.aiMessages.length,
+                    parsedStateCount: bucket.parsedStates.length
+                });
+
+                const saved = await finalizeEchoesStatesForAiRound({
+                    chat: bucket.chat,
+                    roundId: bucket.roundId,
+                    roundUserText: bucket.roundUserText,
+                    aiMessages: bucket.aiMessages,
+                    parsedStates: bucket.parsedStates,
+                    parsedResponses: bucket.parsedResponses
+                });
+
+                kokoDebugLog('[ECHOES AUTO FINALIZE DONE]', {
+                    chatId: bucket.chat?.id,
+                    roundId: bucket.roundId,
+                    savedCount: saved?.length || 0
+                });
+            } catch (error) {
+                console.error('[ECHOES AUTO FINALIZE FAILED]', error);
+                kokoDebugLog('[ECHOES AUTO FINALIZE FAILED]', {
+                    message: error?.message,
+                    stack: error?.stack
+                });
+            } finally {
+                pendingEchoesAutoRounds.delete(key);
+            }
+        }, 300);
     }
 
     function rememberExplicitState(ctx, characterId, explicitState) {
@@ -50201,6 +50295,11 @@ function resolveEchoesStateClickTarget(event) {
                 chatId: chat?.id,
                 roundId
             });
+            kokoDebugLog('[ECHOES FINALIZE SKIPPED NO VISIBLE MESSAGES]', {
+                chatId: chat?.id,
+                roundId,
+                rawAiMessages: aiMessages
+            });
             return [];
         }
 
@@ -50234,12 +50333,62 @@ function resolveEchoesStateClickTarget(event) {
             grouped.get(id).push(message);
         });
 
+        if (!grouped.size && visibleMessages.length) {
+            kokoDebugLog('[ECHOES FINALIZE SKIPPED NO TARGETS]', {
+                chatId: chat?.id,
+                roundId,
+                visibleMessages: visibleMessages.map(message => ({
+                    id: message?.id,
+                    sender: message?.sender,
+                    senderId: message?.senderId,
+                    type: message?.type,
+                    contentPreview: String(getStateTextForMessage(message) || '').slice(0, 80)
+                }))
+            });
+
+            if (!chat?.isGroup) {
+                const fallbackId = normalizeId(chat?.id);
+                if (fallbackId) {
+                    grouped.set(fallbackId, visibleMessages.slice());
+                }
+            } else {
+                visibleMessages.forEach(message => {
+                    const rawSender = message?.senderId || message?.sender || '';
+                    const directId = normalizeId(rawSender);
+                    const matchedProfile = (state.contacts || []).find(item => normalizeId(item?.id) === directId)
+                        || (chat?.npcMembers || []).find(item => normalizeId(item?.id) === directId)
+                        || getProfile(chat, rawSender);
+                    const fallbackId = normalizeCharacterIdForChat(chat, matchedProfile?.id || rawSender, matchedProfile || null);
+                    if (!fallbackId || isUserSender(fallbackId) || fallbackId === 'system' || fallbackId === 'system_instruction') {
+                        kokoDebugLog('[ECHOES FINALIZE GROUP TARGET MISS]', {
+                            chatId: chat?.id,
+                            roundId,
+                            messageId: message?.id,
+                            sender: message?.sender,
+                            senderId: message?.senderId
+                        });
+                        return;
+                    }
+                    if (!grouped.has(fallbackId)) grouped.set(fallbackId, []);
+                    grouped.get(fallbackId).push(message);
+                });
+            }
+        }
+
         const allAiText = visibleMessages
             .map(getStateTextForMessage)
             .filter(Boolean)
             .join('\n')
             .trim();
         const savedRecords = [];
+
+        if (!grouped.size) {
+            console.warn('[ECHOES FINALIZE SKIPPED]', 'no_grouped_targets', {
+                chatId: chat?.id,
+                roundId
+            });
+            return [];
+        }
 
         for (const [characterId, messages] of grouped.entries()) {
             const speakerProfile = getProfile(chat, characterId);
@@ -50958,6 +51107,8 @@ function resolveEchoesStateClickTarget(event) {
     window.finalizeEchoesStatesForAiRound = finalizeEchoesStatesForAiRound;
     window.savePrivateRoundEchoesState = savePrivateRoundEchoesState;
     window.saveGroupRoundEchoesStates = saveGroupRoundEchoesStates;
+    window.getActiveEchoesRound = getActiveEchoesRound;
+    window.scheduleEchoesAutoFinalize = scheduleEchoesAutoFinalize;
     window.parseEchoesStateResult = parseEchoesStateResult;
     window.parseEchoesStyleAiResult = parseEchoesStyleAiResult;
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
@@ -50986,6 +51137,85 @@ function resolveEchoesStateClickTarget(event) {
     try { requestEchoesMainResponseWithRetry = window.requestEchoesMainResponseWithRetry; } catch (error) {}
     try { saveEchoesCharacterState = window.saveEchoesCharacterState; } catch (error) {}
     try { ensureEchoesStateForVisibleMessage = window.ensureEchoesStateForVisibleMessage; } catch (error) {}
+
+    (function installEchoesCreateMessageHook() {
+        if (window.__echoesCreateMessageHookInstalled) return;
+        if (typeof createAndAddMessage !== 'function') {
+            console.warn('[ECHOES HOOK] createAndAddMessage not found');
+            return;
+        }
+
+        window.__echoesCreateMessageHookInstalled = true;
+        const originalCreateAndAddMessage = createAndAddMessage;
+
+        createAndAddMessage = async function(messageData, senderId, chat, shouldSave = true, context = 'chat', ...rest) {
+            const effectiveChat = chat || state.contacts.find(c => c.id === state.activeChatId);
+            const effectiveMode = context || state.currentChatMode;
+            const historyArray = effectiveMode === 'sms' ? 'smsHistory' : 'history';
+            const beforeLength = Array.isArray(effectiveChat?.[historyArray]) ? effectiveChat[historyArray].length : 0;
+            const result = await originalCreateAndAddMessage.apply(this, [messageData, senderId, chat, shouldSave, context, ...rest]);
+
+            try {
+                const liveChat = effectiveChat || chat || state.contacts.find(c => c.id === state.activeChatId);
+                if (!liveChat) {
+                    return result;
+                }
+                const afterMessages = Array.isArray(liveChat?.[historyArray])
+                    ? liveChat[historyArray].slice(beforeLength)
+                    : [];
+                const createdMessages = [];
+
+                if (result && typeof result === 'object' && result.id) {
+                    createdMessages.push(result);
+                }
+                afterMessages.forEach(msg => {
+                    if (msg && msg.id && !createdMessages.some(item => String(item.id) === String(msg.id))) {
+                        createdMessages.push(msg);
+                    }
+                });
+
+                createdMessages.forEach(msg => {
+                    if (!isStateVisibleMessage(msg)) return;
+
+                    const msgSender = normalizeId(msg.senderId || msg.sender || senderId);
+                    if (!msgSender || isUserSender(msgSender)) return;
+
+                    const activeCtx = typeof getActiveEchoesRound === 'function' ? getActiveEchoesRound(liveChat) : null;
+                    const normalizedSender = normalizeCharacterIdForChat(liveChat, msgSender, getProfile(liveChat, msgSender));
+                    const explicitState = activeCtx?.explicitStateMap?.get?.(normalizedSender) || null;
+
+                    scheduleEchoesAutoFinalize({
+                        chat: liveChat,
+                        message: msg,
+                        characterId: msgSender,
+                        explicitState,
+                        parsedStates: activeCtx?.parsedStates || [],
+                        parsedResponses: activeCtx?.parsedResponses || [],
+                        roundUserText: activeCtx?.roundUserText || '',
+                        roundId: activeCtx?.roundId || ''
+                    });
+
+                    kokoDebugLog('[ECHOES MESSAGE HOOK CAPTURED]', {
+                        chatId: liveChat?.id,
+                        messageId: msg.id,
+                        sender: msgSender,
+                        type: msg.type
+                    });
+                });
+            } catch (error) {
+                console.error('[ECHOES MESSAGE HOOK FAILED]', error);
+                kokoDebugLog('[ECHOES MESSAGE HOOK FAILED]', {
+                    message: error?.message,
+                    stack: error?.stack
+                });
+            }
+
+            return result;
+        };
+
+        window.createAndAddMessage = createAndAddMessage;
+        console.log('[ECHOES CREATE MESSAGE HOOK INSTALLED]');
+    })();
     console.log('[ECHOES ROUND STATE ENGINE READY]');
 })();
 </script>
