@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-13">
+<link rel="manifest" href="manifest.json?v=20260526-fix-14">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-13</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-14</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-13';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-14';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -19246,6 +19246,70 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
 
     // 8. 保存联系人数据到 IndexedDB
     await kokoMemory.put('contacts', contact);
+
+    try {
+        const isVisibleMessageFn = window.__echoesRoundIsStateVisibleMessage;
+        const normalizeIdFn = window.__echoesRoundNormalizeId
+            || (typeof normalizeMessageSenderId === 'function' ? normalizeMessageSenderId : (value => String(value || '').trim()));
+        const isUserSenderFn = window.__echoesRoundIsUserSender
+            || (value => {
+                const id = normalizeIdFn(value);
+                if (!id) return false;
+                return typeof isCurrentUserSenderId === 'function'
+                    ? isCurrentUserSenderId(id)
+                    : id === 'user' || id === 'myProfile' || id === state?.myProfile?.id;
+            });
+        const normalizeCharacterIdForChatFn = window.__echoesRoundNormalizeCharacterIdForChat || null;
+        const getProfileFn = window.__echoesRoundGetProfile || null;
+
+        if (
+            historyArray === 'history' &&
+            typeof window.scheduleEchoesAutoFinalize === 'function' &&
+            typeof isVisibleMessageFn === 'function' &&
+            isVisibleMessageFn(fullMessage)
+        ) {
+            const msgSender = normalizeIdFn(fullMessage.senderId || fullMessage.sender || sender);
+
+            if (msgSender && !isUserSenderFn(msgSender)) {
+                const activeCtx = typeof window.getActiveEchoesRound === 'function'
+                    ? window.getActiveEchoesRound(contact)
+                    : null;
+
+                const normalizedSender = typeof normalizeCharacterIdForChatFn === 'function'
+                    ? normalizeCharacterIdForChatFn(contact, msgSender, typeof getProfileFn === 'function' ? getProfileFn(contact, msgSender) : null)
+                    : msgSender;
+
+                const explicitState = activeCtx?.explicitStateMap?.get?.(normalizedSender) || null;
+
+                window.scheduleEchoesAutoFinalize({
+                    chat: contact,
+                    message: fullMessage,
+                    characterId: msgSender,
+                    explicitState,
+                    parsedStates: activeCtx?.parsedStates || [],
+                    parsedResponses: activeCtx?.parsedResponses || [],
+                    roundUserText: activeCtx?.roundUserText || '',
+                    roundId: activeCtx?.roundId || ''
+                });
+
+                kokoDebugLog('[ECHOES DIRECT CREATE CAPTURED]', {
+                    chatId: contact.id,
+                    messageId: fullMessage.id,
+                    sender: msgSender,
+                    senderId: fullMessage.senderId,
+                    type: fullMessage.type
+                });
+            }
+        }
+    } catch (error) {
+        console.error('[ECHOES DIRECT CREATE CAPTURE FAILED]', error);
+        if (typeof kokoDebugLog === 'function') {
+            kokoDebugLog('[ECHOES DIRECT CREATE CAPTURE FAILED]', {
+                message: error?.message,
+                stack: error?.stack
+            });
+        }
+    }
 
     // 9. 刷新对应的列表视图 (主聊天列表 或 短信列表)
     if (fullMessage.sender !== 'system_instruction') {
@@ -48186,7 +48250,7 @@ await initApp();
 </script>
 <script>
   (function() {
-const BUILD_VERSION = '20260526-fix-13';
+const BUILD_VERSION = '20260526-fix-14';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -48209,7 +48273,7 @@ const BUILD_VERSION = '20260526-fix-13';
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-const SW_VERSION = '20260526-fix-13';
+const SW_VERSION = '20260526-fix-14';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -49368,6 +49432,22 @@ function resolveEchoesStateClickTarget(event) {
                     parsedStates: bucket.parsedStates,
                     parsedResponses: bucket.parsedResponses
                 });
+
+                if (!(saved?.length > 0)) {
+                    kokoDebugLog('[ECHOES AUTO FINALIZE ZERO SAVED]', {
+                        chatId: bucket.chat?.id,
+                        roundId: bucket.roundId,
+                        aiMessageCount: bucket.aiMessages.length,
+                        parsedStateCount: bucket.parsedStates.length,
+                        aiMessages: bucket.aiMessages.map(message => ({
+                            id: message?.id,
+                            sender: message?.sender,
+                            senderId: message?.senderId,
+                            type: message?.type,
+                            contentPreview: String(message?.content || '').slice(0, 80)
+                        }))
+                    });
+                }
 
                 kokoDebugLog('[ECHOES AUTO FINALIZE DONE]', {
                     chatId: bucket.chat?.id,
@@ -51109,6 +51189,11 @@ function resolveEchoesStateClickTarget(event) {
     window.saveGroupRoundEchoesStates = saveGroupRoundEchoesStates;
     window.getActiveEchoesRound = getActiveEchoesRound;
     window.scheduleEchoesAutoFinalize = scheduleEchoesAutoFinalize;
+    window.__echoesRoundNormalizeId = normalizeId;
+    window.__echoesRoundIsUserSender = isUserSender;
+    window.__echoesRoundGetProfile = getProfile;
+    window.__echoesRoundNormalizeCharacterIdForChat = normalizeCharacterIdForChat;
+    window.__echoesRoundIsStateVisibleMessage = isStateVisibleMessage;
     window.parseEchoesStateResult = parseEchoesStateResult;
     window.parseEchoesStyleAiResult = parseEchoesStyleAiResult;
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
