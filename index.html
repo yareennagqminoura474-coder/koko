@@ -47694,9 +47694,25 @@ await initApp();
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
-        .then(registration => console.log('ServiceWorker 注册成功: ', registration))
-        .catch(error => console.log('ServiceWorker 注册失败: ', error));
+      const SW_VERSION = '20260526-echoes-group-fix-1';
+      const swUrl = `./sw.js?v=${SW_VERSION}`;
+      (async () => {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map(registration => registration.unregister()));
+          if ('caches' in window) {
+            const cacheKeys = await caches.keys();
+            await Promise.all(cacheKeys.map(cacheKey => caches.delete(cacheKey)));
+            console.log('[SW CACHE CLEARED]', cacheKeys);
+          }
+        } catch (cleanupError) {
+          console.log('ServiceWorker 清理失败: ', cleanupError);
+        }
+
+        navigator.serviceWorker.register(swUrl)
+          .then(registration => console.log('ServiceWorker 注册成功: ', registration))
+          .catch(error => console.log('ServiceWorker 注册失败: ', error));
+      })();
     });
   }
 </script>
