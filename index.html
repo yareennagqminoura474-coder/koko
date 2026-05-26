@@ -12055,9 +12055,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-7</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-8</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-7';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-8';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -19328,6 +19328,13 @@ async function sendMessage() {
     messageInput.value = '';
     messageInput.style.height = '38px'; 
     cancelReply(); 
+
+    await runKokoAiRound({
+        chat: contact,
+        mode: contact.isGroup ? 'group-reply' : 'private-reply',
+        userText: content,
+        reason: 'send'
+    });
 }
 
         const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -19452,18 +19459,15 @@ async function requestAiReply(systemInstruction = null, targetContactId = null) 
         return;
     }
 
-    // ▼▼▼ 核心改动：判断是群聊还是私聊 ▼▼▼
-    if (contact.isGroup) {
-        // 如果是群聊，调用群聊AI处理函数
-        if (typeof window.triggerGroupChatAiReply !== 'function') {
-            throw new Error('window.triggerGroupChatAiReply 未安装');
-        }
-        await window.triggerGroupChatAiReply(contact);
-    } else {
-        // 如果是私聊，调用原来的单聊AI处理函数
-        await triggerAiReply(contact);
-    }
-    // ▲▲▲ 改动结束 ▲▲▲
+    const latestUserMessage = [...(contact.history || [])].reverse().find(message =>
+        message && (message.sender === 'user' || message.sender === 'myProfile')
+    );
+    await runKokoAiRound({
+        chat: contact,
+        mode: contact.isGroup ? 'group-reply' : 'private-reply',
+        userText: systemInstruction || getKokoMessagePlainText(latestUserMessage),
+        reason: 'requestAiReply'
+    });
 }
 async function triggerAiReply(contact) {
             if (contact.needsNarrativeModeExitPrompt === true) { 
@@ -26794,15 +26798,27 @@ async function handleRewind() {
     );
 
     if (confirmed) {
+        const lastUserMessage = contact.history[lastUserMessageIndex];
+        const lastUserText = getKokoMessagePlainText(lastUserMessage);
+        const removedMessageIds = contact.history
+            .slice(lastUserMessageIndex + 1)
+            .map(message => message.id)
+            .filter(Boolean);
         // 4. 截取历史记录，保留到用户最后一条消息
         contact.history = contact.history.slice(0, lastUserMessageIndex + 1);
+        await removeKokoStatesForMessageIds(contact, removedMessageIds);
 
         // 5. 保存修改并刷新聊天界面
         await kokoMemory.put('contacts', contact);
         await openChat(contact.id); // 这会用截断后的历史记录重新渲染聊天界面
 
         // 6. 重新请求AI回复
-        await requestAiReply();
+        await runKokoAiRound({
+            chat: contact,
+            mode: contact.isGroup ? 'group-reply' : 'private-reply',
+            userText: lastUserText,
+            reason: 'regenerate'
+        });
     }
 }
 // --- 手动总结聊天记录功能核心函数 (V10 - 包含视频通话内容版) ---
@@ -41426,26 +41442,22 @@ document.getElementById('request-reply-btn').addEventListener('click', () => {
         // --- Case 1: 用户刚说完 (无论私聊还是群聊) ---
         // 100% 执行“回复你”的逻辑
         console.log("用户刚发言，触发AI回复用户...");
-        requestAiReply(null, contact.id);
+        runKokoAiRound({
+            chat: contact,
+            mode: contact.isGroup ? 'group-reply' : 'private-reply',
+            userText: getKokoMessagePlainText(lastRealMessage),
+            reason: 'request-reply'
+        });
     } else {
         // --- Case 2: 用户没说话 (AI说的，或没记录) ---
         if (contact.isGroup) {
             // 2a. 如果是群聊，调用【群聊】自由聊天
             console.log("群聊：用户未发言，触发AI自由聊天...");
-            if (typeof window.triggerGroupFreeChat === 'function') {
-                window.triggerGroupFreeChat(contact).catch(error => {
-                    kokoDebugLog('[GROUP FREE BUTTON FAILED]', {
-                        message: error?.message,
-                        stack: error?.stack
-                    });
-                });
-            } else {
-                console.error('window.triggerGroupFreeChat 未安装');
-            }
+            runKokoAiRound({ chat: contact, mode: 'group-free', userText: '', reason: 'request-reply' });
         } else {
             // 2b. 如果是私聊，调用【私聊】自由聊天 (新功能!)
             console.log("私聊：用户未发言，触发AI自由聊天...");
-            triggerPrivateFreeChat(contact); 
+            runKokoAiRound({ chat: contact, mode: 'private-free', userText: '', reason: 'request-reply' });
         }
     }
 });
@@ -46239,6 +46251,488 @@ function getActiveGroupAiProfiles(group) {
         .filter(Boolean);
 }
 
+function getKokoMessagePlainText(message = {}) {
+    const text = typeof getMessageTextContent === 'function'
+        ? getMessageTextContent(message)
+        : (typeof message.content === 'string' ? message.content : message.text || '');
+    return stripHtmlTags(String(text || '')).trim();
+}
+
+function resolveKokoRoundSpeakers(chat) {
+    if (!chat) return [];
+    if (!chat.isGroup) return chat.id ? [chat] : [];
+
+    const muted = new Set((chat.mutedMembers || []).map(id => normalizeMessageSenderId(id)));
+    const fromMembers = (chat.members || [])
+        .map(member => {
+            const memberId = typeof member === 'object'
+                ? (member.id || member.characterId || member.contactId)
+                : member;
+            return normalizeMessageSenderId(memberId);
+        })
+        .filter(id => id && !isCurrentUserSenderId(id) && id !== 'user' && id !== 'self' && id !== 'system' && id !== 'system_instruction' && !muted.has(id))
+        .map(id => getProfileInGroupContext(chat, id) || (state.contacts || []).find(contact => normalizeMessageSenderId(contact.id) === id))
+        .filter(Boolean);
+
+    const seen = new Set();
+    const unique = fromMembers.filter(profile => {
+        const id = normalizeMessageSenderId(profile.id);
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+    });
+    if (unique.length) return unique;
+
+    return (state.contacts || [])
+        .filter(contact => contact && !contact.isGroup && contact.id && !isCurrentUserSenderId(contact.id))
+        .slice(0, 3);
+}
+
+function getKokoAffectionFromPrevious(previousState) {
+    if (!previousState) return '50 (初始)';
+    const existing = String(previousState.affection || '').trim();
+    if (/\d/.test(existing)) return existing;
+    const score = previousState.favorability ?? previousState.score ?? 50;
+    const label = previousState.favorabilityLabel || existing || '初始';
+    return `${Number(score) || 50} (${label})`;
+}
+
+function inferKokoMoodFromText(text = '') {
+    const value = String(text || '');
+    if (/开心|高兴|哈哈|笑|喜欢|太好|不错|棒|耶|！/.test(value)) return '轻快';
+    if (/难过|伤心|委屈|哭|累|痛|怕|害怕/.test(value)) return '低落';
+    if (/生气|烦|讨厌|别|滚|气死/.test(value)) return '烦躁';
+    if (/吗|呢|怎么|为什么|？|\?/.test(value)) return '好奇';
+    if (/想你|在意|喜欢|陪|抱/.test(value)) return '柔软';
+    return '平静';
+}
+
+function buildKokoActionFromText(text = '', speaker = null) {
+    const name = speaker?.name || '对方';
+    const compact = String(text || '').replace(/\s+/g, ' ').slice(0, 40);
+    if (/哈哈|笑|开心/.test(compact)) return `${name}看着屏幕弯起眼睛，指尖很快地点下回复，语气里带着一点笑意。`;
+    if (/？|\?|吗|呢/.test(compact)) return `${name}停顿了一下，视线落在最后一条消息上，像是在认真等一个答案。`;
+    if (/别|生气|烦|讨厌/.test(compact)) return `${name}握着手机的手指收紧了一点，回消息时语气比刚才更直接。`;
+    return `${name}低头看着屏幕，把这句话斟酌了一遍后发了出去。`;
+}
+
+function buildKokoInnerThought({ userText = '', aiText = '', speaker = null, chat = null }) {
+    const userPart = String(userText || '').trim().slice(0, 36);
+    const aiPart = String(aiText || '').trim().slice(0, 42);
+    if (userPart) {
+        return `我刚才一直在想“${userPart}”这句话该怎么接，最后还是决定把真实反应藏在比较自然的回复里。`;
+    }
+    if (aiPart) {
+        return `我发出“${aiPart}”的时候其实有点在意大家会怎么接话，也想让这场对话继续往前走。`;
+    }
+    return `我看着这段对话停了一会儿，还是想主动开口把气氛接起来。`;
+}
+
+function normalizeKokoStateForMessage({ chat, speaker, message, explicitState = null, userText = '' }) {
+    const characterId = chat?.isGroup ? normalizeMessageSenderId(speaker?.id) : normalizeMessageSenderId(chat?.id || speaker?.id);
+    const previousState = typeof getLatestCharacterStateSnapshot === 'function'
+        ? getLatestCharacterStateSnapshot(chat, characterId)
+        : null;
+    const visibleText = getKokoMessagePlainText(message);
+    const stateSource = explicitState && typeof explicitState === 'object' ? explicitState : {};
+    const mood = String(stateSource.mood || stateSource.emotion || inferKokoMoodFromText(visibleText)).trim();
+    const rawAffection = String(stateSource.affection || '').trim();
+    const affection = /\d/.test(rawAffection) ? rawAffection : getKokoAffectionFromPrevious(previousState);
+    const clothing = String(stateSource.clothing || stateSource.outfit || previousState?.clothing || previousState?.outfit || '日常穿着').trim();
+    const action = String(stateSource.action || buildKokoActionFromText(visibleText, speaker)).trim();
+    let innerThoughts = String(stateSource.innerThoughts || stateSource.thoughts || '').trim();
+    if (!/^我/.test(innerThoughts)) {
+        innerThoughts = buildKokoInnerThought({ userText, aiText: visibleText, speaker, chat });
+    }
+    return {
+        id: `state_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        chatId: chat.id,
+        characterId,
+        timestamp: Date.now(),
+        relatedMessageId: message.id,
+        mood,
+        affection,
+        clothing,
+        action,
+        innerThoughts
+    };
+}
+
+async function saveKokoRoundState({ chat, speaker, message, explicitState = null, userText = '' }) {
+    const record = normalizeKokoStateForMessage({ chat, speaker, message, explicitState, userText });
+    state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
+    state.characterStates = state.characterStates.filter(existing =>
+        !(existing
+            && existing.chatId === record.chatId
+            && existing.relatedMessageId === record.relatedMessageId
+            && normalizeMessageSenderId(existing.characterId) === normalizeMessageSenderId(record.characterId))
+    );
+    state.characterStates.push(record);
+    await kokoMemory.put('character_states', record);
+    if (typeof updateCharacterStateSnapshot === 'function') updateCharacterStateSnapshot(record);
+    window.state = state;
+    kokoDebugLog('[AI STATE SAVED]', {
+        chatId: record.chatId,
+        characterId: record.characterId,
+        relatedMessageId: record.relatedMessageId
+    });
+    return record;
+}
+
+async function removeKokoStatesForMessageIds(chat, messageIds = []) {
+    const ids = new Set(messageIds.filter(Boolean));
+    if (!ids.size) return;
+    const removed = [];
+    state.characterStates = (state.characterStates || []).filter(record => {
+        const shouldRemove = record && record.chatId === chat?.id && ids.has(record.relatedMessageId);
+        if (shouldRemove) removed.push(record.id);
+        return !shouldRemove;
+    });
+    for (const id of removed) {
+        try { await kokoMemory.delete('character_states', id); } catch (error) {}
+    }
+    if (typeof rebuildCharacterStateSnapshots === 'function') {
+        state.characterStateSnapshots = rebuildCharacterStateSnapshots(state.characterStates || []);
+    }
+}
+
+function extractKokoJsonPayload(rawText = '') {
+    const text = String(rawText || '').trim();
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const source = fenced ? fenced[1].trim() : text;
+    const start = source.indexOf('{');
+    if (start < 0) return '';
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < source.length; i++) {
+        const ch = source[i];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (ch === '\\') escaped = true;
+            else if (ch === '"') inString = false;
+            continue;
+        }
+        if (ch === '"') {
+            inString = true;
+            continue;
+        }
+        if (ch === '{') depth++;
+        if (ch === '}') {
+            depth--;
+            if (depth === 0) return source.slice(start, i + 1);
+        }
+    }
+    return '';
+}
+
+function stripKokoJsonFromText(rawText = '') {
+    let text = String(rawText || '').replace(/```(?:json)?\s*[\s\S]*?```/gi, '').trim();
+    const payload = extractKokoJsonPayload(text);
+    if (payload) text = text.replace(payload, '').trim();
+    if (/^\s*[{[]/.test(text) && /responses|states|characterId|innerThoughts/i.test(text)) return '';
+    return text;
+}
+
+function parseKokoAiOutput(rawText, chat, speakers) {
+    const speakerMap = new Map((speakers || []).map(profile => [normalizeMessageSenderId(profile.id), profile]));
+    const nameMap = new Map((speakers || []).map(profile => [String(profile.name || '').trim(), profile]).filter(item => item[0]));
+    const fallbackSpeaker = speakers[0] || null;
+
+    function resolveSpeaker(rawId) {
+        if (!chat?.isGroup) return fallbackSpeaker;
+        const id = normalizeMessageSenderId(rawId);
+        return speakerMap.get(id) || nameMap.get(String(rawId || '').trim()) || fallbackSpeaker;
+    }
+
+    try {
+        const payloadText = extractKokoJsonPayload(rawText);
+        if (payloadText) {
+            const payload = JSON.parse(payloadText);
+            const responses = (Array.isArray(payload.responses) ? payload.responses : [])
+                .map(item => {
+                    const speaker = resolveSpeaker(item?.characterId || item?.id || item?.name || item?.speaker);
+                    const text = stripKokoJsonFromText(item?.text || item?.content || item?.message || '').trim();
+                    return speaker && text ? { characterId: speaker.id, speaker, text } : null;
+                })
+                .filter(Boolean);
+            const states = (Array.isArray(payload.states) ? payload.states : [])
+                .map(item => {
+                    const speaker = resolveSpeaker(item?.characterId || item?.id || item?.name || item?.speaker);
+                    return speaker ? { ...item, characterId: speaker.id } : null;
+                })
+                .filter(Boolean);
+            if (responses.length) return { responses, states, parsedJson: true };
+        }
+    } catch (error) {
+        kokoDebugLog('[AI ROUND JSON PARSE FAILED]', { message: error?.message });
+    }
+
+    const fallbackText = stripKokoJsonFromText(rawText).trim();
+    if (!fallbackText || !fallbackSpeaker) return { responses: [], states: [], parsedJson: false };
+    return {
+        responses: [{ characterId: fallbackSpeaker.id, speaker: fallbackSpeaker, text: fallbackText }],
+        states: [],
+        parsedJson: false
+    };
+}
+
+function buildKokoRoundMessages({ chat, mode, userText, speakers }) {
+    const nowText = new Date().toLocaleString('zh-CN');
+    const myProfile = state.myProfile || {};
+    const worldBookContext = (chat.worldBooks || [])
+        .map(bookId => (state.worldBooks || []).find(book => book.id === bookId))
+        .filter(Boolean)
+        .map(book => `--- ${book.name} ---\n${book.content || ''}`)
+        .join('\n\n');
+    const speakerLines = speakers.map(profile => {
+        const previous = getLatestCharacterStateSnapshot(chat, profile.id);
+        return `- ${profile.name || profile.id} | id=${profile.id}\n  persona=${String(profile.persona || profile.signature || '').replace(/\n/g, ' ').slice(0, 300)}\n  previousState=${previous ? `mood=${previous.mood || ''}; affection=${previous.affection || getKokoAffectionFromPrevious(previous)}; clothing=${previous.clothing || previous.outfit || ''}; action=${previous.action || ''}` : 'none'}`;
+    }).join('\n');
+    const recentLines = (chat.history || [])
+        .filter(message => message && message.type !== 'heart_voice')
+        .slice(-20)
+        .map(message => {
+            const senderId = normalizeMessageSenderId(message.senderId || message.sender);
+            const senderName = isCurrentUserSenderId(senderId)
+                ? (myProfile.name || '用户')
+                : ((chat.isGroup ? getProfileInGroupContext(chat, senderId) : chat)?.name || senderId || '未知');
+            const content = getKokoMessagePlainText(message);
+            if (!content) return '';
+            if (message.sender === 'system_instruction') return `[系统指令] ${content}`;
+            return `${senderName}: ${content}`;
+        })
+        .filter(Boolean)
+        .join('\n') || '(暂无最近聊天记录)';
+    const groupRule = chat.isGroup
+        ? `这是一轮群聊。请根据当前上下文选择 1-3 个候选角色发言；characterId 必须从候选角色 ID 中选择；每个发言角色都要有 response 和 state；不要输出候选外 ID。`
+        : `这是一轮私聊。只允许角色 ${speakers[0]?.name || chat.name} 发言，characterId 使用 "${speakers[0]?.id || chat.id}"。`;
+
+    const systemPrompt = `
+你是 Koko 的统一聊天回复引擎。当前时间：${nowText}
+
+[用户资料]
+${myProfile.name || '用户'}：${myProfile.signature || '(无)'}
+
+[候选 AI 角色]
+${speakerLines}
+
+[世界书摘要]
+${worldBookContext || '(无)'}
+
+[任务]
+${groupRule}
+mode=${mode}
+
+必须只输出 JSON 对象，不要输出 Markdown，不要输出解释：
+{
+  "responses": [{"characterId": "候选角色id", "text": "聊天气泡内容"}],
+  "states": [{"characterId": "候选角色id", "mood": "情绪", "affection": "50 (初始)", "clothing": "具体穿着", "action": "具体动作", "innerThoughts": "第一人称真实心声"}]
+}
+states 只能用于状态保存，绝不能把 states、innerThoughts 或 JSON 写进聊天气泡。
+`.trim();
+
+    const taskPrompt = `
+[最近 20 条聊天]
+${recentLines}
+
+[本轮用户文本]
+${String(userText || '').trim() || '(用户没有新文本，请自然推进对话)'}
+
+请生成本轮回复。群聊至少 1 条回复；私聊至少 1 条回复。每条可见回复必须有对应 state。
+`.trim();
+
+    return [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: taskPrompt }
+    ];
+}
+
+async function callKokoChatApiDirect(messages, { signal } = {}) {
+    const apiConfig = getApiFor('chat');
+    const { apiKey, model, endpoint } = apiConfig || {};
+    if (!apiKey || !endpoint || !model) {
+        throw new Error('聊天API未配置，请先到 API 设置填写。');
+    }
+
+    const payload = { model, messages };
+    if (apiConfig.temperature !== null && apiConfig.temperature !== undefined && apiConfig.temperature !== '') {
+        payload.temperature = parseFloat(apiConfig.temperature);
+    }
+    if (apiConfig.maxTokens && apiConfig.maxTokens > 0) {
+        payload.max_tokens = parseInt(apiConfig.maxTokens, 10);
+    }
+
+    if (endpoint.includes('generativelanguage.googleapis.com')) {
+        const systemText = messages.filter(message => message.role === 'system').map(message => message.content).join('\n\n');
+        const contents = messages
+            .filter(message => message.role !== 'system')
+            .map((message, index) => ({
+                role: message.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: `${index === 0 && systemText ? systemText + '\n\n' : ''}${message.content || ''}` }]
+            }));
+        if (!contents.length) contents.push({ role: 'user', parts: [{ text: systemText || '请回复。' }] });
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const response = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents }),
+            signal
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`AI 请求失败：${response.status} ${errorText.slice(0, 200)}`);
+        }
+        const data = await response.json();
+        return (data.candidates?.[0]?.content?.parts || []).map(part => part.text || '').join('\n').trim();
+    }
+
+    const chatEndpoint = `${normalizeApiEndpoint(endpoint)}/v1/chat/completions`;
+    const response = await fetch(chatEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify(payload),
+        signal
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`AI 请求失败：${response.status} ${errorText.slice(0, 200)}`);
+    }
+    const data = await response.json();
+    return String(data.choices?.[0]?.message?.content || '').trim();
+}
+
+function getKokoRoundErrorMessage(error) {
+    const message = String(error?.message || error || '');
+    if (error?.name === 'AbortError' || /超时|timeout/i.test(message)) return 'AI 请求超时，已停止等待。';
+    if (/API未配置|API 未配置|聊天API未配置/.test(message)) return '聊天API未配置，请先到 API 设置填写。';
+    if (/Failed to fetch|NetworkError|Load failed/i.test(message)) return `AI 请求失败：${message}`;
+    if (/返回为空/.test(message)) return 'AI 返回为空。';
+    if (/没有可发言/.test(message)) return '没有可发言的 AI 角色。';
+    return `AI 请求失败：${message || '未知错误'}`;
+}
+
+async function runKokoAiRound({ chat, mode, userText = '', reason = '' }) {
+    const liveChat = state.contacts.find(contact => contact.id === chat?.id) || chat;
+    if (!liveChat) return null;
+
+    const chatStatusEl = document.getElementById('chat-contact-status');
+    state.aiTypingStatus[liveChat.id] = true;
+    if (chatStatusEl && state.activeChatId === liveChat.id) {
+        chatStatusEl.textContent = '正在回复...';
+    }
+    const requestId = createAiRequestId(liveChat.id);
+    kokoDebugLog('[AI ROUND START]', { chatId: liveChat.id, mode, reason });
+
+    try {
+        const speakers = resolveKokoRoundSpeakers(liveChat);
+        if (!speakers.length) {
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: '没有可发言的 AI 角色，请检查群成员。'
+            }, 'system', liveChat, false, 'chat');
+            return null;
+        }
+
+        const messages = buildKokoRoundMessages({ chat: liveChat, mode, userText, speakers });
+        kokoDebugLog('[AI ROUND BEFORE FETCH]', {
+            mode,
+            messagesCount: messages.length,
+            speakers: speakers.map(profile => ({ id: profile.id, name: profile.name }))
+        });
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        let rawText = '';
+        try {
+            rawText = await callKokoChatApiDirect(messages, { signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+        }
+        kokoDebugLog('[AI ROUND RAW]', String(rawText || '').slice(0, 500));
+
+        if (!isLatestAiRequest(liveChat.id, requestId)) {
+            kokoDebugLog('[AI ROUND STALE]', { chatId: liveChat.id, mode, requestId });
+            return null;
+        }
+
+        if (!String(rawText || '').trim()) {
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: 'AI 返回为空，请检查模型或 API 设置。'
+            }, 'system', liveChat, false, 'chat');
+            return null;
+        }
+
+        const parsed = parseKokoAiOutput(rawText, liveChat, speakers);
+        kokoDebugLog('[AI ROUND PARSED]', {
+            responseCount: parsed.responses.length,
+            stateCount: parsed.states.length,
+            parsedJson: parsed.parsedJson
+        });
+
+        if (!parsed.responses.length) {
+            await createAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: 'AI 返回为空。'
+            }, 'system', liveChat, false, 'chat');
+            return null;
+        }
+
+        const stateByCharacter = new Map(parsed.states.map(item => [normalizeMessageSenderId(item.characterId), item]));
+        const savedMessages = [];
+        for (const response of parsed.responses) {
+            const speaker = response.speaker || speakers[0];
+            const characterId = liveChat.isGroup ? normalizeMessageSenderId(speaker.id) : normalizeMessageSenderId(liveChat.id);
+            const previousSuppress = state.suppressEchoesStateCommit;
+            state.suppressEchoesStateCommit = true;
+            let message = null;
+            try {
+                message = await createAndAddMessage({
+                    type: 'text',
+                    sender: characterId,
+                    senderId: characterId,
+                    content: response.text,
+                    forceAvatar: true
+                }, characterId, liveChat, true, 'chat');
+            } finally {
+                state.suppressEchoesStateCommit = previousSuppress;
+            }
+            if (!message) throw new Error('AI 回复消息保存失败。');
+            savedMessages.push(message);
+            kokoDebugLog('[AI MESSAGE SAVED]', { messageId: message.id, characterId });
+            await saveKokoRoundState({
+                chat: liveChat,
+                speaker,
+                message,
+                explicitState: stateByCharacter.get(normalizeMessageSenderId(response.characterId || characterId)),
+                userText
+            });
+        }
+
+        return savedMessages;
+    } catch (error) {
+        kokoDebugLog('[AI ROUND FAILED]', { message: error?.message, name: error?.name, stack: error?.stack });
+        await createAndAddMessage({
+            type: 'system_notification',
+            sender: 'system',
+            content: getKokoRoundErrorMessage(error)
+        }, 'system', liveChat, false, 'chat');
+        return null;
+    } finally {
+        state.aiTypingStatus[liveChat.id] = false;
+        if (chatStatusEl && state.activeChatId === liveChat.id) {
+            chatStatusEl.textContent = '在线';
+        }
+        kokoDebugLog('[AI ROUND END]', { chatId: liveChat.id, mode });
+    }
+}
+
+window.runKokoAiRound = runKokoAiRound;
+
 function getPrivateMemoryLineForGroupPrompt(message, privateContact, memberProfile) {
     const senderId = normalizeMessageSenderId(message?.senderId || message?.sender);
     const authorName = isCurrentUserSenderId(senderId)
@@ -47715,7 +48209,7 @@ await initApp();
 </script>
 <script>
   (function() {
-    const BUILD_VERSION = '20260526-fix-7';
+    const BUILD_VERSION = '20260526-fix-8';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -47738,7 +48232,7 @@ await initApp();
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      const SW_VERSION = '20260526-fix-7';
+      const SW_VERSION = '20260526-fix-8';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
