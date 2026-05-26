@@ -3317,179 +3317,6 @@
         transform: translateY(-100%);
     }
 }
-/* --- 新的心声面板样式 (猫咪主题 - 硬编码颜色版) --- */
-#heart-voice-panel {
-    position: fixed !important;
-    bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    width: min(92vw, 390px) !important;
-    max-height: 65vh !important;
-    overflow-y: auto !important;
-    z-index: 2147483647 !important;
-    background: rgba(255, 250, 248, 0.96);
-    border: 1px solid rgba(240, 220, 216, 0.95);
-    border-radius: 22px;
-    box-shadow: 0 16px 48px rgba(80, 60, 56, 0.22);
-    padding: 14px;
-    display: none;
-    flex-direction: column;
-    pointer-events: auto !important;
-    gap: 10px;
-}
-
-#heart-voice-panel[style*="display: flex"] {
-    display: flex !important;
-}
-
-.hv-panel-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.hv-panel-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: #7D6C65;
-}
-
-.hv-panel-subtitle {
-    font-size: 12px;
-    color: #A28F88;
-    margin-top: 4px;
-    line-height: 1.4;
-}
-
-.hv-panel-close {
-    border: none;
-    background: transparent;
-    color: #A28F88;
-    font-size: 18px;
-    cursor: pointer;
-    padding: 0 4px;
-}
-
-.hv-section-title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #7D6C65;
-    margin-bottom: 8px;
-}
-
-.hv-latest-card {
-    background: rgba(255, 255, 255, 0.8);
-    border: 1px solid #F0E2DE;
-    border-radius: 12px;
-    padding: 12px 14px;
-}
-
-.hv-item {
-    display: flex;
-    align-items: flex-start;
-    font-size: 14px;
-    padding-bottom: 12px;
-    border-bottom: 1px dashed #EAD9D5;
-}
-
-.hv-item:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-}
-
-.hv-icon {
-    font-size: 18px;
-    margin-right: 12px;
-    width: 20px;
-    text-align: center;
-    margin-top: -2px;
-}
-
-.hv-label {
-    font-weight: 600;
-    color: #7D6C65;
-    flex-shrink: 0;
-}
-
-.hv-value {
-    color: #A28F88;
-    margin-left: 8px;
-    line-height: 1.5;
-}
-
-#hv-jealousy {
-    color: #FFB347;
-    font-size: 16px;
-    font-weight: bold;
-    letter-spacing: 2px;
-}
-
-.hv-toggle-history-btn {
-    width: 100%;
-    border: none;
-    border-radius: 10px;
-    background: #F3E6E0;
-    color: #7D6C65;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 10px 12px;
-    cursor: pointer;
-}
-
-.hv-record-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.hv-record-item {
-    background: rgba(255, 255, 255, 0.8);
-    border: 1px solid #F0E2DE;
-    border-radius: 12px;
-    padding: 10px 12px;
-}
-
-.hv-record-meta {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 12px;
-    color: #A28F88;
-    margin-bottom: 6px;
-}
-
-.hv-record-emotion {
-    font-size: 13px;
-    font-weight: 700;
-    color: #7D6C65;
-    margin-bottom: 4px;
-}
-
-.hv-record-thoughts {
-    font-size: 13px;
-    color: #6E615C;
-    line-height: 1.5;
-}
-
-.hv-empty {
-    font-size: 13px;
-    color: #A28F88;
-    background: rgba(255, 255, 255, 0.75);
-    border: 1px dashed #EAD9D5;
-    border-radius: 12px;
-    padding: 14px 12px;
-    text-align: center;
-}
-
-#hv-history-section {
-    display: none;
-}
-
-#heart-voice-panel.show-history #hv-history-section {
-    display: block;
-}
-
 .diary-generate-status {
     min-height: 20px;
     margin-top: 10px;
@@ -12226,7 +12053,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
     </div>
 </div>
 </div>
-<div id="heart-voice-panel" class="echoes-state-panel" style="display: none;"></div>
+<div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
 <script>
 (function () {
@@ -24245,7 +24072,9 @@ function renderHeartVoicePanelRecords(records = []) {
 }
 
 function ensureEchoesHeartVoicePanel() {
-    return ensureEchoesStatePanel();
+    return typeof window.ensureEchoesOriginalStatePanel === 'function'
+        ? window.ensureEchoesOriginalStatePanel()
+        : document.getElementById('echoes-state-panel');
 }
 
 function getEchoesCharacterProfile(chat, characterId) {
@@ -24772,394 +24601,12 @@ async function ensureFallbackHeartVoiceForClickedCharacter(chat, characterId) {
     );
 }
 
-function ensureEchoesStatePanelStyles() {
-    if (document.getElementById('echoes-state-panel-style')) return;
-    const style = document.createElement('style');
-    style.id = 'echoes-state-panel-style';
-    style.textContent = `
-        #heart-voice-panel.echoes-state-panel {
-            position: fixed !important;
-            left: 50% !important;
-            bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
-            transform: translateX(-50%) !important;
-            width: min(92vw, 420px) !important;
-            max-height: 78vh !important;
-            overflow-y: auto !important;
-            z-index: 2147483647 !important;
-            display: none;
-            flex-direction: column !important;
-            gap: 14px !important;
-            padding: 0 !important;
-            color: #1f2933;
-            background: rgba(248, 250, 252, 0.88) !important;
-            border: 1px solid rgba(255,255,255,0.72) !important;
-            border-radius: 28px !important;
-            box-shadow: 0 24px 70px rgba(31, 41, 55, 0.28) !important;
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-        }
-        .echoes-state-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 22px 24px 18px;
-            border-bottom: 1px solid rgba(255,255,255,0.7);
-        }
-        .echoes-state-title {
-            font-size: 24px;
-            font-weight: 800;
-            color: #17212f;
-        }
-        .echoes-state-close {
-            width: 42px;
-            height: 42px;
-            border: none;
-            border-radius: 50%;
-            background: rgba(255,255,255,0.66);
-            color: #64748b;
-            font-size: 30px;
-            line-height: 38px;
-            cursor: pointer;
-        }
-        .echoes-state-body {
-            display: flex;
-            flex-direction: column;
-            gap: 14px;
-            padding: 18px 20px 22px;
-        }
-        .echoes-state-profile {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 8px 2px 12px;
-        }
-        .echoes-state-avatar {
-            width: 64px;
-            height: 64px;
-            border-radius: 50%;
-            object-fit: cover;
-            background: rgba(255,255,255,0.8);
-            box-shadow: 0 8px 22px rgba(15,23,42,0.16);
-        }
-        .echoes-state-name {
-            font-size: 22px;
-            font-weight: 800;
-            color: #162033;
-        }
-        .echoes-state-subtitle {
-            margin-top: 4px;
-            color: #758195;
-            font-size: 14px;
-        }
-        .echoes-state-card {
-            background: rgba(255,255,255,0.68);
-            border: 1px solid rgba(255,255,255,0.82);
-            border-radius: 18px;
-            padding: 16px;
-            box-shadow: 0 8px 22px rgba(31,41,55,0.10);
-        }
-        .echoes-state-card-label {
-            font-size: 14px;
-            font-weight: 700;
-            color: #77869a;
-            margin-bottom: 8px;
-        }
-        .echoes-state-card-value {
-            font-size: 18px;
-            line-height: 1.65;
-            color: #202c3b;
-            white-space: pre-wrap;
-        }
-        .echoes-state-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 14px;
-        }
-        .echoes-state-thoughts .echoes-state-card-value {
-            max-height: 210px;
-            overflow-y: auto;
-            font-size: 17px;
-        }
-        .echoes-state-history-toggle {
-            align-self: flex-end;
-            width: 48px;
-            height: 48px;
-            border: none;
-            border-radius: 50%;
-            color: #60748b;
-            background: rgba(255,255,255,0.72);
-            cursor: pointer;
-            box-shadow: 0 8px 20px rgba(31,41,55,0.10);
-        }
-        .echoes-state-history {
-            display: none;
-            flex-direction: column;
-            gap: 10px;
-        }
-        #heart-voice-panel.show-history .echoes-state-history {
-            display: flex;
-        }
-        .echoes-state-history-item {
-            padding: 12px 14px;
-            border-radius: 14px;
-            background: rgba(255,255,255,0.62);
-            border: 1px solid rgba(255,255,255,0.78);
-        }
-        .echoes-state-history-meta {
-            display: flex;
-            justify-content: space-between;
-            color: #7b8794;
-            font-size: 12px;
-            margin-bottom: 6px;
-        }
-        .echoes-state-empty {
-            padding: 18px;
-            color: #718096;
-            text-align: center;
-        }
-        @media (max-width: 420px) {
-            #heart-voice-panel.echoes-state-panel {
-                width: min(94vw, 390px) !important;
-                max-height: 80vh !important;
-                border-radius: 24px !important;
-            }
-            .echoes-state-grid {
-                grid-template-columns: 1fr;
-            }
-            .echoes-state-title {
-                font-size: 22px;
-            }
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-function ensureEchoesStatePanel() {
-    ensureEchoesStatePanelStyles();
-    let panel = document.getElementById('heart-voice-panel');
-    if (!panel) {
-        panel = document.createElement('div');
-        panel.id = 'heart-voice-panel';
-    }
-    panel.className = 'echoes-state-panel';
-    panel.innerHTML = `
-        <div class="echoes-state-header">
-            <div class="echoes-state-title" id="echoes-state-title">角色的状态</div>
-            <button class="echoes-state-close" id="close-heart-voice-panel" type="button">&times;</button>
-        </div>
-        <div class="echoes-state-body">
-            <div class="echoes-state-profile">
-                <img class="echoes-state-avatar" id="echoes-state-avatar" alt="角色头像">
-                <div style="flex:1; min-width:0;">
-                    <div class="echoes-state-name" id="echoes-state-name">角色</div>
-                    <div class="echoes-state-subtitle" id="hv-character-name">实时状态同步中</div>
-                </div>
-                <button class="echoes-state-history-toggle" id="hv-toggle-history-btn" type="button" title="查看历史状态">
-                    <i class="fas fa-clock-rotate-left"></i>
-                </button>
-            </div>
-            <div id="hv-empty-state" class="echoes-state-empty" style="display:none;">还没有状态记录</div>
-            <div id="hv-content-wrap">
-                <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">实时心情</div>
-                    <div class="echoes-state-card-value" id="echoes-state-mood"></div>
-                </div>
-                <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">对你的好感度</div>
-                    <div class="echoes-state-card-value" id="echoes-state-favorability"></div>
-                </div>
-                <div class="echoes-state-grid">
-                    <div class="echoes-state-card">
-                        <div class="echoes-state-card-label">穿着</div>
-                        <div class="echoes-state-card-value" id="echoes-state-outfit"></div>
-                    </div>
-                    <div class="echoes-state-card">
-                        <div class="echoes-state-card-label">动作</div>
-                        <div class="echoes-state-card-value" id="echoes-state-action"></div>
-                    </div>
-                </div>
-                <div class="echoes-state-card echoes-state-thoughts">
-                    <div class="echoes-state-card-label">内心想法</div>
-                    <div class="echoes-state-card-value" id="echoes-state-inner-thoughts"></div>
-                </div>
-                <div class="echoes-state-history" id="hv-history-section">
-                    <div class="echoes-state-card-label">历史状态记录</div>
-                    <div id="hv-history-list"></div>
-                </div>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(panel);
-
-    const closeBtn = panel.querySelector('#close-heart-voice-panel');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            closeHeartVoicePanel();
-        });
-    }
-
-    const toggleBtn = panel.querySelector('#hv-toggle-history-btn');
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            panel.classList.toggle('show-history');
-        });
-    }
-
-    return panel;
-}
-
-function getEchoesStateHistory(chat, characterId) {
-    const chatId = typeof chat === 'string' ? chat : chat?.id;
-    const normalizedId = normalizeMessageSenderId(characterId);
-    return (state.characterStates || [])
-        .filter(record =>
-            record
-            && record.chatId === chatId
-            && normalizeMessageSenderId(record.characterId) === normalizedId
-        )
-        .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0));
-}
-
-function buildEmptyEchoesState(chat, characterId) {
-    const profile = getEchoesCharacterProfile(chat, characterId) || chat || {};
-    const previous = getLatestCharacterStateSnapshot(chat, characterId);
-    return previous || {
-        id: `state_preview_${Date.now()}`,
-        chatId: chat?.id || '',
-        characterId: normalizeMessageSenderId(characterId),
-        timestamp: Date.now(),
-        source: chat?.isGroup ? 'group' : 'private',
-        mood: '等待同步',
-        favorability: 50,
-        favorabilityLabel: getStableFavorabilityLabel(50, '等待同步'),
-        outfit: getDefaultOutfitForProfile(profile),
-        action: '还没有新的动作记录。',
-        innerThoughts: '还没有状态记录。继续聊一轮后，这里会同步角色没有说出口的想法。',
-        heartRate: '平稳',
-        jealousy: '无'
-    };
-}
-
-function renderEchoesStatePanel(chat, characterId, snapshot, historyRecords = []) {
-    const profile = getEchoesCharacterProfile(chat, characterId) || chat || {};
-    const name = profile.name || '角色';
-    const avatar = profile.avatar || `https://via.placeholder.com/80/DDD/666?text=${encodeURIComponent(name.slice(0, 1) || 'U')}`;
-
-    const titleEl = document.getElementById('echoes-state-title');
-    const avatarEl = document.getElementById('echoes-state-avatar');
-    const nameEl = document.getElementById('echoes-state-name');
-    const subtitleEl = document.getElementById('hv-character-name');
-    const emptyEl = document.getElementById('hv-empty-state');
-    const contentWrapEl = document.getElementById('hv-content-wrap');
-    const moodEl = document.getElementById('echoes-state-mood');
-    const favorabilityEl = document.getElementById('echoes-state-favorability');
-    const outfitEl = document.getElementById('echoes-state-outfit');
-    const actionEl = document.getElementById('echoes-state-action');
-    const thoughtsEl = document.getElementById('echoes-state-inner-thoughts');
-    const historyListEl = document.getElementById('hv-history-list');
-
-    if (titleEl) titleEl.textContent = `${name} 的状态`;
-    if (avatarEl) avatarEl.src = avatar;
-    if (nameEl) nameEl.textContent = name;
-    if (subtitleEl) subtitleEl.textContent = '实时状态同步中';
-
-    if (!snapshot) {
-        if (emptyEl) {
-            emptyEl.textContent = '还没有状态记录';
-            emptyEl.style.display = 'block';
-        }
-        if (contentWrapEl) contentWrapEl.style.display = 'none';
-        return;
-    }
-
-    if (emptyEl) emptyEl.style.display = 'none';
-    if (contentWrapEl) contentWrapEl.style.display = 'block';
-    const favorability = normalizeFavorabilityValue(snapshot.favorability, 50);
-    const label = snapshot.favorabilityLabel || getStableFavorabilityLabel(favorability, snapshot.mood);
-    if (moodEl) moodEl.textContent = snapshot.mood || '平静';
-    if (favorabilityEl) favorabilityEl.textContent = `${favorability}（${label}）`;
-    if (outfitEl) outfitEl.textContent = snapshot.outfit || snapshot.clothing || getDefaultOutfitForProfile(profile);
-    if (actionEl) actionEl.textContent = snapshot.action || '维持着当前状态。';
-    if (thoughtsEl) thoughtsEl.textContent = snapshot.innerThoughts || '还没有记录到内心想法。';
-
-    if (historyListEl) {
-        historyListEl.innerHTML = historyRecords.slice(0, 8).map(record => `
-            <div class="echoes-state-history-item">
-                <div class="echoes-state-history-meta">
-                    <span>${escapeUiHtml(formatHeartVoiceRecordTime(record.timestamp))}</span>
-                    <span>${escapeUiHtml(record.mood || '平静')}</span>
-                </div>
-                <div>${escapeUiHtml(record.innerThoughts || '')}</div>
-            </div>
-        `).join('') || '<div class="echoes-state-empty">暂无历史状态</div>';
-    }
-}
-
 async function openEchoesStatePanel(chatId, characterId, options = {}) {
-    const panel = ensureEchoesStatePanel();
-    const chat = state.contacts.find(contact => contact.id === chatId);
-    if (!chat) {
-        alert('没有当前聊天');
-        console.warn('[ECHOES STATE PANEL OPEN FAILED] missing_chat', { chatId, characterId });
-        return null;
+    if (typeof window.__openEchoesOriginalStatePanel === 'function') {
+        return window.__openEchoesOriginalStatePanel(chatId || state.activeChatId, characterId, options);
     }
-
-    let normalizedCharacterId = normalizeMessageSenderId(characterId);
-    if (!chat.isGroup || normalizedCharacterId === 'contact') {
-        normalizedCharacterId = normalizeMessageSenderId(chat.id);
-    }
-    if (!normalizedCharacterId || isCurrentUserSenderId(normalizedCharacterId)) {
-        alert('未找到该角色状态');
-        console.warn('[ECHOES STATE PANEL OPEN FAILED] invalid_character', { chatId, characterId, normalizedCharacterId });
-        return null;
-    }
-
-    let snapshot = getLatestCharacterStateSnapshot(chat, normalizedCharacterId);
-    if (!snapshot && options.createFallbackIfEmpty === true) {
-        snapshot = await ensureFallbackHeartVoiceForClickedCharacter(chat, normalizedCharacterId);
-    }
-    snapshot = snapshot || buildEmptyEchoesState(chat, normalizedCharacterId);
-    const historyRecords = getEchoesStateHistory(chat, normalizedCharacterId);
-    renderEchoesStatePanel(chat, normalizedCharacterId, snapshot, historyRecords);
-
-    panel.dataset.characterId = normalizedCharacterId;
-    panel.dataset.chatId = chat.id || '';
-    panel.style.setProperty('display', 'flex', 'important');
-    panel.style.setProperty('position', 'fixed', 'important');
-    panel.style.setProperty('left', '50%', 'important');
-    panel.style.setProperty('bottom', 'calc(72px + env(safe-area-inset-bottom, 0px))', 'important');
-    panel.style.setProperty('transform', 'translateX(-50%)', 'important');
-    panel.style.setProperty('width', 'min(92vw, 420px)', 'important');
-    panel.style.setProperty('max-height', '78vh', 'important');
-    panel.style.setProperty('overflow-y', 'auto', 'important');
-    panel.style.setProperty('z-index', '2147483647', 'important');
-    panel.style.setProperty('visibility', 'visible', 'important');
-    panel.style.setProperty('opacity', '1', 'important');
-    panel.style.setProperty('pointer-events', 'auto', 'important');
-
-    state.heartVoicePanel = {
-        isOpen: true,
-        characterId: normalizedCharacterId,
-        chatId: chat.id || null
-    };
-
-    console.log('[ECHOES STATE PANEL OPEN]', {
-        chatId: chat.id,
-        characterId: normalizedCharacterId,
-        hasSnapshot: !!snapshot,
-        historyCount: historyRecords.length
-    });
-    console.log('[ECHOES STATE PANEL OPEN DONE]', {
-        chatId: chat.id,
-        characterId: normalizedCharacterId,
-        display: panel.style.display,
-        rect: panel.getBoundingClientRect()
-    });
-    return snapshot;
+    console.warn('[ECHOES STATE PANEL] original panel is not installed yet');
+    return null;
 }
 
 async function openEchoesHeartVoicePanel(chatId, characterId, options = {}) {
@@ -25180,9 +24627,7 @@ function openHeartVoicePanel(characterId, chatContext) {
 
 window.openHeartVoicePanelForCharacter = openHeartVoicePanelForCharacter;
 window.openEchoesHeartVoicePanel = openEchoesHeartVoicePanel;
-window.openEchoesStatePanel = openEchoesStatePanel;
 window.state = state;
-
 function setupEchoesStateAvatarClick() {
     if (window.__echoesStateAvatarClickBound) {
         document.removeEventListener('click', handleEchoesStateAvatarClick, true);
@@ -48499,500 +47944,6 @@ await initApp();
         console.log('[ECHOES STATE BRIDGE READY]');
     }
 
-    function ensureEchoesStatePanel() {
-        let panel = document.getElementById('echoes-state-panel');
-
-        if (!panel) {
-            panel = document.createElement('div');
-            panel.id = 'echoes-state-panel';
-            panel.className = 'echoes-state-panel';
-            document.body.appendChild(panel);
-        }
-
-        panel.innerHTML = `
-            <div class="echoes-state-header">
-                <div class="echoes-state-title" id="echoes-state-title">角色的状态</div>
-                <button class="echoes-state-close" id="echoes-state-close" type="button">×</button>
-            </div>
-
-            <div class="echoes-state-profile">
-                <img id="echoes-state-avatar" class="echoes-state-avatar" alt="">
-                <div class="echoes-state-profile-main">
-                    <div id="echoes-state-name" class="echoes-state-name">角色</div>
-                    <div class="echoes-state-sync">实时状态同步中</div>
-                </div>
-            </div>
-
-            <div id="echoes-state-empty" class="echoes-state-empty" style="display:none;">还没有状态记录</div>
-
-            <div id="echoes-state-content" class="echoes-state-content">
-                <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">实时心情</div>
-                    <div class="echoes-state-card-value" id="echoes-state-mood">微妙</div>
-                </div>
-
-                <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">对你的好感度</div>
-                    <div class="echoes-state-card-value" id="echoes-state-favorability">50（一般）</div>
-                </div>
-
-                <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">穿着</div>
-                    <div class="echoes-state-card-value" id="echoes-state-outfit">日常穿着</div>
-                </div>
-
-                <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">动作</div>
-                    <div class="echoes-state-card-value" id="echoes-state-action">安静地站着。</div>
-                </div>
-
-                <div class="echoes-state-card echoes-state-thought-card">
-                    <div class="echoes-state-card-label">内心想法</div>
-                    <div class="echoes-state-card-value" id="echoes-state-inner-thoughts">他没有把所有话说出口。</div>
-                </div>
-
-                <details class="echoes-state-history">
-                    <summary>历史状态记录</summary>
-                    <div id="echoes-state-history-list" class="echoes-state-history-list"></div>
-                </details>
-            </div>
-        `;
-
-        const closeBtn = panel.querySelector('#echoes-state-close');
-        if (closeBtn) {
-            closeBtn.onclick = () => {
-                panel.style.setProperty('display', 'none', 'important');
-            };
-        }
-
-        ensureEchoesStatePanelStyles();
-        document.body.appendChild(panel);
-        return panel;
-    }
-
-    function ensureEchoesStatePanelStyles() {
-        if (document.getElementById('echoes-state-panel-final-style')) return;
-
-        const style = document.createElement('style');
-        style.id = 'echoes-state-panel-final-style';
-        style.textContent = `
-            #echoes-state-panel {
-                position: fixed !important;
-                left: 50% !important;
-                bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
-                transform: translateX(-50%) !important;
-                width: min(92vw, 420px) !important;
-                max-height: 78vh !important;
-                overflow-y: auto !important;
-                z-index: 2147483647 !important;
-                display: none;
-                flex-direction: column !important;
-                gap: 12px !important;
-                padding: 0 0 16px !important;
-                border-radius: 28px !important;
-                background: rgba(248, 250, 252, 0.92) !important;
-                border: 1px solid rgba(255,255,255,0.78) !important;
-                box-shadow: 0 24px 70px rgba(31, 41, 55, 0.28) !important;
-                backdrop-filter: blur(20px) !important;
-                -webkit-backdrop-filter: blur(20px) !important;
-                color: #1f2933 !important;
-            }
-
-            #echoes-state-panel .echoes-state-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 20px 22px 14px;
-                border-bottom: 1px solid rgba(255,255,255,0.72);
-            }
-
-            #echoes-state-panel .echoes-state-title {
-                font-size: 22px;
-                font-weight: 800;
-                color: #17212f;
-            }
-
-            #echoes-state-panel .echoes-state-close {
-                width: 38px;
-                height: 38px;
-                border: none;
-                border-radius: 50%;
-                background: rgba(255,255,255,0.72);
-                color: #64748b;
-                font-size: 28px;
-                line-height: 34px;
-                cursor: pointer;
-            }
-
-            #echoes-state-panel .echoes-state-profile {
-                display: flex;
-                align-items: center;
-                gap: 14px;
-                margin: 16px 18px 4px;
-                padding: 14px;
-                border-radius: 22px;
-                background: rgba(255,255,255,0.68);
-            }
-
-            #echoes-state-panel .echoes-state-avatar {
-                width: 58px;
-                height: 58px;
-                border-radius: 18px;
-                object-fit: cover;
-                background: #e5e7eb;
-            }
-
-            #echoes-state-panel .echoes-state-name {
-                font-size: 18px;
-                font-weight: 800;
-                color: #1f2937;
-            }
-
-            #echoes-state-panel .echoes-state-sync {
-                margin-top: 4px;
-                font-size: 12px;
-                color: #6b7280;
-            }
-
-            #echoes-state-panel .echoes-state-content {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-                padding: 0 18px;
-            }
-
-            #echoes-state-panel .echoes-state-card {
-                padding: 13px 15px;
-                border-radius: 18px;
-                background: rgba(255,255,255,0.72);
-                border: 1px solid rgba(255,255,255,0.86);
-            }
-
-            #echoes-state-panel .echoes-state-card-label {
-                font-size: 12px;
-                font-weight: 700;
-                color: #79907b;
-                margin-bottom: 6px;
-            }
-
-            #echoes-state-panel .echoes-state-card-value {
-                font-size: 14px;
-                line-height: 1.65;
-                color: #263238;
-                white-space: pre-wrap;
-                word-break: break-word;
-            }
-
-            #echoes-state-panel .echoes-state-thought-card .echoes-state-card-value {
-                font-size: 15px;
-                line-height: 1.75;
-            }
-
-            #echoes-state-panel .echoes-state-empty {
-                margin: 14px 18px;
-                padding: 18px;
-                border-radius: 18px;
-                background: rgba(255,255,255,0.72);
-                text-align: center;
-                color: #6b7280;
-            }
-
-            #echoes-state-panel .echoes-state-history {
-                margin-top: 4px;
-                padding: 12px 14px;
-                border-radius: 16px;
-                background: rgba(255,255,255,0.55);
-                color: #4b5563;
-                font-size: 13px;
-            }
-
-            #echoes-state-panel .echoes-state-history-item {
-                margin-top: 10px;
-                padding-top: 10px;
-                border-top: 1px solid rgba(148,163,184,0.25);
-                line-height: 1.6;
-            }
-
-            #chat-messages .message-wrapper.echoes-state-clickable-message .message-avatar,
-            #chat-messages .message-wrapper.echoes-state-clickable-message.is-first-in-sequence .message-avatar {
-                visibility: visible !important;
-            }
-
-            #chat-messages .message-wrapper.echoes-state-clickable-message .message-author-name,
-            #chat-messages .message-wrapper.show-state-author-name .message-author-name {
-                display: block !important;
-                cursor: pointer !important;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
-    function getEchoesStateRecordsForPanel(chat, characterId) {
-        const normalizedId = safeNormalizeId(characterId);
-        const records = [];
-
-        if (Array.isArray(state.characterStates)) {
-            records.push(
-                ...state.characterStates.filter(record =>
-                    record &&
-                    safeNormalizeId(record.chatId) === safeNormalizeId(chat.id) &&
-                    safeNormalizeId(record.characterId) === normalizedId
-                )
-            );
-        }
-
-        if (Array.isArray(chat.history)) {
-            records.push(
-                ...chat.history
-                    .filter(message =>
-                        message &&
-                        message.type === 'heart_voice' &&
-                        (
-                            safeNormalizeId(message.characterId) === normalizedId ||
-                            safeNormalizeId(message.senderId) === normalizedId ||
-                            safeNormalizeId(message.sender) === normalizedId
-                        )
-                    )
-                    .map(message => ({
-                        id: message.id,
-                        chatId: chat.id,
-                        characterId: normalizedId,
-                        timestamp: message.timestamp || Date.now(),
-                        mood: message.content?.mood || message.content?.emotion || '微妙',
-                        favorability: message.content?.favorability,
-                        favorabilityLabel: message.content?.favorabilityLabel || '',
-                        outfit: message.content?.outfit || message.content?.clothing || '日常穿着',
-                        action: message.content?.action || '安静地看着这场对话。',
-                        innerThoughts: message.content?.innerThoughts || message.content?.thoughts || message.text || '他没有把所有话说出口。'
-                    }))
-            );
-        }
-
-        return records.sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
-    }
-
-    async function ensureEchoesStateForClickedCharacter(chat, characterId, sourceMessage = null) {
-        const existing = getEchoesStateRecordsForPanel(chat, characterId)[0];
-        if (existing) return existing;
-
-        const fallback = buildEchoesFallbackState(chat, characterId, sourceMessage);
-
-        if (typeof saveEchoesCharacterState === 'function') {
-            const saved = await saveEchoesCharacterState(
-                chat,
-                characterId,
-                fallback,
-                sourceMessage?.id || `echoes_click_${chat.id}_${characterId}_${Date.now()}`
-            );
-            if (saved) return saved;
-        }
-
-        state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
-
-        const record = {
-            id: `state_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            chatId: chat.id,
-            characterId,
-            timestamp: Date.now(),
-            source: chat.isGroup ? 'group' : 'private',
-            ...fallback,
-            relatedMessageId: sourceMessage?.id || null
-        };
-
-        state.characterStates.push(record);
-
-        if (typeof updateCharacterStateSnapshot === 'function') {
-            updateCharacterStateSnapshot(record);
-        }
-
-        try {
-            if (typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
-                await kokoMemory.put('character_states', record);
-            }
-        } catch (error) {
-            console.warn('[ECHOES STATE FALLBACK PERSIST FAILED]', error);
-        }
-
-        console.log('[ECHOES_STATE_SAVED_BY_CLICK]', record);
-        return record;
-    }
-
-    function buildEchoesFallbackState(chat, characterId, message = null) {
-        const profile = getEchoesProfileForPanel(chat, characterId);
-        const visibleText = getMessageTextForEchoesState(message) || '刚才那句话还停在心里，没有完全说出口。';
-
-        let previous = null;
-        if (typeof getLatestCharacterStateSnapshot === 'function') {
-            previous = getLatestCharacterStateSnapshot(chat, characterId);
-        }
-
-        if (!previous && chat.isGroup && typeof getCrossChatStateHintForGroupMember === 'function') {
-            previous = getCrossChatStateHintForGroupMember(chat, characterId);
-        }
-
-        let fallbackThought = '';
-        if (typeof makeLocalHeartVoiceThought === 'function') {
-            fallbackThought = makeLocalHeartVoiceThought(visibleText, profile, chat);
-        } else {
-            fallbackThought = '他刚才那句话说得不重，但心里其实还在掂量对方的反应。';
-        }
-
-        let mood = previous?.mood || previous?.emotion || '微妙';
-        if (typeof inferHeartVoiceEmotion === 'function') {
-            mood = inferHeartVoiceEmotion(visibleText) || mood;
-        }
-
-        let favorability = Number(previous?.favorability);
-        if (!Number.isFinite(favorability)) favorability = 50;
-
-        const label = previous?.favorabilityLabel || previous?.affection || mapEchoesFavorabilityLabel(favorability, mood);
-
-        const outfit = previous?.outfit || previous?.clothing || '日常穿着，没有明确换装迹象。';
-        const action = previous?.action || '安静地看着对话的走向，神情有些细微变化。';
-
-        return {
-            mood,
-            favorability,
-            favorabilityLabel: label,
-            affection: label,
-            outfit,
-            clothing: outfit,
-            action,
-            innerThoughts: fallbackThought,
-            visibleText
-        };
-    }
-
-    function mapEchoesFavorabilityLabel(value, mood = '') {
-        const n = Number(value);
-        if (n <= 10) return '极度厌恶';
-        if (n <= 25) return '厌烦';
-        if (n <= 40) return '冷淡';
-        if (n <= 55) return '一般';
-        if (n <= 70) {
-            if (/怒|恼|烦|冷|火/.test(String(mood))) return '恼火中带在意';
-            return '在意';
-        }
-        if (n <= 85) return '明显偏爱';
-        return '非常偏爱';
-    }
-
-    function renderEchoesStatePanelCard(chat, characterId, record, historyRecords = []) {
-        const panel = ensureEchoesStatePanel();
-        const profile = getEchoesProfileForPanel(chat, characterId);
-        const name = profile?.name || '角色';
-        const avatar = profile?.avatar || `https://via.placeholder.com/80/DDD/666?text=${encodeURIComponent(name.slice(0, 1) || '角')}`;
-
-        panel.querySelector('#echoes-state-title').textContent = `${name} 的状态`;
-        panel.querySelector('#echoes-state-name').textContent = name;
-        panel.querySelector('#echoes-state-avatar').src = avatar;
-
-        const emptyEl = panel.querySelector('#echoes-state-empty');
-        const contentEl = panel.querySelector('#echoes-state-content');
-
-        if (!record) {
-            emptyEl.style.display = 'block';
-            contentEl.style.display = 'none';
-            return;
-        }
-
-        emptyEl.style.display = 'none';
-        contentEl.style.display = 'flex';
-
-        const mood = record.mood || record.emotion || '微妙';
-        const favorability = record.favorability ?? record.affection ?? '50';
-        const favorabilityLabel = record.favorabilityLabel || record.affection || mapEchoesFavorabilityLabel(favorability, mood);
-        const outfit = record.outfit || record.clothing || '日常穿着';
-        const action = record.action || '安静地看着这场对话。';
-        const thoughts = record.innerThoughts || record.thoughts || '他没有把所有话说出口。';
-
-        panel.querySelector('#echoes-state-mood').textContent = mood;
-        panel.querySelector('#echoes-state-favorability').textContent = `${favorability}（${favorabilityLabel}）`;
-        panel.querySelector('#echoes-state-outfit').textContent = outfit;
-        panel.querySelector('#echoes-state-action').textContent = action;
-        panel.querySelector('#echoes-state-inner-thoughts').textContent = thoughts;
-
-        const historyList = panel.querySelector('#echoes-state-history-list');
-        historyList.innerHTML = '';
-
-        historyRecords.slice(0, 8).forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'echoes-state-history-item';
-            const time = item.timestamp
-                ? new Date(item.timestamp).toLocaleString()
-                : '';
-            const title = document.createElement('div');
-            title.innerHTML = `<strong>${item.mood || item.emotion || '微妙'}</strong> ${time}`;
-            const thoughtsEl = document.createElement('div');
-            thoughtsEl.textContent = item.innerThoughts || item.thoughts || '……';
-            div.appendChild(title);
-            div.appendChild(thoughtsEl);
-            historyList.appendChild(div);
-        });
-    }
-
-    async function openEchoesStatePanel(chatId, characterId, options = {}) {
-        const panel = ensureEchoesStatePanel();
-        const chat = (state.contacts || []).find(c => c && c.id === chatId);
-
-        if (!chat) {
-            console.warn('[ECHOES STATE PANEL OPEN FAILED] missing chat', { chatId, characterId });
-            panel.style.setProperty('display', 'flex', 'important');
-            panel.querySelector('#echoes-state-title').textContent = '角色的状态';
-            panel.querySelector('#echoes-state-empty').textContent = '没有当前聊天';
-            panel.querySelector('#echoes-state-empty').style.display = 'block';
-            panel.querySelector('#echoes-state-content').style.display = 'none';
-            return null;
-        }
-
-        let id = safeNormalizeId(characterId);
-        if (!chat.isGroup || id === 'contact') {
-            id = safeNormalizeId(chat.id);
-        }
-
-        if (!id || isUserId(id) || id === 'system' || id === 'system_instruction') {
-            console.warn('[ECHOES STATE PANEL OPEN FAILED] invalid character', { chatId, characterId, id });
-            return null;
-        }
-
-        let records = getEchoesStateRecordsForPanel(chat, id);
-        let latest = records[0] || null;
-
-        if (!latest && options.createFallbackIfEmpty !== false) {
-            latest = await ensureEchoesStateForClickedCharacter(chat, id, options.sourceMessage || null);
-            records = getEchoesStateRecordsForPanel(chat, id);
-        }
-
-        renderEchoesStatePanelCard(chat, id, latest, records);
-
-        panel.dataset.chatId = chat.id || '';
-        panel.dataset.characterId = id || '';
-
-        document.body.appendChild(panel);
-        panel.style.setProperty('display', 'flex', 'important');
-        panel.style.setProperty('position', 'fixed', 'important');
-        panel.style.setProperty('left', '50%', 'important');
-        panel.style.setProperty('bottom', 'calc(72px + env(safe-area-inset-bottom, 0px))', 'important');
-        panel.style.setProperty('transform', 'translateX(-50%)', 'important');
-        panel.style.setProperty('width', 'min(92vw, 420px)', 'important');
-        panel.style.setProperty('max-height', '78vh', 'important');
-        panel.style.setProperty('overflow-y', 'auto', 'important');
-        panel.style.setProperty('z-index', '2147483647', 'important');
-        panel.style.setProperty('visibility', 'visible', 'important');
-        panel.style.setProperty('opacity', '1', 'important');
-        panel.style.setProperty('pointer-events', 'auto', 'important');
-
-        console.log('[ECHOES STATE PANEL OPEN DONE]', {
-            chatId: chat.id,
-            characterId: id,
-            recordsCount: records.length,
-            display: panel.style.display,
-            rect: panel.getBoundingClientRect()
-        });
-
-        return latest;
-    }
-
     function markExistingMessagesEchoesStateClickable() {
         const chat = getActiveEchoesChat();
         if (!chat) return;
@@ -49096,12 +48047,6 @@ await initApp();
     window.handleEchoesStateBridgeClick = handleEchoesStateBridgeClick;
     window.resolveEchoesStateClickTarget = resolveEchoesStateClickTarget;
     window.resolveEchoesCharacterFromTrigger = resolveEchoesCharacterFromTrigger;
-    window.openEchoesStatePanel = openEchoesStatePanel;
-    window.ensureEchoesStatePanel = ensureEchoesStatePanel;
-    window.renderEchoesStatePanelCard = renderEchoesStatePanelCard;
-    window.ensureEchoesStateForClickedCharacter = ensureEchoesStateForClickedCharacter;
-    window.buildEchoesFallbackState = buildEchoesFallbackState;
-    window.getEchoesStateRecordsForPanel = getEchoesStateRecordsForPanel;
 
     window.setupEchoesStateAvatarClick = function() {
         return setupEchoesStateBridge();
@@ -49620,786 +48565,6 @@ await initApp();
         );
     }
 
-    function ensureEchoesStatePanelStyles() {
-        if (document.getElementById('echoes-state-panel-final-v3-style')) return;
-        const style = document.createElement('style');
-        style.id = 'echoes-state-panel-final-v3-style';
-        style.textContent = `
-            #echoes-state-panel,
-            #echoes-state-history-panel {
-                position: fixed !important;
-                inset: 0 !important;
-                display: none;
-                align-items: flex-end;
-                justify-content: center;
-                padding: 20px 16px calc(92px + env(safe-area-inset-bottom, 0px));
-                z-index: 2147483647 !important;
-                pointer-events: auto !important;
-            }
-            #echoes-state-history-panel {
-                z-index: 2147483648 !important;
-            }
-            #echoes-state-panel .echoes-state-backdrop,
-            #echoes-state-history-panel .echoes-state-backdrop {
-                position: absolute;
-                inset: 0;
-                background: rgba(15, 23, 42, 0.18);
-                backdrop-filter: blur(10px);
-                -webkit-backdrop-filter: blur(10px);
-            }
-            #echoes-state-panel .echoes-state-dialog,
-            #echoes-state-history-panel .echoes-state-dialog {
-                position: relative;
-                width: min(92vw, 432px);
-                max-height: min(82vh, 760px);
-                overflow: hidden;
-                border-radius: 32px;
-                background: rgba(244, 248, 251, 0.82);
-                border: 1px solid rgba(255, 255, 255, 0.82);
-                box-shadow: 0 32px 90px rgba(15, 23, 42, 0.28);
-                backdrop-filter: blur(22px) saturate(1.12);
-                -webkit-backdrop-filter: blur(22px) saturate(1.12);
-                color: #1f2937;
-            }
-            #echoes-state-panel .echoes-state-scroll,
-            #echoes-state-history-panel .echoes-state-scroll {
-                max-height: min(82vh, 760px);
-                overflow-y: auto;
-                overscroll-behavior: contain;
-            }
-            #echoes-state-panel .echoes-state-header,
-            #echoes-state-history-panel .echoes-state-header {
-                position: sticky;
-                top: 0;
-                z-index: 2;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 22px 24px 18px;
-                background: linear-gradient(180deg, rgba(244, 248, 251, 0.94), rgba(244, 248, 251, 0.82));
-                border-bottom: 1px solid rgba(255, 255, 255, 0.76);
-                backdrop-filter: blur(18px);
-                -webkit-backdrop-filter: blur(18px);
-            }
-            #echoes-state-panel .echoes-state-title,
-            #echoes-state-history-panel .echoes-state-title {
-                font-size: 23px;
-                font-weight: 800;
-                color: #18212d;
-                letter-spacing: 0;
-            }
-            #echoes-state-panel .echoes-state-close,
-            #echoes-state-history-panel .echoes-state-close,
-            #echoes-state-panel .echoes-state-history-trigger,
-            #echoes-state-history-panel .echoes-history-delete {
-                border: none;
-                cursor: pointer;
-                transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
-            }
-            #echoes-state-panel .echoes-state-close,
-            #echoes-state-history-panel .echoes-state-close {
-                width: 42px;
-                height: 42px;
-                border-radius: 999px;
-                background: rgba(255, 255, 255, 0.74);
-                color: #667789;
-                font-size: 28px;
-                line-height: 42px;
-                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
-            }
-            #echoes-state-panel .echoes-state-close:hover,
-            #echoes-state-history-panel .echoes-state-close:hover {
-                transform: translateY(-1px);
-                background: rgba(255, 255, 255, 0.9);
-                color: #334155;
-            }
-            #echoes-state-panel .echoes-state-body,
-            #echoes-state-history-panel .echoes-state-body {
-                padding: 0 22px 24px;
-            }
-            #echoes-state-panel .echoes-state-profile,
-            #echoes-state-history-panel .echoes-state-profile {
-                display: flex;
-                align-items: center;
-                gap: 14px;
-                padding: 22px 2px 18px;
-            }
-            #echoes-state-panel .echoes-state-identity,
-            #echoes-state-history-panel .echoes-state-identity {
-                flex: 1;
-                min-width: 0;
-                display: flex;
-                align-items: center;
-                gap: 14px;
-            }
-            #echoes-state-panel .echoes-state-avatar,
-            #echoes-state-history-panel .echoes-state-avatar {
-                width: 64px;
-                height: 64px;
-                border-radius: 999px;
-                object-fit: cover;
-                background: rgba(255, 255, 255, 0.86);
-                box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
-                flex-shrink: 0;
-            }
-            #echoes-state-panel .echoes-state-name,
-            #echoes-state-history-panel .echoes-state-name {
-                font-size: 21px;
-                font-weight: 800;
-                color: #1d2836;
-                line-height: 1.2;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-            #echoes-state-panel .echoes-state-sync,
-            #echoes-state-history-panel .echoes-state-sync {
-                margin-top: 5px;
-                color: #748396;
-                font-size: 13px;
-                font-weight: 600;
-                line-height: 1.4;
-            }
-            #echoes-state-panel .echoes-state-history-trigger {
-                width: 44px;
-                height: 44px;
-                border-radius: 999px;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                background: rgba(255, 255, 255, 0.74);
-                color: #5f7387;
-                box-shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
-                flex-shrink: 0;
-            }
-            #echoes-state-panel .echoes-state-history-trigger:hover {
-                transform: translateY(-1px);
-                background: rgba(255, 255, 255, 0.92);
-                color: #3f556a;
-            }
-            #echoes-state-panel .echoes-state-history-trigger svg {
-                width: 19px;
-                height: 19px;
-                stroke: currentColor;
-                fill: none;
-                stroke-width: 1.8;
-                stroke-linecap: round;
-                stroke-linejoin: round;
-            }
-            #echoes-state-panel .echoes-state-empty,
-            #echoes-state-history-panel .echoes-state-empty {
-                padding: 20px 18px;
-                border-radius: 22px;
-                background: rgba(255, 255, 255, 0.64);
-                border: 1px solid rgba(255, 255, 255, 0.84);
-                color: #748396;
-                font-size: 15px;
-                font-weight: 600;
-                text-align: center;
-                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 8px 22px rgba(15, 23, 42, 0.07);
-            }
-            #echoes-state-panel .echoes-state-content {
-                display: flex;
-                flex-direction: column;
-                gap: 14px;
-            }
-            #echoes-state-panel .echoes-state-grid {
-                display: grid;
-                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-                gap: 14px;
-            }
-            #echoes-state-panel .echoes-state-card,
-            #echoes-state-history-panel .echoes-history-card {
-                border-radius: 24px;
-                background: rgba(255, 255, 255, 0.68);
-                border: 1px solid rgba(255, 255, 255, 0.86);
-                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 10px 28px rgba(15, 23, 42, 0.08);
-            }
-            #echoes-state-panel .echoes-state-card {
-                padding: 17px 18px;
-            }
-            #echoes-state-panel .echoes-state-card-label,
-            #echoes-state-history-panel .echoes-history-label {
-                color: #718196;
-                font-size: 13px;
-                font-weight: 800;
-                margin-bottom: 10px;
-                line-height: 1.3;
-            }
-            #echoes-state-panel .echoes-state-card-value,
-            #echoes-state-history-panel .echoes-history-value {
-                color: #1f2b38;
-                font-size: 16px;
-                line-height: 1.72;
-                white-space: pre-wrap;
-                word-break: break-word;
-            }
-            #echoes-state-panel .echoes-state-card.is-affection .echoes-state-card-value {
-                color: #4f89a6;
-                font-size: 20px;
-                font-weight: 800;
-                line-height: 1.4;
-            }
-            #echoes-state-panel .echoes-state-card.is-thought .echoes-state-card-value {
-                font-size: 17px;
-                line-height: 1.82;
-            }
-            #echoes-state-history-panel .echoes-history-list {
-                display: flex;
-                flex-direction: column;
-                gap: 14px;
-            }
-            #echoes-state-history-panel .echoes-history-card {
-                padding: 16px 16px 14px;
-            }
-            #echoes-state-history-panel .echoes-history-card-head {
-                display: flex;
-                align-items: flex-start;
-                justify-content: space-between;
-                gap: 12px;
-                margin-bottom: 10px;
-            }
-            #echoes-state-history-panel .echoes-history-meta {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-                min-width: 0;
-            }
-            #echoes-state-history-panel .echoes-history-time {
-                color: #708195;
-                font-size: 12px;
-                font-weight: 700;
-                line-height: 1.4;
-            }
-            #echoes-state-history-panel .echoes-history-affection {
-                display: inline-flex;
-                align-items: center;
-                padding: 5px 10px;
-                border-radius: 999px;
-                background: rgba(122, 173, 201, 0.14);
-                color: #4f89a6;
-                font-size: 12px;
-                font-weight: 800;
-                max-width: 100%;
-                width: fit-content;
-            }
-            #echoes-state-history-panel .echoes-history-delete {
-                width: 34px;
-                height: 34px;
-                border-radius: 999px;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                background: rgba(255, 255, 255, 0.82);
-                color: #9b6b72;
-                box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
-                flex-shrink: 0;
-            }
-            #echoes-state-history-panel .echoes-history-delete:hover {
-                transform: translateY(-1px);
-                background: rgba(255, 239, 241, 0.96);
-                color: #c04557;
-            }
-            #echoes-state-history-panel .echoes-history-delete svg {
-                width: 16px;
-                height: 16px;
-                stroke: currentColor;
-                fill: none;
-                stroke-width: 1.9;
-                stroke-linecap: round;
-                stroke-linejoin: round;
-            }
-            #echoes-state-history-panel .echoes-history-row {
-                padding-top: 10px;
-                margin-top: 10px;
-                border-top: 1px solid rgba(148, 163, 184, 0.20);
-            }
-            #chat-messages .message-wrapper.echoes-state-clickable-message .message-avatar {
-                visibility: visible !important;
-            }
-            #chat-messages .message-wrapper.echoes-state-clickable-message .message-author-name,
-            #chat-messages .message-wrapper.show-state-author-name .message-author-name {
-                display: block !important;
-                cursor: pointer !important;
-            }
-            @media (max-width: 420px) {
-                #echoes-state-panel,
-                #echoes-state-history-panel {
-                    padding: 16px 12px calc(88px + env(safe-area-inset-bottom, 0px));
-                }
-                #echoes-state-panel .echoes-state-dialog,
-                #echoes-state-history-panel .echoes-state-dialog {
-                    width: min(94vw, 400px);
-                    border-radius: 28px;
-                }
-                #echoes-state-panel .echoes-state-header,
-                #echoes-state-history-panel .echoes-state-header {
-                    padding: 18px 18px 15px;
-                }
-                #echoes-state-panel .echoes-state-body,
-                #echoes-state-history-panel .echoes-state-body {
-                    padding: 0 16px 18px;
-                }
-                #echoes-state-panel .echoes-state-grid {
-                    gap: 12px;
-                }
-                #echoes-state-panel .echoes-state-card {
-                    padding: 15px 15px;
-                }
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
-    function getEchoesStatePanelProfile(chat, characterId) {
-        return (typeof getProfile === 'function' && getProfile(chat, characterId))
-            || (typeof finalGetProfile === 'function' && finalGetProfile(chat, characterId))
-            || {};
-    }
-
-    function getEchoesStatePanelAvatar(profile, name) {
-        return profile?.avatar || `https://via.placeholder.com/80/DDD/666?text=${encodeURIComponent((name || '角').slice(0, 1))}`;
-    }
-
-    function escapeEchoesStatePanelHtml(value) {
-        const text = value === undefined || value === null ? '' : String(value);
-        if (typeof escapeHtml === 'function') return escapeHtml(text);
-        return text
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
-    function closeEchoesStateHistoryPanel() {
-        const panel = document.getElementById('echoes-state-history-panel');
-        if (!panel) return;
-        panel.style.setProperty('display', 'none', 'important');
-        panel.dataset.chatId = '';
-        panel.dataset.characterId = '';
-    }
-
-    function closeEchoesStatePanel() {
-        const panel = document.getElementById('echoes-state-panel');
-        if (!panel) return;
-        panel.style.setProperty('display', 'none', 'important');
-        panel.dataset.chatId = '';
-        panel.dataset.characterId = '';
-        closeEchoesStateHistoryPanel();
-        if (state.heartVoicePanel) {
-            state.heartVoicePanel.isOpen = false;
-            state.heartVoicePanel.chatId = null;
-            state.heartVoicePanel.characterId = null;
-        }
-    }
-
-    async function deleteEchoesStateHistoryRecord(chatId, characterId, recordId) {
-        if (!chatId || !characterId || !recordId) return;
-        const chat = (state.contacts || []).find(item => item && item.id === chatId);
-        if (!chat) return;
-
-        const normalizedChatId = normalizeId(chatId);
-        const normalizedCharacterId = normalizeId(characterId);
-        let removedStateRecord = false;
-        let removedLegacyRecord = false;
-
-        if (Array.isArray(state.characterStates)) {
-            state.characterStates = state.characterStates.filter(record => {
-                const match = record
-                    && String(record.id || '') === String(recordId)
-                    && normalizeId(record.chatId) === normalizedChatId
-                    && normalizeId(record.characterId) === normalizedCharacterId;
-                if (match) removedStateRecord = true;
-                return !match;
-            });
-        }
-
-        if (Array.isArray(chat.history)) {
-            const nextHistory = chat.history.filter(message => {
-                const match = message
-                    && message.type === 'heart_voice'
-                    && String(message.id || '') === String(recordId)
-                    && normalizeId(message.characterId || message.senderId || message.sender) === normalizedCharacterId;
-                if (match) removedLegacyRecord = true;
-                return !match;
-            });
-            if (nextHistory.length !== chat.history.length) {
-                chat.history = nextHistory;
-            }
-        }
-
-        if (!removedStateRecord && !removedLegacyRecord) return;
-
-        state.characterStateSnapshots = rebuildCharacterStateSnapshots(state.characterStates || []);
-
-        try {
-            if (removedStateRecord && typeof kokoMemory !== 'undefined' && kokoMemory?.delete) {
-                await kokoMemory.delete('character_states', recordId);
-            }
-        } catch (error) {
-            console.warn('[ECHOES STATE DELETE FAILED]', error, { chatId, characterId, recordId });
-        }
-
-        try {
-            if (removedLegacyRecord && typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
-                await kokoMemory.put('contacts', chat);
-            }
-        } catch (error) {
-            console.warn('[ECHOES LEGACY STATE DELETE FAILED]', error, { chatId, characterId, recordId });
-        }
-
-        window.state = state;
-
-        const records = getEchoesStateRecordsForPanel(chat, characterId);
-        const mainPanel = document.getElementById('echoes-state-panel');
-        if (
-            mainPanel
-            && mainPanel.style.display === 'flex'
-            && normalizeId(mainPanel.dataset.chatId) === normalizedChatId
-            && normalizeId(mainPanel.dataset.characterId) === normalizedCharacterId
-        ) {
-            renderEchoesStatePanel(chat, characterId, records[0] || null, records);
-        }
-
-        const historyPanel = document.getElementById('echoes-state-history-panel');
-        if (
-            historyPanel
-            && historyPanel.style.display === 'flex'
-            && normalizeId(historyPanel.dataset.chatId) === normalizedChatId
-            && normalizeId(historyPanel.dataset.characterId) === normalizedCharacterId
-        ) {
-            renderEchoesStateHistoryPanel(chat, characterId, records.slice(1));
-        }
-    }
-
-    function ensureEchoesStatePanel() {
-        ensureEchoesStatePanelStyles();
-        let panel = document.getElementById('echoes-state-panel');
-        if (!panel) {
-            panel = document.createElement('div');
-            panel.id = 'echoes-state-panel';
-            document.body.appendChild(panel);
-        }
-        panel.className = 'echoes-state-panel';
-        panel.innerHTML = `
-            <div class="echoes-state-backdrop" data-echoes-state-close="panel"></div>
-            <div class="echoes-state-dialog">
-                <div class="echoes-state-scroll">
-                    <div class="echoes-state-header">
-                        <div class="echoes-state-title" id="echoes-state-title">角色的状态</div>
-                        <button class="echoes-state-close" id="echoes-state-close" type="button" aria-label="关闭">×</button>
-                    </div>
-                    <div class="echoes-state-body">
-                        <div class="echoes-state-profile">
-                            <div class="echoes-state-identity">
-                                <img id="echoes-state-avatar" class="echoes-state-avatar" alt="">
-                                <div class="echoes-state-meta">
-                                    <div id="echoes-state-name" class="echoes-state-name">角色</div>
-                                    <div class="echoes-state-sync">实时状态同步中</div>
-                                </div>
-                            </div>
-                            <button class="echoes-state-history-trigger" id="echoes-state-history-trigger" type="button" title="历史状态记录" aria-label="历史状态记录">
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <path d="M3 12a9 9 0 1 0 3-6.7"></path>
-                                    <path d="M3 4v4h4"></path>
-                                    <path d="M12 7v5l3 2"></path>
-                                </svg>
-                            </button>
-                        </div>
-                        <div id="echoes-state-empty" class="echoes-state-empty" style="display:none;">还没有状态记录</div>
-                        <div id="echoes-state-content" class="echoes-state-content">
-                            <div class="echoes-state-card is-wide">
-                                <div class="echoes-state-card-label">实时心情</div>
-                                <div class="echoes-state-card-value" id="echoes-state-mood"></div>
-                            </div>
-                            <div class="echoes-state-card is-wide is-affection">
-                                <div class="echoes-state-card-label">对你的好感度</div>
-                                <div class="echoes-state-card-value" id="echoes-state-favorability"></div>
-                            </div>
-                            <div class="echoes-state-grid">
-                                <div class="echoes-state-card">
-                                    <div class="echoes-state-card-label">穿着</div>
-                                    <div class="echoes-state-card-value" id="echoes-state-clothing"></div>
-                                </div>
-                                <div class="echoes-state-card">
-                                    <div class="echoes-state-card-label">动作</div>
-                                    <div class="echoes-state-card-value" id="echoes-state-action"></div>
-                                </div>
-                            </div>
-                            <div class="echoes-state-card is-thought">
-                                <div class="echoes-state-card-label">内心想法</div>
-                                <div class="echoes-state-card-value" id="echoes-state-inner-thoughts"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-        panel.querySelector('#echoes-state-close').onclick = () => closeEchoesStatePanel();
-        panel.querySelector('[data-echoes-state-close="panel"]').onclick = () => closeEchoesStatePanel();
-        panel.querySelector('#echoes-state-history-trigger').onclick = () => {
-            const currentChatId = panel.dataset.chatId;
-            const currentCharacterId = panel.dataset.characterId;
-            if (currentChatId && currentCharacterId) {
-                openEchoesStateHistoryPanel(currentChatId, currentCharacterId);
-            }
-        };
-        return panel;
-    }
-
-    function renderEchoesStatePanel(chat, characterId, snapshot, historyRecords = []) {
-        const panel = ensureEchoesStatePanel();
-        const profile = getEchoesStatePanelProfile(chat, characterId);
-        const name = profile.name || '角色';
-        const avatar = getEchoesStatePanelAvatar(profile, name);
-        panel.querySelector('#echoes-state-title').textContent = `${name} 的状态`;
-        panel.querySelector('#echoes-state-avatar').src = avatar;
-        panel.querySelector('#echoes-state-avatar').alt = `${name} 的头像`;
-        panel.querySelector('#echoes-state-name').textContent = name;
-
-        const emptyEl = panel.querySelector('#echoes-state-empty');
-        const contentEl = panel.querySelector('#echoes-state-content');
-        if (!snapshot) {
-            emptyEl.style.display = 'block';
-            contentEl.style.display = 'none';
-            return;
-        }
-
-        emptyEl.style.display = 'none';
-        contentEl.style.display = 'flex';
-
-        const affection = String(
-            snapshot.affection || formatEchoesAffection(snapshot.favorability, snapshot.favorabilityLabel, snapshot.mood)
-        ).trim();
-
-        panel.querySelector('#echoes-state-mood').textContent = snapshot.mood || '平静';
-        panel.querySelector('#echoes-state-favorability').textContent = affection;
-        panel.querySelector('#echoes-state-clothing').textContent =
-            snapshot.clothing || snapshot.outfit || expandOutfitDescription('', profile, null, '');
-        panel.querySelector('#echoes-state-action').textContent =
-            snapshot.action || expandActionDescription('', snapshot.visibleText || '', profile, null, snapshot.mood);
-        panel.querySelector('#echoes-state-inner-thoughts').textContent =
-            snapshot.innerThoughts || '我还没把心里的话整理清楚。';
-
-        const historyTrigger = panel.querySelector('#echoes-state-history-trigger');
-        if (historyTrigger) {
-            const historyCount = Math.max(0, (historyRecords || []).length - 1);
-            historyTrigger.title = historyCount > 0 ? `历史状态记录 (${historyCount})` : '历史状态记录';
-            historyTrigger.setAttribute('aria-label', historyTrigger.title);
-        }
-    }
-
-    function historyRow(label, value) {
-        if (value === undefined || value === null || String(value).trim() === '') return '';
-        return `<div class="echoes-history-row"><div class="echoes-history-label">${escapeEchoesStatePanelHtml(label)}</div><div class="echoes-history-value">${escapeEchoesStatePanelHtml(String(value))}</div></div>`;
-    }
-
-    function ensureEchoesStateHistoryPanel() {
-        ensureEchoesStatePanelStyles();
-        let panel = document.getElementById('echoes-state-history-panel');
-        if (!panel) {
-            panel = document.createElement('div');
-            panel.id = 'echoes-state-history-panel';
-            document.body.appendChild(panel);
-        }
-        panel.className = 'echoes-state-history-panel';
-        panel.innerHTML = `
-            <div class="echoes-state-backdrop" data-echoes-state-close="history"></div>
-            <div class="echoes-state-dialog">
-                <div class="echoes-state-scroll">
-                    <div class="echoes-state-header">
-                        <div class="echoes-state-title" id="echoes-state-history-title">状态历史</div>
-                        <button class="echoes-state-close" id="echoes-state-history-close" type="button" aria-label="关闭">×</button>
-                    </div>
-                    <div class="echoes-state-body">
-                        <div class="echoes-state-profile">
-                            <div class="echoes-state-identity">
-                                <img id="echoes-state-history-avatar" class="echoes-state-avatar" alt="">
-                                <div class="echoes-state-meta">
-                                    <div id="echoes-state-history-name" class="echoes-state-name">角色</div>
-                                    <div class="echoes-state-sync">历史状态记录</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div id="echoes-state-history-empty" class="echoes-state-empty" style="display:none;">暂无历史状态记录</div>
-                        <div class="echoes-history-list" id="echoes-state-history-list"></div>
-                    </div>
-                </div>
-            </div>
-        `;
-        panel.querySelector('#echoes-state-history-close').onclick = () => closeEchoesStateHistoryPanel();
-        panel.querySelector('[data-echoes-state-close="history"]').onclick = () => closeEchoesStateHistoryPanel();
-        panel.onclick = async event => {
-            const deleteButton = event.target.closest('[data-echoes-state-delete]');
-            if (!deleteButton) return;
-            event.preventDefault();
-            event.stopPropagation();
-            await deleteEchoesStateHistoryRecord(
-                panel.dataset.chatId,
-                panel.dataset.characterId,
-                deleteButton.dataset.recordId
-            );
-        };
-        return panel;
-    }
-
-    function renderEchoesStateHistoryPanel(chat, characterId, historyRecords = []) {
-        const panel = ensureEchoesStateHistoryPanel();
-        const profile = getEchoesStatePanelProfile(chat, characterId);
-        const name = profile.name || '角色';
-        const avatar = getEchoesStatePanelAvatar(profile, name);
-        panel.querySelector('#echoes-state-history-title').textContent = `${name} 的状态历史`;
-        panel.querySelector('#echoes-state-history-name').textContent = name;
-        panel.querySelector('#echoes-state-history-avatar').src = avatar;
-        panel.querySelector('#echoes-state-history-avatar').alt = `${name} 的头像`;
-
-        const list = panel.querySelector('#echoes-state-history-list');
-        const empty = panel.querySelector('#echoes-state-history-empty');
-        const records = Array.isArray(historyRecords) ? historyRecords : [];
-        if (!records.length) {
-            list.innerHTML = '';
-            empty.style.display = 'block';
-            return;
-        }
-
-        empty.style.display = 'none';
-        list.innerHTML = records.map((record, index) => {
-            const affection = record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood);
-            const timeText = record.timestamp
-                ? new Date(record.timestamp).toLocaleString('zh-CN')
-                : `过去状态 ${index + 1}`;
-            return `
-                <div class="echoes-history-card">
-                    <div class="echoes-history-card-head">
-                        <div class="echoes-history-meta">
-                            <div class="echoes-history-time">${escapeEchoesStatePanelHtml(timeText)}</div>
-                            <div class="echoes-history-affection">${escapeEchoesStatePanelHtml(String(affection || ''))}</div>
-                        </div>
-                        <button class="echoes-history-delete" type="button" data-echoes-state-delete="true" data-record-id="${escapeEchoesStatePanelHtml(record.id || '')}" aria-label="删除历史状态">
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M3 6h18"></path>
-                                <path d="M8 6V4h8v2"></path>
-                                <path d="M19 6l-1 14H6L5 6"></path>
-                                <path d="M10 11v6"></path>
-                                <path d="M14 11v6"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    ${historyRow('实时心情', record.mood)}
-                    ${historyRow('动作', record.action)}
-                    ${historyRow('内心想法', record.innerThoughts)}
-                </div>
-            `;
-        }).join('');
-    }
-
-    function openEchoesStateHistoryPanel(chatId, characterId, options = {}) {
-        const chat = (state.contacts || []).find(item => item && item.id === chatId);
-        if (!chat || !characterId) return null;
-        const records = getEchoesStateRecordsForPanel(chat, characterId);
-        const historyRecords = options.includeCurrent === true ? records : records.slice(1);
-        const panel = ensureEchoesStateHistoryPanel();
-        renderEchoesStateHistoryPanel(chat, characterId, historyRecords);
-        panel.dataset.chatId = chat.id;
-        panel.dataset.characterId = characterId;
-        panel.style.setProperty('display', 'flex', 'important');
-        return panel;
-    }
-
-    async function openEchoesStatePanel(chatId, characterId, options = {}) {
-        const panel = ensureEchoesStatePanel();
-        const chat = (state.contacts || []).find(contact => contact.id === chatId);
-        if (!chat) return null;
-        let id = finalNormalizeId(characterId);
-        if (!chat.isGroup || id === 'contact') id = finalNormalizeId(chat.id);
-        if (!id || finalIsUserId(id) || id === 'system' || id === 'system_instruction') return null;
-        let records = getEchoesStateRecordsForPanel(chat, id);
-        let latest = records[0] || null;
-        if (!latest && options.createFallbackIfEmpty !== false) {
-            latest = await ensureEchoesStateForClickedCharacter(chat, id, options.sourceMessage || null);
-            records = getEchoesStateRecordsForPanel(chat, id);
-        }
-        renderEchoesStatePanel(chat, id, latest, records);
-        panel.dataset.chatId = chat.id;
-        panel.dataset.characterId = id;
-        panel.style.setProperty('display', 'flex', 'important');
-        state.heartVoicePanel = {
-            isOpen: true,
-            chatId: chat.id,
-            characterId: id
-        };
-        window.state = state;
-        console.log('[ECHOES STATE PANEL OPEN DONE]', {
-            chatId: chat.id,
-            characterId: id,
-            display: panel.style.display,
-            rect: panel.getBoundingClientRect()
-        });
-        return latest;
-    }
-
-    function finalResolveClickTarget(event) {
-        const target = event.target;
-        if (!target?.closest) return null;
-        const hard = target.closest(
-            '#chat-messages .message-avatar, ' +
-            '#chat-messages .message-avatar img, ' +
-            '#chat-messages .message-author-name[data-heart-voice-character-id], ' +
-            '#chat-messages .echoes-state-author-trigger'
-        );
-        if (hard) return hard;
-        const messageEl = target.closest('#chat-messages .message');
-        const wrapper = messageEl?.closest('.message-wrapper');
-        if (!messageEl || !wrapper || wrapper.dataset.echoesStateClickable !== 'true') return null;
-        if (STATE_SKIP_TYPES.has(wrapper.dataset.messageType || '')) return null;
-        return messageEl;
-    }
-
-    function finalResolveCharacter(trigger) {
-        const chat = finalGetActiveChat();
-        if (!chat || !trigger) return { chat: null, characterId: '', message: null, wrapper: null };
-        const wrapper = trigger.closest('.message-wrapper');
-        const message = finalFindMessageByWrapper(chat, wrapper);
-        let id = finalNormalizeId(
-            trigger.dataset?.heartVoiceCharacterId ||
-            trigger.dataset?.senderId ||
-            wrapper?.dataset?.heartVoiceCharacterId ||
-            wrapper?.dataset?.senderId ||
-            wrapper?.dataset?.sender ||
-            message?.senderId ||
-            message?.sender ||
-            ''
-        );
-        if (!chat.isGroup && id && !finalIsUserId(id)) id = finalNormalizeId(chat.id);
-        if (chat.isGroup && (id === 'contact' || id === finalNormalizeId(chat.id))) {
-            id = finalNormalizeId(message?.senderId || message?.sender || '');
-        }
-        return { chat, characterId: id, message, wrapper };
-    }
-
-    async function handleEchoesStateBridgeClick(event) {
-        const trigger = finalResolveClickTarget(event);
-        if (!trigger) return;
-        const { chat, characterId, message, wrapper } = finalResolveCharacter(trigger);
-        if (!chat || !characterId || finalIsUserId(characterId) || characterId === 'system' || characterId === 'system_instruction') return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
-        console.log('[ECHOES STATE AVATAR CLICK]', {
-            chatId: chat.id,
-            isGroup: chat.isGroup,
-            characterId,
-            messageId: message?.id,
-            wrapperSenderId: wrapper?.dataset?.senderId,
-            triggerClass: trigger.className
-        });
-        await openEchoesStatePanel(chat.id, characterId, {
-            createFallbackIfEmpty: true,
-            sourceMessage: message
-        });
-    }
-
     function markExistingMessagesEchoesStateClickable() {
         const chat = finalGetActiveChat();
         if (!chat) return;
@@ -50452,16 +48617,6 @@ await initApp();
     window.buildFirstPersonInnerThought = buildFirstPersonInnerThought;
     window.expandOutfitDescription = expandOutfitDescription;
     window.expandActionDescription = expandActionDescription;
-    window.getEchoesStateRecordsForPanel = getEchoesStateRecordsForPanel;
-    window.ensureEchoesStateForClickedCharacter = ensureEchoesStateForClickedCharacter;
-    window.buildEchoesFallbackState = buildEchoesFallbackState;
-    window.ensureEchoesStatePanel = ensureEchoesStatePanel;
-    window.ensureEchoesStatePanelStyles = ensureEchoesStatePanelStyles;
-    window.renderEchoesStatePanel = renderEchoesStatePanel;
-    window.ensureEchoesStateHistoryPanel = ensureEchoesStateHistoryPanel;
-    window.renderEchoesStateHistoryPanel = renderEchoesStateHistoryPanel;
-    window.openEchoesStateHistoryPanel = openEchoesStateHistoryPanel;
-    window.openEchoesStatePanel = openEchoesStatePanel;
     window.setupEchoesStateBridge = setupEchoesStateBridge;
     window.handleEchoesStateBridgeClick = handleEchoesStateBridgeClick;
 
@@ -50482,9 +48637,6 @@ await initApp();
     try { ensureCompleteCharacterStateForMessage = window.ensureCompleteCharacterStateForMessage = ensureCompleteCharacterStateForMessage; } catch (error) {}
     try { saveEchoesCharacterState = window.saveEchoesCharacterState = saveEchoesCharacterState; } catch (error) {}
     try { ensureEchoesStateForVisibleMessage = window.ensureEchoesStateForVisibleMessage = ensureEchoesStateForVisibleMessage; } catch (error) {}
-    try { openEchoesStatePanel = window.openEchoesStatePanel = openEchoesStatePanel; } catch (error) {}
-    try { ensureEchoesStatePanel = window.ensureEchoesStatePanel = ensureEchoesStatePanel; } catch (error) {}
-    try { renderEchoesStatePanel = window.renderEchoesStatePanel = renderEchoesStatePanel; } catch (error) {}
 
     setupEchoesStateBridge();
     setTimeout(markExistingMessagesEchoesStateClickable, 0);
@@ -51540,127 +49692,6 @@ await initApp();
         return deduped.sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
     }
 
-    function ensureEchoesStateHistoryPanelStyles() {
-        ensureEchoesStatePanelStyles();
-    }
-
-    function ensureEchoesStateHistoryPanel() {
-        ensureEchoesStateHistoryPanelStyles();
-        let panel = document.getElementById('echoes-state-history-panel');
-        if (!panel) {
-            panel = document.createElement('div');
-            panel.id = 'echoes-state-history-panel';
-            document.body.appendChild(panel);
-        }
-        panel.className = 'echoes-state-history-panel';
-        panel.innerHTML = `
-            <div class="echoes-state-backdrop" data-echoes-state-close="history"></div>
-            <div class="echoes-state-dialog">
-                <div class="echoes-state-scroll">
-                    <div class="echoes-state-header">
-                        <div class="echoes-state-title" id="echoes-state-history-title">状态历史</div>
-                        <button class="echoes-state-close" id="echoes-state-history-close" type="button" aria-label="关闭">×</button>
-                    </div>
-                    <div class="echoes-state-body">
-                        <div class="echoes-state-profile">
-                            <div class="echoes-state-identity">
-                                <img id="echoes-state-history-avatar" class="echoes-state-avatar" alt="">
-                                <div class="echoes-state-meta">
-                                    <div id="echoes-state-history-name" class="echoes-state-name">角色</div>
-                                    <div class="echoes-state-sync">历史状态记录</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div id="echoes-state-history-empty" class="echoes-state-empty" style="display:none;">暂无历史状态记录</div>
-                        <div class="echoes-history-list" id="echoes-state-history-list"></div>
-                    </div>
-                </div>
-            </div>
-        `;
-        panel.querySelector('#echoes-state-history-close').onclick = () => closeEchoesStateHistoryPanel();
-        panel.querySelector('[data-echoes-state-close="history"]').onclick = () => closeEchoesStateHistoryPanel();
-        panel.onclick = async event => {
-            const deleteButton = event.target.closest('[data-echoes-state-delete]');
-            if (!deleteButton) return;
-            event.preventDefault();
-            event.stopPropagation();
-            await deleteEchoesStateHistoryRecord(
-                panel.dataset.chatId,
-                panel.dataset.characterId,
-                deleteButton.dataset.recordId
-            );
-        };
-        return panel;
-    }
-
-    function historyRow(label, value) {
-        if (value === undefined || value === null || String(value).trim() === '') return '';
-        return `<div class="echoes-history-row"><div class="echoes-history-label">${escapeEchoesStatePanelHtml(label)}</div><div class="echoes-history-value">${escapeEchoesStatePanelHtml(String(value))}</div></div>`;
-    }
-
-    function renderEchoesStateHistoryPanel(chat, characterId, historyRecords = []) {
-        const panel = ensureEchoesStateHistoryPanel();
-        const profile = getEchoesStatePanelProfile(chat, characterId);
-        const name = profile.name || '角色';
-        const avatar = getEchoesStatePanelAvatar(profile, name);
-        panel.querySelector('#echoes-state-history-title').textContent = `${name} 的状态历史`;
-        panel.querySelector('#echoes-state-history-name').textContent = name;
-        panel.querySelector('#echoes-state-history-avatar').src = avatar;
-        panel.querySelector('#echoes-state-history-avatar').alt = `${name} 的头像`;
-
-        const list = panel.querySelector('#echoes-state-history-list');
-        const empty = panel.querySelector('#echoes-state-history-empty');
-        const records = Array.isArray(historyRecords) ? historyRecords : [];
-        if (!records.length) {
-            list.innerHTML = '';
-            empty.style.display = 'block';
-            return;
-        }
-
-        empty.style.display = 'none';
-        list.innerHTML = records.map((record, index) => {
-            const affection = record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood);
-            const timeText = record.timestamp
-                ? new Date(record.timestamp).toLocaleString('zh-CN')
-                : `过去状态 ${index + 1}`;
-            return `
-                <div class="echoes-history-card">
-                    <div class="echoes-history-card-head">
-                        <div class="echoes-history-meta">
-                            <div class="echoes-history-time">${escapeEchoesStatePanelHtml(timeText)}</div>
-                            <div class="echoes-history-affection">${escapeEchoesStatePanelHtml(String(affection || ''))}</div>
-                        </div>
-                        <button class="echoes-history-delete" type="button" data-echoes-state-delete="true" data-record-id="${escapeEchoesStatePanelHtml(record.id || '')}" aria-label="删除历史状态">
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M3 6h18"></path>
-                                <path d="M8 6V4h8v2"></path>
-                                <path d="M19 6l-1 14H6L5 6"></path>
-                                <path d="M10 11v6"></path>
-                                <path d="M14 11v6"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    ${historyRow('实时心情', record.mood)}
-                    ${historyRow('动作', record.action)}
-                    ${historyRow('内心想法', record.innerThoughts)}
-                </div>
-            `;
-        }).join('');
-    }
-
-    function openEchoesStateHistoryPanel(chatId, characterId, options = {}) {
-        const chat = (state.contacts || []).find(item => item && item.id === chatId);
-        if (!chat || !characterId) return null;
-        const records = getEchoesStateRecordsForPanel(chat, characterId);
-        const historyRecords = options.includeCurrent === true ? records : records.slice(1);
-        const panel = ensureEchoesStateHistoryPanel();
-        renderEchoesStateHistoryPanel(chat, characterId, historyRecords);
-        panel.dataset.chatId = chat.id;
-        panel.dataset.characterId = characterId;
-        panel.style.setProperty('display', 'flex', 'important');
-        return panel;
-    }
-
     window.createEchoesRoundId = createEchoesRoundId;
     window.extractEchoesJsonPayload = extractEchoesJsonPayload;
     window.tryParseEchoesJson = tryParseEchoesJson;
@@ -51678,11 +49709,6 @@ await initApp();
     window.ensureEchoesStateForVisibleMessage = ensureEchoesStateForVisibleMessage;
     window.savePrivateRoundEchoesState = savePrivateRoundEchoesState;
     window.saveGroupRoundEchoesStates = saveGroupRoundEchoesStates;
-    window.getEchoesStateRecordsForPanel = getEchoesStateRecordsForPanel;
-    window.ensureEchoesStateHistoryPanelStyles = ensureEchoesStateHistoryPanelStyles;
-    window.ensureEchoesStateHistoryPanel = ensureEchoesStateHistoryPanel;
-    window.renderEchoesStateHistoryPanel = renderEchoesStateHistoryPanel;
-    window.openEchoesStateHistoryPanel = openEchoesStateHistoryPanel;
     window.parseEchoesStateResult = parseEchoesStateResult;
     window.parseEchoesStyleAiResult = parseEchoesStyleAiResult;
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
@@ -51709,11 +49735,780 @@ await initApp();
     try { buildNextCharacterState = window.buildNextCharacterState; } catch (error) {}
     try { saveEchoesCharacterState = window.saveEchoesCharacterState; } catch (error) {}
     try { ensureEchoesStateForVisibleMessage = window.ensureEchoesStateForVisibleMessage; } catch (error) {}
-    try { openEchoesStateHistoryPanel = window.openEchoesStateHistoryPanel; } catch (error) {}
     try { if (originalTriggerGroupChatAiReply) triggerGroupChatAiReply = window.triggerGroupChatAiReply; } catch (error) {}
     try { if (originalTriggerGroupFreeChat) triggerGroupFreeChat = window.triggerGroupFreeChat; } catch (error) {}
 
     console.log('[ECHOES ROUND STATE ENGINE READY]');
+})();
+</script>
+
+<script>
+(function installEchoesOriginalStatePanel() {
+    const PANEL_ID = 'echoes-state-panel';
+    const LEGACY_PANEL_ID = 'heart-voice-panel';
+    const LEGACY_HISTORY_PANEL_ID = 'echoes-state-history-panel';
+    const STYLE_ID = 'echoes-original-state-panel-style';
+    const LEGACY_STYLE_IDS = [
+        'echoes-state-panel-style',
+        'echoes-state-panel-final-style',
+        'echoes-state-panel-final-v3-style'
+    ];
+
+    function escapeEchoesOriginalHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function normalizeEchoesOriginalId(value) {
+        const raw = String(value ?? '').trim();
+        if (!raw) return '';
+        if (typeof normalizeMessageSenderId === 'function') return normalizeMessageSenderId(raw);
+        return raw;
+    }
+
+    function isEchoesOriginalUserId(value) {
+        const id = normalizeEchoesOriginalId(value);
+        if (!id) return true;
+        if (typeof isCurrentUserSenderId === 'function' && isCurrentUserSenderId(id)) return true;
+        return id === 'user' || id === 'me' || id === 'self' || id === 'system' || id === 'system_instruction';
+    }
+
+    function getEchoesOriginalChat(chatId) {
+        const id = String(chatId || state?.activeChatId || '');
+        return (state?.contacts || []).find(contact => contact && String(contact.id) === id) || null;
+    }
+
+    function getEchoesOriginalProfile(chat, characterId) {
+        if (typeof getEchoesCharacterProfile === 'function') {
+            const profile = getEchoesCharacterProfile(chat, characterId);
+            if (profile) return profile;
+        }
+        if (chat?.isGroup) {
+            const id = normalizeEchoesOriginalId(characterId);
+            return (state?.contacts || []).find(contact => normalizeEchoesOriginalId(contact.id) === id)
+                || (chat.npcMembers || []).find(member => normalizeEchoesOriginalId(member.id) === id)
+                || { id, name: id || '角色' };
+        }
+        return chat || { id: characterId, name: '角色' };
+    }
+
+    function getEchoesOriginalAvatar(profile, name) {
+        return profile?.avatar
+            || `https://via.placeholder.com/96/DBEAFE/475569?text=${encodeURIComponent((name || '角').slice(0, 1))}`;
+    }
+
+    function normalizeEchoesOriginalState(record, profile) {
+        const fallbackOutfit = typeof getDefaultOutfitForProfile === 'function'
+            ? getDefaultOutfitForProfile(profile)
+            : '日常便服';
+        const hasFavorability = record?.favorability !== undefined && record?.favorability !== null && record?.favorability !== '';
+        return {
+            ...record,
+            id: record?.id || `fallback-${record?.characterId || profile?.id || Date.now()}`,
+            timestamp: Number(record?.timestamp) || Date.now(),
+            mood: record?.mood || record?.emotion || '平静',
+            affection: record?.affection || (hasFavorability ? `${record.favorability} (${record.favorabilityLabel || '状态未标注'})` : '50 (初始)'),
+            clothing: record?.clothing || record?.outfit || fallbackOutfit || '日常便服',
+            action: record?.action || '正在等待新的互动',
+            innerThoughts: record?.innerThoughts || record?.thoughts || '我还在感受这段关系的变化。'
+        };
+    }
+
+    function getEchoesOriginalRecords(chat, characterId) {
+        const profile = getEchoesOriginalProfile(chat, characterId);
+        const source = typeof window.getEchoesStateRecordsForPanel === 'function'
+            ? window.getEchoesStateRecordsForPanel(chat, characterId)
+            : (typeof getEchoesStateHistory === 'function' ? getEchoesStateHistory(chat, characterId) : []);
+        return (Array.isArray(source) ? source : [])
+            .map(record => normalizeEchoesOriginalState(record, profile))
+            .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0));
+    }
+
+    function ensureEchoesOriginalStatePanelStyles() {
+        LEGACY_STYLE_IDS.forEach(id => {
+            const style = document.getElementById(id);
+            if (style) style.remove();
+        });
+        if (document.getElementById(STYLE_ID)) return;
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            #${PANEL_ID}.echoes-modal-backdrop {
+                position: fixed !important;
+                inset: 0 !important;
+                left: 0 !important;
+                bottom: auto !important;
+                width: auto !important;
+                max-height: none !important;
+                transform: none !important;
+                align-items: center !important;
+                justify-content: center !important;
+                padding: 16px !important;
+                overflow: visible !important;
+                background: rgba(15, 23, 42, 0.20) !important;
+                backdrop-filter: blur(4px) !important;
+                -webkit-backdrop-filter: blur(4px) !important;
+                z-index: 2147483647 !important;
+                color: #1e293b !important;
+                box-sizing: border-box !important;
+            }
+            #${PANEL_ID} *, #${PANEL_ID} *::before, #${PANEL_ID} *::after {
+                box-sizing: border-box;
+            }
+            #${PANEL_ID} .echoes-modal-container {
+                width: 100% !important;
+                max-width: 384px !important;
+                max-height: 80vh !important;
+                display: flex !important;
+                flex-direction: column !important;
+                overflow: hidden !important;
+                border-radius: 24px !important;
+                background: rgba(255, 255, 255, 0.70) !important;
+                border: 1px solid rgba(255, 255, 255, 0.60) !important;
+                box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25) !important;
+                backdrop-filter: blur(36px) saturate(1.14) !important;
+                -webkit-backdrop-filter: blur(36px) saturate(1.14) !important;
+            }
+            #${PANEL_ID} .echoes-modal-header {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                flex-shrink: 0 !important;
+                padding: 16px !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.40) !important;
+            }
+            #${PANEL_ID} .echoes-modal-header h3 {
+                margin: 0 !important;
+                font-size: 18px !important;
+                line-height: 28px !important;
+                font-weight: 600 !important;
+                color: #1e293b !important;
+            }
+            #${PANEL_ID} .echoes-modal-close-btn {
+                width: 28px !important;
+                height: 28px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                padding: 4px !important;
+                border: 0 !important;
+                border-radius: 999px !important;
+                background: transparent !important;
+                color: #64748b !important;
+                cursor: pointer !important;
+                transition: background-color 0.15s ease, color 0.15s ease !important;
+            }
+            #${PANEL_ID} .echoes-modal-close-btn:hover {
+                background: rgba(255, 255, 255, 0.50) !important;
+                color: #334155 !important;
+            }
+            #${PANEL_ID} .echoes-modal-content {
+                flex: 1 1 auto !important;
+                overflow-y: auto !important;
+                padding: 16px !important;
+            }
+            #${PANEL_ID} [data-echoes-original-profile-row] {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                gap: 12px !important;
+                margin-bottom: 16px !important;
+            }
+            #${PANEL_ID} [data-echoes-original-identity] {
+                display: flex !important;
+                align-items: center !important;
+                min-width: 0 !important;
+                gap: 12px !important;
+            }
+            #${PANEL_ID} .echoes-original-avatar {
+                width: 48px !important;
+                height: 48px !important;
+                flex-shrink: 0 !important;
+                border-radius: 999px !important;
+                object-fit: cover !important;
+                background: rgba(255, 255, 255, 0.72) !important;
+                border: 1px solid rgba(255, 255, 255, 0.62) !important;
+                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
+            }
+            #${PANEL_ID} [data-echoes-original-name] {
+                margin: 0 !important;
+                font-size: 16px !important;
+                line-height: 24px !important;
+                font-weight: 600 !important;
+                color: #1e293b !important;
+            }
+            #${PANEL_ID} [data-echoes-original-sync] {
+                margin: 0 !important;
+                font-size: 12px !important;
+                line-height: 16px !important;
+                color: #64748b !important;
+            }
+            #${PANEL_ID} #echoes-state-history-trigger {
+                width: 36px !important;
+                height: 36px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                padding: 8px !important;
+                border: 0 !important;
+                border-radius: 999px !important;
+                cursor: pointer !important;
+                transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease !important;
+            }
+            #${PANEL_ID} #echoes-state-history-trigger[aria-pressed="false"] {
+                background: rgba(255, 255, 255, 0.50) !important;
+                color: #64748b !important;
+            }
+            #${PANEL_ID} #echoes-state-history-trigger[aria-pressed="false"]:hover {
+                background: rgba(255, 255, 255, 0.70) !important;
+            }
+            #${PANEL_ID} #echoes-state-history-trigger[aria-pressed="true"] {
+                background: rgba(244, 249, 253, 0.96) !important;
+                color: #6f8faa !important;
+                border: 1px solid rgba(224, 242, 254, 0.80) !important;
+                box-shadow: 0 4px 10px rgba(132, 167, 197, 0.10) !important;
+            }
+            #${PANEL_ID} [data-echoes-original-current-view],
+            #${PANEL_ID} [data-echoes-original-history-view] {
+                display: flex !important;
+                flex-direction: column !important;
+            }
+            #${PANEL_ID} [data-echoes-original-current-view] {
+                gap: 12px !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-view] {
+                gap: 16px !important;
+                max-height: 320px !important;
+                overflow-y: auto !important;
+                padding-right: 8px !important;
+            }
+            #${PANEL_ID} [data-echoes-original-grid] {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+                gap: 12px !important;
+            }
+            #${PANEL_ID} [data-echoes-original-card],
+            #${PANEL_ID} [data-echoes-original-history-card] {
+                padding: 12px !important;
+                border-radius: 16px !important;
+                background: rgba(255, 255, 255, 0.40) !important;
+                border: 1px solid rgba(255, 255, 255, 0.60) !important;
+                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+            }
+            #${PANEL_ID} [data-echoes-original-label] {
+                display: flex !important;
+                align-items: center !important;
+                gap: 4px !important;
+                margin-bottom: 4px !important;
+                font-size: 12px !important;
+                line-height: 16px !important;
+                font-weight: 500 !important;
+                color: #64748b !important;
+            }
+            #${PANEL_ID} [data-echoes-original-value] {
+                font-size: 14px !important;
+                line-height: 20px !important;
+                color: #1e293b !important;
+                white-space: pre-wrap !important;
+                overflow-wrap: anywhere !important;
+            }
+            #${PANEL_ID} [data-echoes-original-affection] {
+                color: #5f8fb4 !important;
+                font-weight: 500 !important;
+            }
+            #${PANEL_ID} [data-echoes-original-thought-card] {
+                position: relative !important;
+                overflow: hidden !important;
+                padding: 12px !important;
+                border-radius: 16px !important;
+                background: rgba(243, 248, 252, 0.82) !important;
+                border: 1px solid rgba(219, 232, 242, 0.80) !important;
+                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+            }
+            #${PANEL_ID} [data-echoes-original-thought-glow] {
+                position: absolute !important;
+                top: 0 !important;
+                right: 0 !important;
+                width: 64px !important;
+                height: 64px !important;
+                border-radius: 999px !important;
+                background: rgba(185, 212, 231, 0.14) !important;
+                transform: translate(50%, -50%) !important;
+                filter: blur(16px) !important;
+            }
+            #${PANEL_ID} [data-echoes-original-thought-label] {
+                margin-bottom: 4px !important;
+                font-size: 12px !important;
+                line-height: 16px !important;
+                font-weight: 500 !important;
+                color: #7b9ab3 !important;
+            }
+            #${PANEL_ID} [data-echoes-original-thought-value] {
+                position: relative !important;
+                z-index: 1 !important;
+                font-size: 14px !important;
+                line-height: 20px !important;
+                color: #1e293b !important;
+                font-style: italic !important;
+                white-space: pre-wrap !important;
+                overflow-wrap: anywhere !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-head] {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                gap: 8px !important;
+                margin-bottom: 8px !important;
+                padding-bottom: 8px !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.40) !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-time] {
+                flex-shrink: 0 !important;
+                font-size: 12px !important;
+                line-height: 16px !important;
+                color: #64748b !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-affection] {
+                flex: 1 1 auto !important;
+                padding: 0 8px !important;
+                text-align: center !important;
+                font-size: 12px !important;
+                line-height: 16px !important;
+                font-weight: 500 !important;
+                color: #5f8fb4 !important;
+                overflow-wrap: anywhere !important;
+            }
+            #${PANEL_ID} [data-echoes-original-delete] {
+                width: 24px !important;
+                height: 24px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                padding: 4px !important;
+                border: 0 !important;
+                border-radius: 8px !important;
+                background: transparent !important;
+                color: #94a3b8 !important;
+                cursor: pointer !important;
+                transition: color 0.15s ease, background-color 0.15s ease !important;
+            }
+            #${PANEL_ID} [data-echoes-original-delete]:hover {
+                color: #ef4444 !important;
+                background: #fef2f2 !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-body] {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 6px !important;
+                font-size: 14px !important;
+                line-height: 20px !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-body] p {
+                margin: 0 !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-k] {
+                margin-right: 8px !important;
+                font-size: 12px !important;
+                line-height: 16px !important;
+                color: #64748b !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-v] {
+                color: #1e293b !important;
+            }
+            #${PANEL_ID} [data-echoes-original-history-thought] {
+                margin-top: 8px !important;
+                color: #475569 !important;
+                font-style: italic !important;
+                white-space: pre-wrap !important;
+                overflow-wrap: anywhere !important;
+            }
+            #${PANEL_ID} [data-echoes-original-empty] {
+                padding: 32px 0 !important;
+                text-align: center !important;
+                font-size: 14px !important;
+                line-height: 20px !important;
+                color: #64748b !important;
+            }
+            #chat-messages .message-wrapper.echoes-state-clickable-message .message-avatar {
+                visibility: visible !important;
+            }
+            #chat-messages .message-wrapper.echoes-state-clickable-message .message-author-name,
+            #chat-messages .message-wrapper.show-state-author-name .message-author-name {
+                display: block !important;
+                cursor: pointer !important;
+            }
+            #${PANEL_ID} svg {
+                width: 20px;
+                height: 20px;
+                fill: none;
+                stroke: currentColor;
+                stroke-width: 2;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+            #${PANEL_ID} [data-echoes-original-label] svg,
+            #${PANEL_ID} [data-echoes-original-delete] svg {
+                width: 14px !important;
+                height: 14px !important;
+            }
+            @media (max-width: 420px) {
+                #${PANEL_ID}.echoes-modal-backdrop {
+                    padding: 12px !important;
+                }
+                #${PANEL_ID} .echoes-modal-container {
+                    max-width: 100% !important;
+                    max-height: 84vh !important;
+                }
+                #${PANEL_ID} [data-echoes-original-grid] {
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+                    gap: 10px !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function iconSvg(name) {
+        if (name === 'history') {
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>`;
+        }
+        if (name === 'trash') {
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+        }
+        if (name === 'activity') {
+            return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg>`;
+        }
+        return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
+    }
+
+    function ensureEchoesOriginalStatePanel() {
+        ensureEchoesOriginalStatePanelStyles();
+        const legacyHistoryPanel = document.getElementById(LEGACY_HISTORY_PANEL_ID);
+        if (legacyHistoryPanel) legacyHistoryPanel.remove();
+        const legacyPanel = document.getElementById(LEGACY_PANEL_ID);
+        if (legacyPanel) legacyPanel.style.setProperty('display', 'none', 'important');
+
+        let panel = document.getElementById(PANEL_ID);
+        const wasOpen = panel?.style.display === 'flex';
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = PANEL_ID;
+            document.body.appendChild(panel);
+        }
+        panel.className = 'echoes-state-panel echoes-modal-backdrop fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-slate-900/20 backdrop-blur-sm';
+        panel.innerHTML = `
+            <div class="echoes-modal-container bg-white/70 backdrop-blur-3xl border border-white/60 shadow-2xl rounded-3xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[80%]">
+                <div class="echoes-modal-header flex justify-between items-center p-4 border-b border-white/40 flex-shrink-0">
+                    <h3 id="echoes-state-title" class="text-lg font-semibold text-slate-800">角色 的状态</h3>
+                    <button id="echoes-state-close" class="echoes-modal-close-btn p-1 rounded-full hover:bg-white/50 text-slate-500 transition-colors" type="button" aria-label="关闭">${iconSvg('x')}</button>
+                </div>
+                <div class="echoes-modal-content p-4 overflow-y-auto flex-1">
+                    <div data-echoes-original-profile-row class="flex justify-between items-center mb-4">
+                        <div data-echoes-original-identity class="flex items-center gap-3">
+                            <img id="echoes-state-avatar" class="w-12 h-12 text-xl echoes-original-avatar" alt="">
+                            <div>
+                                <h3 id="echoes-state-name" data-echoes-original-name class="font-semibold text-slate-800">角色</h3>
+                                <p data-echoes-original-sync class="text-xs text-slate-500">实时状态同步中</p>
+                            </div>
+                        </div>
+                        <button id="echoes-state-history-trigger" type="button" title="历史状态记录" aria-label="历史状态记录" aria-pressed="false">
+                            ${iconSvg('history')}
+                        </button>
+                    </div>
+                    <div id="echoes-state-content-slot"></div>
+                </div>
+            </div>
+        `;
+        panel.style.setProperty('display', wasOpen ? 'flex' : 'none', 'important');
+        panel.onclick = event => {
+            if (event.target === panel) closeEchoesOriginalStatePanel();
+        };
+        panel.querySelector('#echoes-state-close').onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeEchoesOriginalStatePanel();
+        };
+        panel.querySelector('.echoes-modal-container').onclick = event => event.stopPropagation();
+        panel.querySelector('#echoes-state-history-trigger').onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const showHistory = panel.dataset.showHistory !== 'true';
+            panel.dataset.showHistory = showHistory ? 'true' : 'false';
+            const chat = getEchoesOriginalChat(panel.dataset.chatId);
+            if (!chat || !panel.dataset.characterId) return;
+            const records = getEchoesOriginalRecords(chat, panel.dataset.characterId);
+            renderEchoesOriginalStatePanel(chat, panel.dataset.characterId, records[0] || null, records, showHistory);
+        };
+        return panel;
+    }
+
+    function currentStateHtml(snapshot) {
+        if (!snapshot) {
+            return `<div data-echoes-original-empty class="text-center text-slate-500 text-sm py-8">暂无状态记录。<br>等待角色回复后更新。</div>`;
+        }
+        return `
+            <div data-echoes-original-current-view class="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div data-echoes-original-card class="bg-white/40 border border-white/60 rounded-2xl p-3 shadow-sm">
+                    <div data-echoes-original-label class="text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">${iconSvg('activity')} 实时心情</div>
+                    <div data-echoes-original-value class="text-sm text-slate-800">${escapeEchoesOriginalHtml(snapshot.mood || '正在思考...')}</div>
+                </div>
+                <div data-echoes-original-card class="bg-white/40 border border-white/60 rounded-2xl p-3 shadow-sm">
+                    <div data-echoes-original-label class="text-xs font-medium text-slate-500 mb-1">对你的好感度</div>
+                    <div data-echoes-original-value data-echoes-original-affection class="text-sm text-[#5f8fb4] font-medium">${escapeEchoesOriginalHtml(snapshot.affection || '未知')}</div>
+                </div>
+                <div data-echoes-original-grid class="grid grid-cols-2 gap-3">
+                    <div data-echoes-original-card class="bg-white/40 border border-white/60 rounded-2xl p-3 shadow-sm">
+                        <div data-echoes-original-label class="text-xs font-medium text-slate-500 mb-1">穿着</div>
+                        <div data-echoes-original-value class="text-sm text-slate-800">${escapeEchoesOriginalHtml(snapshot.clothing || '未知')}</div>
+                    </div>
+                    <div data-echoes-original-card class="bg-white/40 border border-white/60 rounded-2xl p-3 shadow-sm">
+                        <div data-echoes-original-label class="text-xs font-medium text-slate-500 mb-1">动作</div>
+                        <div data-echoes-original-value class="text-sm text-slate-800">${escapeEchoesOriginalHtml(snapshot.action || '静止')}</div>
+                    </div>
+                </div>
+                <div data-echoes-original-thought-card class="bg-[rgba(243,248,252,0.82)] border border-[#dbe8f2]/80 rounded-2xl p-3 shadow-sm relative overflow-hidden">
+                    <div data-echoes-original-thought-glow class="absolute top-0 right-0 w-16 h-16 bg-[#b9d4e7]/14 rounded-full -translate-y-1/2 translate-x-1/2 blur-xl"></div>
+                    <div data-echoes-original-thought-label class="text-xs font-medium text-[#7b9ab3] mb-1">内心想法</div>
+                    <div data-echoes-original-thought-value class="text-sm text-slate-800 italic relative z-10">"${escapeEchoesOriginalHtml(snapshot.innerThoughts || '...')}"</div>
+                </div>
+            </div>
+        `;
+    }
+
+    function historyStateHtml(records) {
+        if (!records.length) {
+            return `<div data-echoes-original-empty class="text-center text-slate-500 text-sm py-8">暂无历史记录</div>`;
+        }
+        return `
+            <div data-echoes-original-history-view class="space-y-4 animate-in fade-in slide-in-from-right-2 duration-300 max-h-80 overflow-y-auto pr-2">
+                ${records.map(record => `
+                    <div data-echoes-original-history-card class="bg-white/40 border border-white/60 rounded-2xl p-3 shadow-sm text-sm">
+                        <div data-echoes-original-history-head class="flex justify-between items-center mb-2 border-b border-white/40 pb-2">
+                            <span data-echoes-original-history-time class="text-xs text-slate-500">${escapeEchoesOriginalHtml(new Date(record.timestamp).toLocaleTimeString())}</span>
+                            <span data-echoes-original-history-affection class="text-xs font-medium text-[#5f8fb4] flex-1 text-center px-2">${escapeEchoesOriginalHtml(record.affection || '')}</span>
+                            <button data-echoes-original-delete data-record-id="${escapeEchoesOriginalHtml(record.id || '')}" class="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors" type="button" title="删除此条记录" aria-label="删除此条记录">
+                                ${iconSvg('trash')}
+                            </button>
+                        </div>
+                        <div data-echoes-original-history-body class="space-y-1.5">
+                            <p><span data-echoes-original-history-k class="text-slate-500 text-xs mr-2">心情</span><span data-echoes-original-history-v class="text-slate-800">${escapeEchoesOriginalHtml(record.mood || '平静')}</span></p>
+                            <p><span data-echoes-original-history-k class="text-slate-500 text-xs mr-2">动作</span><span data-echoes-original-history-v class="text-slate-800">${escapeEchoesOriginalHtml(record.action || '静止')}</span></p>
+                            <p data-echoes-original-history-thought class="italic text-slate-600 mt-2">"${escapeEchoesOriginalHtml(record.innerThoughts || '')}"</p>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function renderEchoesOriginalStatePanel(chat, characterId, snapshot, historyRecords = [], showHistory = false) {
+        const panel = ensureEchoesOriginalStatePanel();
+        const profile = getEchoesOriginalProfile(chat, characterId);
+        const name = profile?.name || '角色';
+        const normalizedSnapshot = snapshot ? normalizeEchoesOriginalState(snapshot, profile) : null;
+        const records = (Array.isArray(historyRecords) ? historyRecords : [])
+            .map(record => normalizeEchoesOriginalState(record, profile))
+            .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0));
+
+        panel.dataset.chatId = chat?.id || '';
+        panel.dataset.characterId = normalizeEchoesOriginalId(characterId);
+        panel.dataset.showHistory = showHistory ? 'true' : 'false';
+        panel.querySelector('#echoes-state-title').textContent = `${name} 的状态`;
+        panel.querySelector('#echoes-state-name').textContent = name;
+        const avatar = panel.querySelector('#echoes-state-avatar');
+        avatar.src = getEchoesOriginalAvatar(profile, name);
+        avatar.alt = `${name} 的头像`;
+
+        const historyButton = panel.querySelector('#echoes-state-history-trigger');
+        historyButton.setAttribute('aria-pressed', showHistory ? 'true' : 'false');
+        historyButton.className = showHistory
+            ? 'p-2 rounded-full transition-colors bg-[rgba(244,249,253,0.96)] text-[#6f8faa] border border-sky-100/80 shadow-[0_4px_10px_rgba(132,167,197,0.10)]'
+            : 'p-2 rounded-full transition-colors bg-white/50 text-slate-500 hover:bg-white/70';
+
+        const slot = panel.querySelector('#echoes-state-content-slot');
+        slot.innerHTML = showHistory ? historyStateHtml(records) : currentStateHtml(normalizedSnapshot);
+        slot.querySelectorAll('[data-echoes-original-delete]').forEach(button => {
+            button.addEventListener('click', async event => {
+                event.preventDefault();
+                event.stopPropagation();
+                await deleteEchoesOriginalStateRecord(panel.dataset.chatId, panel.dataset.characterId, button.dataset.recordId);
+            });
+        });
+        return panel;
+    }
+
+    function closeEchoesOriginalStatePanel() {
+        const panel = document.getElementById(PANEL_ID);
+        if (panel) {
+            panel.style.setProperty('display', 'none', 'important');
+            panel.dataset.chatId = '';
+            panel.dataset.characterId = '';
+            panel.dataset.showHistory = 'false';
+        }
+        if (state?.heartVoicePanel) {
+            state.heartVoicePanel.isOpen = false;
+            state.heartVoicePanel.chatId = null;
+            state.heartVoicePanel.characterId = null;
+        }
+    }
+
+    function closeEchoesOriginalStateHistoryPanel() {
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel || panel.style.display !== 'flex') return;
+        const chat = getEchoesOriginalChat(panel.dataset.chatId);
+        if (!chat || !panel.dataset.characterId) return;
+        const records = getEchoesOriginalRecords(chat, panel.dataset.characterId);
+        renderEchoesOriginalStatePanel(chat, panel.dataset.characterId, records[0] || null, records, false);
+    }
+
+    async function deleteEchoesOriginalStateRecord(chatId, characterId, recordId) {
+        if (!chatId || !characterId || !recordId) return;
+        const chat = getEchoesOriginalChat(chatId);
+        if (!chat) return;
+        const normalizedChatId = String(chat.id || '');
+        const normalizedCharacterId = normalizeEchoesOriginalId(characterId);
+        const normalizedRecordId = String(recordId);
+        let removedStateRecord = false;
+        let removedLegacyRecord = false;
+
+        if (Array.isArray(state.characterStates)) {
+            state.characterStates = state.characterStates.filter(record => {
+                const matches = record
+                    && String(record.id || '') === normalizedRecordId
+                    && String(record.chatId || '') === normalizedChatId
+                    && normalizeEchoesOriginalId(record.characterId) === normalizedCharacterId;
+                if (matches) removedStateRecord = true;
+                return !matches;
+            });
+        }
+
+        if (Array.isArray(chat.history)) {
+            chat.history = chat.history.filter(message => {
+                const matches = message
+                    && message.type === 'heart_voice'
+                    && String(message.id || '') === normalizedRecordId
+                    && normalizeEchoesOriginalId(message.characterId || message.senderId || message.sender) === normalizedCharacterId;
+                if (matches) removedLegacyRecord = true;
+                return !matches;
+            });
+        }
+
+        if (!removedStateRecord && !removedLegacyRecord) return;
+
+        if (typeof rebuildCharacterStateSnapshots === 'function') {
+            state.characterStateSnapshots = rebuildCharacterStateSnapshots(state.characterStates || []);
+        }
+
+        try {
+            if (removedStateRecord && typeof kokoMemory !== 'undefined' && kokoMemory?.delete) {
+                await kokoMemory.delete('character_states', normalizedRecordId);
+            }
+        } catch (error) {
+            console.warn('[ECHOES ORIGINAL STATE DELETE FAILED]', error, { chatId, characterId, recordId });
+        }
+
+        try {
+            if (removedLegacyRecord && typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
+                await kokoMemory.put('contacts', chat);
+            }
+        } catch (error) {
+            console.warn('[ECHOES ORIGINAL LEGACY STATE DELETE FAILED]', error, { chatId, characterId, recordId });
+        }
+
+        window.state = state;
+        const records = getEchoesOriginalRecords(chat, normalizedCharacterId);
+        renderEchoesOriginalStatePanel(chat, normalizedCharacterId, records[0] || null, records, true);
+    }
+
+    async function openEchoesOriginalStatePanel(chatId, characterId, options = {}) {
+        const chat = getEchoesOriginalChat(chatId);
+        if (!chat) return null;
+        let id = normalizeEchoesOriginalId(characterId);
+        if (!chat.isGroup || id === 'contact') id = normalizeEchoesOriginalId(chat.id);
+        if (!id || isEchoesOriginalUserId(id)) return null;
+
+        let records = getEchoesOriginalRecords(chat, id);
+        let latest = records[0] || null;
+        if (!latest && options.createFallbackIfEmpty !== false) {
+            if (typeof window.ensureEchoesStateForClickedCharacter === 'function') {
+                latest = await window.ensureEchoesStateForClickedCharacter(chat, id, options.sourceMessage || null);
+            } else if (typeof ensureFallbackHeartVoiceForClickedCharacter === 'function') {
+                latest = await ensureFallbackHeartVoiceForClickedCharacter(chat, id);
+            }
+            records = getEchoesOriginalRecords(chat, id);
+            latest = records[0] || latest;
+        }
+
+        const profile = getEchoesOriginalProfile(chat, id);
+        latest = latest
+            ? normalizeEchoesOriginalState(latest, profile)
+            : normalizeEchoesOriginalState({ id: `fallback-${id}`, characterId: id, timestamp: Date.now() }, profile);
+        if (!records.length) records = [latest];
+
+        const panel = renderEchoesOriginalStatePanel(chat, id, latest, records, options.showHistory === true);
+        panel.style.setProperty('display', 'flex', 'important');
+
+        if (state?.heartVoicePanel) {
+            state.heartVoicePanel = {
+                isOpen: true,
+                chatId: chat.id,
+                characterId: id
+            };
+        }
+        window.state = state;
+        return latest;
+    }
+
+    function ensureEchoesOriginalStateHistoryPanel() {
+        return ensureEchoesOriginalStatePanel();
+    }
+
+    function renderEchoesOriginalStateHistoryPanel(chat, characterId, historyRecords = []) {
+        const records = Array.isArray(historyRecords) && historyRecords.length
+            ? historyRecords
+            : getEchoesOriginalRecords(chat, characterId);
+        return renderEchoesOriginalStatePanel(chat, characterId, records[0] || null, records, true);
+    }
+
+    function openEchoesOriginalStateHistoryPanel(chatId, characterId, options = {}) {
+        return openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, {
+            ...options,
+            createFallbackIfEmpty: false,
+            showHistory: true
+        });
+    }
+
+    function refreshEchoesOriginalStatePanelIfOpen(chat) {
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel || panel.style.display !== 'flex' || !chat) return;
+        if (String(panel.dataset.chatId || '') !== String(chat.id || '')) return;
+        const characterId = panel.dataset.characterId;
+        if (!characterId) return;
+        openEchoesOriginalStatePanel(chat.id, characterId, {
+            createFallbackIfEmpty: false,
+            showHistory: panel.dataset.showHistory === 'true'
+        });
+    }
+    window.__openEchoesOriginalStatePanel = openEchoesOriginalStatePanel;
+    window.ensureEchoesOriginalStatePanel = ensureEchoesOriginalStatePanel;
+    window.openEchoesStatePanel = openEchoesOriginalStatePanel;
+    window.openEchoesHeartVoicePanel = (chatId, characterId, options = {}) => openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, { createFallbackIfEmpty: true, ...options });
+    window.openHeartVoicePanelForCharacter = (characterId, chatId) => openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, { createFallbackIfEmpty: true });
+    window.openHeartVoicePanel = (characterId, chatContext) => openEchoesOriginalStatePanel((typeof chatContext === 'string' ? chatContext : chatContext?.id) || state?.activeChatId, characterId, { createFallbackIfEmpty: true });
+    window.closeHeartVoicePanel = closeEchoesOriginalStatePanel;
+    window.refreshHeartVoicePanelIfOpen = refreshEchoesOriginalStatePanelIfOpen;
+    window.refreshOpenHeartVoicePanelForSavedRecord = (liveChat) => refreshEchoesOriginalStatePanelIfOpen(liveChat);
+
+    try { openEchoesStatePanel = openEchoesOriginalStatePanel; } catch (error) {}
+    try { closeHeartVoicePanel = closeEchoesOriginalStatePanel; } catch (error) {}
+    try { refreshHeartVoicePanelIfOpen = refreshEchoesOriginalStatePanelIfOpen; } catch (error) {}
+    try { refreshOpenHeartVoicePanelForSavedRecord = window.refreshOpenHeartVoicePanelForSavedRecord; } catch (error) {}
+
+    console.log('[ECHOES ORIGINAL STATE PANEL READY]');
 })();
 </script>
 
