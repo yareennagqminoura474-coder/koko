@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="manifest" href="manifest.json?v=20260526-fix-11">
+<link rel="manifest" href="manifest.json?v=20260526-fix-12">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-11</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-12</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-11';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-12';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -18599,7 +18599,7 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
                         if (event.stopImmediatePropagation) event.stopImmediatePropagation();
                         if (event.detail && event.detail > 1) return;
                         openEchoesStatePanel(contact.id, characterId, {
-                            createFallbackIfEmpty: true
+                            createFallbackIfEmpty: false
                         });
                     };
                 } else {
@@ -19807,26 +19807,6 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
             content: text,
             forceAvatar: true
         }, speaker.id, group, true, 'chat');
-        if (addedMessage) {
-            await ensureEchoesStateForVisibleMessage(
-                addedMessage,
-                group,
-                speaker,
-                heartVoice || null
-            );
-        } else {
-            await saveEchoesCharacterState(
-                group,
-                speaker.id,
-                heartVoice || {
-                    mood: inferHeartVoiceEmotion(text),
-                    innerThoughts: makeLocalHeartVoiceThought(text, speaker, group),
-                    heartRate: '平稳',
-                    jealousy: inferHeartVoiceJealousy(text)
-                },
-                `group_turn_${group.id}_${speaker.id}_${messageStartedAt}`
-            );
-        }
     } else {
         await processAndDisplayAiResponse(text, speaker, group, 'chat', {
             skipHeartVoiceFallback: true,
@@ -24632,18 +24612,18 @@ async function openEchoesStatePanel(chatId, characterId, options = {}) {
 
 async function openEchoesHeartVoicePanel(chatId, characterId, options = {}) {
     return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, {
-        createFallbackIfEmpty: true,
+        createFallbackIfEmpty: false,
         ...options
     }) || null;
 }
 
 function openHeartVoicePanelForCharacter(characterId, chatId) {
-    return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true }) || null;
+    return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: false }) || null;
 }
 
 function openHeartVoicePanel(characterId, chatContext) {
     const chatId = typeof chatContext === 'string' ? chatContext : chatContext?.id;
-    return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true }) || null;
+    return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: false }) || null;
 }
 
 window.openHeartVoicePanelForCharacter = openHeartVoicePanelForCharacter;
@@ -48206,7 +48186,7 @@ await initApp();
 </script>
 <script>
   (function() {
-const BUILD_VERSION = '20260526-fix-11';
+const BUILD_VERSION = '20260526-fix-12';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -48229,7 +48209,7 @@ const BUILD_VERSION = '20260526-fix-11';
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-const SW_VERSION = '20260526-fix-11';
+const SW_VERSION = '20260526-fix-12';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -48597,7 +48577,7 @@ function resolveEchoesStateClickTarget(event) {
 
     window.openHeartVoicePanelForCharacter = function(characterId, chatId) {
         return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, {
-            createFallbackIfEmpty: true
+            createFallbackIfEmpty: false
         }) || null;
     };
 
@@ -48607,13 +48587,13 @@ function resolveEchoesStateClickTarget(event) {
             : chatContext?.id || state.activeChatId;
 
         return window.__openEchoesOriginalStatePanel?.(chatId, characterId, {
-            createFallbackIfEmpty: true
+            createFallbackIfEmpty: false
         }) || null;
     };
 
     window.openEchoesHeartVoicePanel = function(chatId, characterId, options = {}) {
         return window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, {
-            createFallbackIfEmpty: true,
+            createFallbackIfEmpty: false,
             ...options
         }) || null;
     };
@@ -49087,12 +49067,11 @@ function resolveEchoesStateClickTarget(event) {
     async function ensureEchoesStateForClickedCharacter(chat, characterId, message = null) {
         const existing = getEchoesStateRecordsForPanel(chat, characterId)[0];
         if (existing) return existing;
-        return saveEchoesCharacterState(
-            chat,
-            characterId,
-            buildEchoesFallbackState(chat, characterId, message),
-            message?.id || `echoes_click_${chat.id}_${characterId}_${Date.now()}`
-        );
+        console.warn('[ECHOES PANEL READ ONLY] missing_saved_state', {
+            chatId: chat?.id,
+            characterId
+        });
+        return null;
     }
 
     function markExistingMessagesEchoesStateClickable() {
@@ -49120,9 +49099,9 @@ function resolveEchoesStateClickTarget(event) {
     window.setupEchoesStateBridge = setupEchoesStateBridge;
     window.handleEchoesStateBridgeClick = handleEchoesStateBridgeClick;
 
-    window.openHeartVoicePanelForCharacter = (characterId, chatId) => window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true }) || null;
-    window.openHeartVoicePanel = (characterId, chatContext) => window.__openEchoesOriginalStatePanel?.((typeof chatContext === 'string' ? chatContext : chatContext?.id) || state.activeChatId, characterId, { createFallbackIfEmpty: true }) || null;
-    window.openEchoesHeartVoicePanel = (chatId, characterId, options = {}) => window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: true, ...options }) || null;
+    window.openHeartVoicePanelForCharacter = (characterId, chatId) => window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: false }) || null;
+    window.openHeartVoicePanel = (characterId, chatContext) => window.__openEchoesOriginalStatePanel?.((typeof chatContext === 'string' ? chatContext : chatContext?.id) || state.activeChatId, characterId, { createFallbackIfEmpty: false }) || null;
+    window.openEchoesHeartVoicePanel = (chatId, characterId, options = {}) => window.__openEchoesOriginalStatePanel?.(chatId || state.activeChatId, characterId, { createFallbackIfEmpty: false, ...options }) || null;
     window.setupEchoesStateAvatarClick = () => null;
     window.setupEchoesHeartVoiceAvatarClick = () => null;
     window.handleEchoesStateAvatarClick = () => null;
@@ -49202,6 +49181,35 @@ function resolveEchoesStateClickTarget(event) {
         return String(messageOrText.text || '');
     }
 
+    function getStateTextForMessage(messageOrText) {
+        const text = getText(messageOrText).trim();
+        if (text) return text;
+        if (!messageOrText || typeof messageOrText !== 'object') return '';
+        switch (messageOrText.type) {
+            case 'voice':
+                return '发来了一段语音';
+            case 'image':
+            case 'uploaded_image':
+            case 'picture':
+            case 'picture_description':
+                return '发来了一张图片';
+            case 'music':
+            case 'music_share':
+                return '分享了一段音乐';
+            case 'red_packet':
+                return '发来了一个红包';
+            case 'transfer':
+                return '发来了一笔转账';
+            case 'gift':
+                return '送来了一份礼物';
+            case 'location':
+            case 'location_share':
+                return '发来了位置信息';
+            default:
+                return '';
+        }
+    }
+
     function escapeHtml(value = '') {
         if (typeof escapeUiHtml === 'function') return escapeUiHtml(value);
         return String(value)
@@ -49248,7 +49256,10 @@ function resolveEchoesStateClickTarget(event) {
     }
 
     function isStateVisibleMessage(message) {
-        if (!message || SKIP_STATE_TYPES.has(message.type)) return false;
+        if (!message) return false;
+        if (message.type === 'heart_voice' || message.type === 'system_notification' || message.type === 'system_instruction' || message.type === 'recall_ai') {
+            return false;
+        }
         const sender = normalizeId(message.senderId || message.sender);
         return !!sender && !isUserSender(sender) && sender !== 'system' && sender !== 'system_instruction';
     }
@@ -49269,7 +49280,9 @@ function resolveEchoesStateClickTarget(event) {
             startedHistoryLength: Array.isArray(chat.history) ? chat.history.length : 0,
             speakerMessageMap: new Map(),
             explicitStateMap: new Map(),
-            relatedMessageMap: new Map()
+            relatedMessageMap: new Map(),
+            parsedStates: [],
+            parsedResponses: []
         };
         activeRoundByChatId.set(chat.id, ctx);
         return { ctx, owner: true };
@@ -49898,8 +49911,8 @@ function resolveEchoesStateClickTarget(event) {
             ? chat.history.find(message => String(message.id) === String(relatedMessageId))
             : null;
         const roundUserText = options.roundUserText || payloadObject.roundUserText || activeRound?.roundUserText || latestUserText(chat, relatedMessage?.timestamp || Date.now());
-        const visibleText = String(options.visibleText || payloadObject.visibleText || payloadObject.roundAiText || payloadObject.text || payloadObject.content || getText(relatedMessage) || '').trim();
-        const roundAiText = String(options.roundAiText || payloadObject.roundAiText || visibleText || getText(relatedMessage)).trim();
+        const visibleText = String(options.visibleText || payloadObject.visibleText || payloadObject.roundAiText || payloadObject.text || payloadObject.content || getStateTextForMessage(relatedMessage) || '').trim();
+        const roundAiText = String(options.roundAiText || payloadObject.roundAiText || visibleText || getStateTextForMessage(relatedMessage)).trim();
         const speakerProfile = getProfile(chat, id);
         const previousState = typeof getLatestCharacterStateSnapshot === 'function'
             ? getLatestCharacterStateSnapshot(chat, id)
@@ -49918,15 +49931,14 @@ function resolveEchoesStateClickTarget(event) {
                 roundAiText,
                 explicitState: payloadObject
             })
-            : buildEchoesDerivedState({
-                character: speakerProfile,
+            : buildDerivedEchoesStateForRound({
                 chat,
+                character: speakerProfile,
+                characterId: id,
                 roundUserText,
-                roundResponsesText: roundAiText,
-                ownResponseText: visibleText,
-                previousState,
-                explicitState: payloadObject,
-                didSpeak: !!visibleText
+                ownAiText: visibleText,
+                allAiText: roundAiText,
+                previousState
             });
 
         if (!normalized.mood || !normalized.affection || !normalized.clothing || !normalized.action || !normalized.innerThoughts) {
@@ -49939,68 +49951,21 @@ function resolveEchoesStateClickTarget(event) {
             return null;
         }
 
-        state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
         const targetRelatedMessageId = relatedMessageId || payloadObject.relatedMessageId || null;
         const targetRoundId = options.roundId || payloadObject.roundId || activeRound?.roundId || null;
-        const sameRoundRecord = targetRoundId
-            ? state.characterStates.find(record =>
-                record &&
-                normalizeId(record.chatId) === normalizeId(chat.id) &&
-                normalizeId(record.characterId) === id &&
-                String(record.roundId || '') === String(targetRoundId)
-            )
-            : null;
-        const sameRelatedRecord = state.characterStates.find(record =>
-            record &&
-            normalizeId(record.chatId) === normalizeId(chat.id) &&
-            normalizeId(record.characterId) === id &&
-            targetRelatedMessageId &&
-            String(record.relatedMessageId || '') === String(targetRelatedMessageId)
-        );
-
-        const timestamp = Date.now();
-        const nextFields = {
-            chatId: chat.id,
+        return saveEchoesRoundStateRecord({
+            chat,
             characterId: id,
-            timestamp,
-            roundId: targetRoundId,
             relatedMessageId: targetRelatedMessageId,
-            mood: normalized.mood,
-            affection: normalized.affection,
-            clothing: normalized.clothing,
-            action: normalized.action,
-            innerThoughts: normalized.innerThoughts
-        };
-
-        let record;
-        if (sameRoundRecord || sameRelatedRecord) {
-            const existingRecord = sameRoundRecord || sameRelatedRecord;
-            record = Object.assign(existingRecord, nextFields, { id: existingRecord.id });
-        } else {
-            record = {
-                id: `state_${timestamp}_${Math.random().toString(36).slice(2)}`,
-                ...nextFields
-            };
-            state.characterStates.push(record);
-        }
-
-        if (typeof updateCharacterStateSnapshot === 'function') {
-            updateCharacterStateSnapshot(record);
-        }
-        try {
-            if (typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
-                await kokoMemory.put('character_states', record);
+            roundId: targetRoundId || createEchoesRoundId(chat, 'single-state'),
+            payload: {
+                mood: normalized.mood,
+                affection: normalized.affection,
+                clothing: normalized.clothing,
+                action: normalized.action,
+                innerThoughts: normalized.innerThoughts
             }
-        } catch (error) {
-            console.warn('[ECHOES STATE STORE FAILED]', error, record);
-        }
-        window.state = state;
-        if (payloadObject.__echoesFallback === true || options.isFallbackState === true) {
-            console.log('[ECHOES FALLBACK STATE SAVED]', record);
-        } else {
-            console.log('[ECHOES STATE SAVED]', record);
-        }
-        return record;
+        });
     }
 
     async function ensureEchoesStateForVisibleMessage(message, chat, speakerProfile, explicitState = null) {
@@ -50013,7 +49978,7 @@ function resolveEchoesStateClickTarget(event) {
             return null;
         }
         if (!explicitState) {
-            console.warn('[ECHOES STATE SAVE FAILED]', 'missing_explicit_state_for_visible_message', {
+            console.warn('[ECHOES SINGLE MESSAGE STATE SKIPPED] no explicitState; finalizeEchoesStatesForAiRound should handle this round', {
                 chatId: chat?.id,
                 characterId: id,
                 relatedMessageId: message?.id || null
@@ -50021,7 +49986,7 @@ function resolveEchoesStateClickTarget(event) {
             return null;
         }
         const roundId = createEchoesRoundId(chat, 'message');
-        const text = getText(message);
+        const text = getStateTextForMessage(message);
         return saveEchoesCharacterState(chat, id, {
             ...(explicitState || {}),
             visibleText: text,
@@ -50032,6 +49997,80 @@ function resolveEchoesStateClickTarget(event) {
             replaceSameRound: true,
             isFallbackState: false
         });
+    }
+
+    function getRoundTopicSnippet(...texts) {
+        const source = texts.map(text => String(text || '').trim()).find(Boolean) || '';
+        return source ? snippet(source, 18) : '刚才那句分寸';
+    }
+
+    function buildDerivedEchoesAction(mood, combinedText = '', previousAction = '') {
+        const previous = String(previousAction || '').trim();
+        if (/生气|烦|别闹|够了|闭嘴|冷|火/.test(combinedText)) {
+            return '轻轻皱眉，指尖在屏幕边缘停了一下，像是把更重的话压了回去';
+        }
+        if (/哈哈|开心|笑|高兴|喜欢|放松/.test(combinedText)) {
+            return '眼尾微微松开，指尖在屏幕上敲得快了一点，像是情绪终于顺了下来';
+        }
+        if (/嗯|随便|行吧|算了|克制|冷淡/.test(combinedText)) {
+            return '偏过头看着消息，停顿了几秒才回复，手指最后只敲下了最克制的那句';
+        }
+        if (/对不起|沉默|没事|难过|低落|犹豫|担心/.test(combinedText)) {
+            return '垂下眼，指尖在屏幕边缘停了一下，像是把更软的话先收回心里';
+        }
+        if (previous) return previous;
+        return '身体微微前倾，视线停在消息上，像是在心里把话过了一遍才慢慢发出去';
+    }
+
+    function buildDerivedEchoesStateForRound({
+        chat,
+        character,
+        characterId,
+        roundUserText = '',
+        ownAiText = '',
+        allAiText = '',
+        previousState = null
+    }) {
+        if (!chat || !characterId) return null;
+        const ownText = String(ownAiText || '').trim();
+        const mergedText = [roundUserText, ownText, allAiText].filter(Boolean).join(' ');
+        let mood = '专注 / 微妙';
+        if (/生气|烦|别闹|够了|闭嘴|压着火|不爽/.test(mergedText)) {
+            mood = '烦躁 / 压着火';
+        } else if (/哈哈|笑|开心|高兴|喜欢|轻松|放松/.test(mergedText)) {
+            mood = '放松 / 愉快';
+        } else if (/嗯|随便|行吧|算了|克制|冷淡/.test(mergedText)) {
+            mood = '克制 / 冷淡';
+        } else if (/对不起|沉默|没事|难过|低落|犹豫|担心|不安/.test(mergedText)) {
+            mood = '低落 / 犹豫';
+        }
+
+        const affection = String(previousState?.affection || '50 (初始)').trim() || '50 (初始)';
+        const clothing = String(previousState?.clothing || previousState?.outfit || '日常穿着').trim() || '日常穿着';
+        const action = buildDerivedEchoesAction(mood, mergedText, previousState?.action || '');
+        const shortOwnText = snippet(ownText || allAiText || '……', 30) || '……';
+        const topicSnippet = getRoundTopicSnippet(roundUserText, ownText, allAiText);
+        const carryLine = previousState?.innerThoughts ? '上一轮留下的那点情绪还没散，我这次说话也带着它。' : '';
+
+        let innerThoughts = chat.isGroup
+            ? `我刚才当着大家说出“${shortOwnText}”时，心里还在意“${topicSnippet}”。${carryLine}${roundUserText ? `她刚才那句“${snippet(roundUserText, 22)}”让我没法真的装作无所谓，` : ''}旁边还有别人的反应，我不能把话一次说满，只能先用这种方式接住。`
+            : `我刚才回了“${shortOwnText}”，这句并不是随手发出去的。${carryLine}${roundUserText ? `她先前那句“${snippet(roundUserText, 22)}”还压在我心里，` : ''}我不想把在意说得太直，只能先把情绪收进这句回复里。`;
+
+        innerThoughts = String(innerThoughts || '')
+            .replace(/正在等待新的互动|我还在感受这段关系的变化|正在回应这段对话|我还在消化这句话|表面上/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!/^我/.test(innerThoughts)) {
+            innerThoughts = `我${innerThoughts.replace(/^[，。,.、\s]+/g, '')}`;
+        }
+
+        return {
+            mood,
+            affection,
+            clothing,
+            action,
+            innerThoughts: innerThoughts.slice(0, 220)
+        };
     }
 
     function buildEchoesDerivedState({
@@ -50047,141 +50086,267 @@ function resolveEchoesStateClickTarget(event) {
         if (!chat || !character || !didSpeak) return null;
         const characterId = normalizeCharacterIdForChat(chat, character.id, character);
         if (!characterId) return null;
-        const visibleText = String(ownResponseText || roundResponsesText || '').trim();
-        const roundAiText = String(roundResponsesText || visibleText || '').trim();
-        const derived = buildNextCharacterState(previousState, {
+        const derived = buildDerivedEchoesStateForRound({
             chat,
-            speakerProfile: character,
-            visibleText,
+            character,
+            characterId,
             roundUserText,
-            roundAiText,
-            explicitState: explicitState || {}
+            ownAiText: String(ownResponseText || '').trim(),
+            allAiText: String(roundResponsesText || ownResponseText || '').trim(),
+            previousState
         });
         if (!derived) return null;
         kokoDebugLog('[ECHOES STATE DERIVED]', {
             chatId: chat.id,
             characterId,
-            visibleText: snippet(visibleText, 80),
+            visibleText: snippet(ownResponseText, 80),
             roundUserText: snippet(roundUserText, 80)
         });
         return {
             characterId,
-            mood: derived.mood,
-            affection: derived.affection,
-            clothing: derived.clothing,
-            action: derived.action,
-            innerThoughts: derived.innerThoughts,
-            visibleText: derived.visibleText,
-            roundUserText: derived.roundUserText,
-            roundAiText: derived.roundAiText,
+            ...derived,
+            visibleText: String(ownResponseText || roundResponsesText || '').trim(),
+            roundUserText: String(roundUserText || '').trim(),
+            roundAiText: String(roundResponsesText || ownResponseText || '').trim(),
             __echoesFallback: true
         };
     }
 
-    async function savePrivateRoundEchoesState({ chat, characterId, roundId, roundUserText, aiMessages = [], explicitState = null }) {
-        if (!chat || !characterId) return null;
-        const messages = aiMessages.filter(Boolean);
-        const roundAiText = messages.map(getText).filter(Boolean).join('\n').trim()
-            || String(explicitState?.roundAiText || explicitState?.visibleText || '').trim();
-        if (!roundAiText && !explicitState) return null;
-        const relatedMessageId = messages[messages.length - 1]?.id || null;
-        const speakerProfile = getProfile(chat, characterId);
-        const previousState = typeof getLatestCharacterStateSnapshot === 'function'
-            ? getLatestCharacterStateSnapshot(chat, characterId)
-            : null;
-        const statePayload = explicitState || buildEchoesDerivedState({
-            character: speakerProfile,
-            chat,
-            roundUserText,
-            roundResponsesText: roundAiText,
-            ownResponseText: roundAiText,
-            previousState,
-            explicitState: null,
-            didSpeak: !!roundAiText
+    async function saveEchoesRoundStateRecord({
+        chat,
+        characterId,
+        relatedMessageId,
+        roundId,
+        payload
+    }) {
+        if (!chat || !characterId || !roundId || !payload) return null;
+        let id = normalizeCharacterIdForChat(chat, characterId, getProfile(chat, characterId));
+        if (!chat.isGroup) id = normalizeId(chat.id);
+        if (!id || isUserSender(id) || id === 'system' || id === 'system_instruction') return null;
+
+        state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
+        const removed = [];
+        state.characterStates = state.characterStates.filter(record => {
+            const sameRound = record
+                && normalizeId(record.chatId) === normalizeId(chat.id)
+                && normalizeId(record.characterId) === normalizeId(id)
+                && String(record.roundId || '') === String(roundId);
+            if (sameRound) removed.push(record);
+            return !sameRound;
         });
-        return saveEchoesCharacterState(chat, characterId, {
-            ...(statePayload || {}),
-            visibleText: roundAiText,
-            roundUserText,
-            roundAiText
-        }, relatedMessageId, {
+
+        for (const oldRecord of removed) {
+            try {
+                if (typeof kokoMemory !== 'undefined' && kokoMemory?.delete && oldRecord?.id) {
+                    await kokoMemory.delete('character_states', oldRecord.id);
+                }
+            } catch (error) {
+                console.warn('[ECHOES STATE OLD DELETE FAILED]', error, oldRecord);
+            }
+        }
+
+        const record = {
+            id: `state_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            chatId: chat.id,
+            characterId: id,
+            timestamp: Date.now(),
+            relatedMessageId: relatedMessageId || null,
+            roundId,
+            mood: String(payload.mood || '').trim() || '专注 / 微妙',
+            affection: String(payload.affection || '').trim() || '50 (初始)',
+            clothing: String(payload.clothing || '').trim() || '日常穿着',
+            action: String(payload.action || '').trim() || '垂下眼，指尖在屏幕边缘停了一下',
+            innerThoughts: String(payload.innerThoughts || '').trim() || '我刚才那句话没有随便说出口。'
+        };
+
+        state.characterStates.push(record);
+        if (typeof updateCharacterStateSnapshot === 'function') {
+            updateCharacterStateSnapshot(record);
+        }
+        try {
+            if (typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
+                await kokoMemory.put('character_states', record);
+            }
+        } catch (error) {
+            console.warn('[ECHOES STATE STORE FAILED]', error, record);
+        }
+        if (typeof refreshHeartVoicePanelIfOpen === 'function') {
+            refreshHeartVoicePanelIfOpen(chat);
+        }
+        window.state = state;
+        console.log('[ECHOES STATE SAVED]', record);
+        kokoDebugLog('[ECHOES STATE SAVED]', {
+            chatId: chat.id,
+            characterId: id,
+            roundId,
+            relatedMessageId: relatedMessageId || null
+        });
+        return record;
+    }
+
+    async function finalizeEchoesStatesForAiRound({
+        chat,
+        roundId,
+        roundUserText,
+        aiMessages,
+        parsedStates,
+        parsedResponses
+    }) {
+        const visibleMessages = (Array.isArray(aiMessages) ? aiMessages : [])
+            .filter(Boolean)
+            .filter(isStateVisibleMessage)
+            .filter((message, index, list) => list.findIndex(item => String(item?.id || '') === String(message?.id || '')) === index);
+        if (!visibleMessages.length) {
+            console.warn('[ECHOES FINALIZE SKIPPED] no ai messages', {
+                chatId: chat?.id,
+                roundId
+            });
+            return [];
+        }
+
+        const normalizedParsedStates = Array.isArray(parsedStates) ? parsedStates : [];
+        const normalizedParsedResponses = Array.isArray(parsedResponses) ? parsedResponses : [];
+        const stateByCharacterId = new Map();
+        normalizedParsedStates.forEach(item => {
+            const id = typeof normalizeEchoesResponseCharacterId === 'function'
+                ? normalizeEchoesResponseCharacterId(item, chat, getProfile(chat, item?.characterId || item?.id || item?.senderId))
+                : normalizeCharacterIdForChat(chat, item?.characterId || item?.id || item?.senderId, getProfile(chat, item?.characterId || item?.id || item?.senderId));
+            if (!id) return;
+            stateByCharacterId.set(id, item);
+        });
+
+        kokoDebugLog('[ECHOES FINALIZE START]', {
+            chatId: chat?.id,
+            isGroup: !!chat?.isGroup,
+            roundId,
+            aiMessageCount: visibleMessages.length,
+            parsedStateCount: normalizedParsedStates.length
+        });
+
+        const grouped = new Map();
+        visibleMessages.forEach(message => {
+            let id = normalizeCharacterIdForChat(chat, message.senderId || message.sender, getProfile(chat, message.senderId || message.sender));
+            if (!chat?.isGroup) {
+                id = normalizeId(chat?.id);
+            }
+            if (!id || isUserSender(id) || id === 'system' || id === 'system_instruction') return;
+            if (!grouped.has(id)) grouped.set(id, []);
+            grouped.get(id).push(message);
+        });
+
+        const allAiText = visibleMessages
+            .map(getStateTextForMessage)
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+        const savedRecords = [];
+
+        for (const [characterId, messages] of grouped.entries()) {
+            const speakerProfile = getProfile(chat, characterId);
+            const relatedMessageId = messages[messages.length - 1]?.id || null;
+            const ownAiText = messages
+                .map(getStateTextForMessage)
+                .filter(Boolean)
+                .join('\n')
+                .trim();
+            const previousState = typeof getLatestCharacterStateSnapshot === 'function'
+                ? getLatestCharacterStateSnapshot(chat, characterId)
+                : null;
+
+            kokoDebugLog('[ECHOES STATE TARGET]', {
+                characterId,
+                relatedMessageId,
+                ownAiTextPreview: snippet(ownAiText, 80)
+            });
+
+            const apiState = stateByCharacterId.get(characterId) || null;
+            let payload = null;
+            if (apiState && isCompleteEchoesState(apiState)) {
+                payload = buildNextCharacterState(previousState, {
+                    chat,
+                    speakerProfile,
+                    visibleText: ownAiText,
+                    roundUserText,
+                    roundAiText: allAiText || ownAiText,
+                    explicitState: apiState
+                });
+                kokoDebugLog('[ECHOES STATE FROM API]', {
+                    chatId: chat?.id,
+                    characterId,
+                    roundId
+                });
+            } else {
+                payload = buildDerivedEchoesStateForRound({
+                    chat,
+                    character: speakerProfile,
+                    characterId,
+                    roundUserText,
+                    ownAiText,
+                    allAiText,
+                    previousState
+                });
+                kokoDebugLog('[ECHOES STATE DERIVED]', {
+                    chatId: chat?.id,
+                    characterId,
+                    roundId
+                });
+            }
+
+            if (!payload) continue;
+            const record = await saveEchoesRoundStateRecord({
+                chat,
+                characterId,
+                relatedMessageId,
+                roundId,
+                payload
+            });
+            if (record) savedRecords.push(record);
+        }
+
+        kokoDebugLog('[ECHOES FINALIZE DONE]', {
+            chatId: chat?.id,
+            roundId,
+            savedCount: savedRecords.length,
+            parsedResponseCount: normalizedParsedResponses.length
+        });
+        return savedRecords;
+    }
+
+    async function savePrivateRoundEchoesState({ chat, characterId, roundId, roundUserText, aiMessages = [], explicitState = null }) {
+        return finalizeEchoesStatesForAiRound({
+            chat,
             roundId,
             roundUserText,
-            roundAiText,
-            visibleText: roundAiText,
-            replaceSameRound: true
+            aiMessages,
+            parsedStates: explicitState ? [{ characterId, ...explicitState }] : [],
+            parsedResponses: []
         });
     }
 
     async function saveGroupRoundEchoesStates({ group, roundId, roundUserText, speakerMessageMap, explicitStateMap }) {
-        if (!group) return [];
-        const saved = [];
-        const speakerIds = new Set([
-            ...Array.from(speakerMessageMap?.keys?.() || []),
-            ...Array.from(explicitStateMap?.keys?.() || [])
-        ]);
-        for (const speakerId of speakerIds) {
-            const id = normalizeCharacterIdForChat(group, speakerId);
-            if (!id) continue;
-            const messages = speakerMessageMap?.get(id) || [];
-            const explicitState = explicitStateMap?.get(id) || null;
-            const roundAiText = messages.map(getText).filter(Boolean).join('\n').trim()
-                || String(explicitState?.roundAiText || explicitState?.visibleText || '').trim();
-            if (!roundAiText && !explicitState) continue;
-            const relatedMessageId = messages[messages.length - 1]?.id || null;
-            const speakerProfile = getProfile(group, id);
-            const previousState = typeof getLatestCharacterStateSnapshot === 'function'
-                ? getLatestCharacterStateSnapshot(group, id)
-                : null;
-            const statePayload = explicitState || buildEchoesDerivedState({
-                character: speakerProfile,
-                chat: group,
-                roundUserText,
-                roundResponsesText: roundAiText,
-                ownResponseText: roundAiText,
-                previousState,
-                explicitState: null,
-                didSpeak: !!roundAiText
-            });
-            const record = await saveEchoesCharacterState(group, id, {
-                ...(statePayload || {}),
-                visibleText: roundAiText,
-                roundUserText,
-                roundAiText
-            }, relatedMessageId, {
-                roundId,
-                roundUserText,
-                roundAiText,
-                visibleText: roundAiText,
-                replaceSameRound: true
-            });
-            if (record) saved.push(record);
-        }
-        return saved;
+        const aiMessages = Array.from(speakerMessageMap?.values?.() || []).flat().filter(Boolean);
+        const parsedStates = Array.from(explicitStateMap?.values?.() || []).filter(Boolean);
+        return finalizeEchoesStatesForAiRound({
+            chat: group,
+            roundId,
+            roundUserText,
+            aiMessages,
+            parsedStates,
+            parsedResponses: []
+        });
     }
 
     async function commitEchoesRound(ctx) {
         if (!ctx) return [];
-        if (ctx.chat?.isGroup) {
-            return saveGroupRoundEchoesStates({
-                group: ctx.chat,
-                roundId: ctx.roundId,
-                roundUserText: ctx.roundUserText,
-                speakerMessageMap: ctx.speakerMessageMap,
-                explicitStateMap: ctx.explicitStateMap
-            });
-        }
-        const characterId = normalizeId(ctx.chat.id);
-        const explicitState = ctx.explicitStateMap.get(characterId) || Array.from(ctx.explicitStateMap.values())[0] || null;
-        const record = await savePrivateRoundEchoesState({
+        const aiMessages = Array.from(ctx.speakerMessageMap.values()).flat().filter(Boolean);
+        return finalizeEchoesStatesForAiRound({
             chat: ctx.chat,
-            characterId,
             roundId: ctx.roundId,
             roundUserText: ctx.roundUserText,
-            aiMessages: ctx.speakerMessageMap.get(characterId) || [],
-            explicitState
+            aiMessages,
+            parsedStates: ctx.parsedStates || Array.from(ctx.explicitStateMap.values()),
+            parsedResponses: ctx.parsedResponses || []
         });
-        return record ? [record] : [];
     }
 
     async function finishEchoesRound(ctx, owner) {
@@ -50228,6 +50393,8 @@ function resolveEchoesStateClickTarget(event) {
             });
 
             const responses = parsed.responses || [];
+            ctx.parsedStates = Array.isArray(parsed.states) ? parsed.states.slice() : [];
+            ctx.parsedResponses = responses.slice();
 
             for (const response of responses) {
                 const characterId = typeof normalizeEchoesResponseCharacterId === 'function'
@@ -50441,9 +50608,26 @@ function resolveEchoesStateClickTarget(event) {
         const ctx = begin.ctx;
         try {
             for (const parsedMessage of parsedMessages) {
+                const beforeLength = Array.isArray(group.history) ? group.history.length : 0;
+                if (ctx) {
+                    ctx.parsedResponses.push({
+                        characterId: parsedMessage?.speaker?.id || '',
+                        text: String(parsedMessage?.content || '')
+                    });
+                    if (parsedMessage?.heartVoice) {
+                        ctx.parsedStates.push({
+                            characterId: parsedMessage.speaker?.id || '',
+                            ...parsedMessage.heartVoice
+                        });
+                        rememberExplicitState(ctx, parsedMessage.speaker?.id || '', parsedMessage.heartVoice);
+                    }
+                }
                 try {
                     const rendered = await renderParsedGroupMessage(parsedMessage, group, requestId, staleLogLabel);
                     if (!rendered) return null;
+                    if (ctx) {
+                        collectRoundMessagesFromHistory(ctx, beforeLength, parsedMessage?.speaker?.id || '', parsedMessage?.heartVoice || null);
+                    }
                 } catch (renderError) {
                     if (!isLatestAiRequest(group.id, requestId)) {
                         console.warn(staleLogLabel, { chatId: group.id, requestId });
@@ -50457,6 +50641,9 @@ function resolveEchoesStateClickTarget(event) {
                         senderId: speaker.id,
                         content: String(content || '').trim()
                     }, speaker.id, group, true, 'chat');
+                    if (ctx) {
+                        collectRoundMessagesFromHistory(ctx, beforeLength, parsedMessage?.speaker?.id || '', parsedMessage?.heartVoice || null);
+                    }
                 }
             }
             if (begin.owner) {
@@ -50766,6 +50953,9 @@ function resolveEchoesStateClickTarget(event) {
     window.requestEchoesMainResponseWithRetry = requestEchoesMainResponseWithRetry;
     window.saveEchoesCharacterState = saveEchoesCharacterState;
     window.ensureEchoesStateForVisibleMessage = ensureEchoesStateForVisibleMessage;
+    window.saveEchoesRoundStateRecord = saveEchoesRoundStateRecord;
+    window.buildDerivedEchoesStateForRound = buildDerivedEchoesStateForRound;
+    window.finalizeEchoesStatesForAiRound = finalizeEchoesStatesForAiRound;
     window.savePrivateRoundEchoesState = savePrivateRoundEchoesState;
     window.saveGroupRoundEchoesStates = saveGroupRoundEchoesStates;
     window.parseEchoesStateResult = parseEchoesStateResult;
@@ -51314,7 +51504,7 @@ function resolveEchoesStateClickTarget(event) {
 
     function currentStateHtml(snapshot) {
         if (!snapshot) {
-            return `<div data-echoes-original-empty class="text-center text-slate-500 text-sm py-8">暂无状态记录。<br>等待角色回复后更新。</div>`;
+            return `<div data-echoes-original-empty class="text-center text-slate-500 text-sm py-8">暂无心声记录。<br>请先让角色回复一轮。</div>`;
         }
         return `
             <div data-echoes-original-current-view class="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -51497,23 +51687,11 @@ function resolveEchoesStateClickTarget(event) {
         if (!chat.isGroup || id === 'contact') id = normalizeEchoesOriginalId(chat.id);
         if (!id || isEchoesOriginalUserId(id)) return null;
 
-        let records = getEchoesOriginalRecords(chat, id);
-        let latest = records[0] || null;
-        if (!latest && options.createFallbackIfEmpty !== false) {
-            if (typeof window.ensureEchoesStateForClickedCharacter === 'function') {
-                latest = await window.ensureEchoesStateForClickedCharacter(chat, id, options.sourceMessage || null);
-            } else if (typeof ensureFallbackHeartVoiceForClickedCharacter === 'function') {
-                latest = await ensureFallbackHeartVoiceForClickedCharacter(chat, id);
-            }
-            records = getEchoesOriginalRecords(chat, id);
-            latest = records[0] || latest;
-        }
-
+        const records = getEchoesOriginalRecords(chat, id);
         const profile = getEchoesOriginalProfile(chat, id);
-        latest = latest
-            ? normalizeEchoesOriginalState(latest, profile)
-            : normalizeEchoesOriginalState({ id: `fallback-${id}`, characterId: id, timestamp: Date.now() }, profile);
-        if (!records.length) records = [latest];
+        const latest = records[0]
+            ? normalizeEchoesOriginalState(records[0], profile)
+            : null;
 
         console.log('[ECHOES PANEL RECORDS]', records);
         const panel = renderEchoesOriginalStatePanel(chat, id, latest, records, options.showHistory === true);
@@ -51563,9 +51741,9 @@ function resolveEchoesStateClickTarget(event) {
     window.__openEchoesOriginalStatePanel = openEchoesOriginalStatePanel;
     window.ensureEchoesOriginalStatePanel = ensureEchoesOriginalStatePanel;
     window.openEchoesStatePanel = openEchoesOriginalStatePanel;
-    window.openEchoesHeartVoicePanel = (chatId, characterId, options = {}) => openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, { createFallbackIfEmpty: true, ...options });
-    window.openHeartVoicePanelForCharacter = (characterId, chatId) => openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, { createFallbackIfEmpty: true });
-    window.openHeartVoicePanel = (characterId, chatContext) => openEchoesOriginalStatePanel((typeof chatContext === 'string' ? chatContext : chatContext?.id) || state?.activeChatId, characterId, { createFallbackIfEmpty: true });
+    window.openEchoesHeartVoicePanel = (chatId, characterId, options = {}) => openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, { createFallbackIfEmpty: false, ...options });
+    window.openHeartVoicePanelForCharacter = (characterId, chatId) => openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, { createFallbackIfEmpty: false });
+    window.openHeartVoicePanel = (characterId, chatContext) => openEchoesOriginalStatePanel((typeof chatContext === 'string' ? chatContext : chatContext?.id) || state?.activeChatId, characterId, { createFallbackIfEmpty: false });
     window.closeHeartVoicePanel = closeEchoesOriginalStatePanel;
     window.refreshHeartVoicePanelIfOpen = refreshEchoesOriginalStatePanelIfOpen;
     window.refreshOpenHeartVoicePanelForSavedRecord = (liveChat) => refreshEchoesOriginalStatePanelIfOpen(liveChat);
