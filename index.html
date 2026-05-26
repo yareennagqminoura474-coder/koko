@@ -19663,7 +19663,7 @@ ${worldBookContextString}
 
 [Echoes 式输出规则]
 你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出 JSON 以外的任何文字：
-{"responses":[{"characterId":"${contact.id}","text":"角色说出口的话"}],"states":[{"characterId":"${contact.id}","mood":"当前情绪","affection":"68 (当前关系/好感状态)","clothing":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
+{"responses":[{"characterId":"角色id","text":"角色说出口的话"}],"states":[{"characterId":"角色id","mood":"当前情绪","affection":"68 (当前关系/好感状态)","clothing":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
 responses[].text 是唯一可见聊天内容；states 只用于状态面板，里面的 mood / affection / clothing / action / innerThoughts 绝不能写进 text。每个发言角色必须有一条 state。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；clothing 没有明确换装/场景切换时保持上一状态。不要输出代码块、解释文字、标签或额外字段。
 `.trim() : `
 [！！！核心任务！！！]
@@ -19677,7 +19677,7 @@ responses[].text 是唯一可见聊天内容；states 只用于状态面板，�
 
 [Echoes 式输出规则]
 你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出 JSON 以外的任何文字：
-{"responses":[{"characterId":"${contact.id}","text":"角色说出口的话"}],"states":[{"characterId":"${contact.id}","mood":"当前情绪","affection":"68 (当前关系/好感状态)","clothing":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
+{"responses":[{"characterId":"角色id","text":"角色说出口的话"}],"states":[{"characterId":"角色id","mood":"当前情绪","affection":"68 (当前关系/好感状态)","clothing":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
 responses[].text 是唯一可见聊天内容；states 只用于状态面板，里面的 mood / affection / clothing / action / innerThoughts 绝不能写进 text。每个发言角色必须有一条 state。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；clothing 没有明确换装/场景切换时保持上一状态。不要输出代码块、解释文字、标签或额外字段。
 `.trim();
         
@@ -20264,7 +20264,7 @@ clothing 要详细描写颜色、款式、细节和整洁程度；没有明确�
 普通聊天不要主动输出 \`[diary]\`。只有在用户明确要求写日记，或系统任务明确要求单独生成日记时，才允许输出 \`[diary]\`。
 
 [示例回复]
-{"responses":[{"characterId":"${contact.id}","text":"你好啊，今天天气真不错。要不要一起出去走走？我知道一个很棒的公园。"}],"states":[{"characterId":"${contact.id}","mood":"期待","affection":"66 (明显在意)","clothing":"浅色上衣干净平整，袖口随手挽起一点，整体看起来轻松又利落。","action":"说话时朝你这边看过来，语气放轻，指尖在桌面上轻轻点了一下。","innerThoughts":"我其实挺想把这次邀约说得再自然一点，可还是忍不住想看看你会不会答应。"}]}
+{"responses":[{"characterId":"角色id","text":"你好啊，今天天气真不错。要不要一起出去走走？我知道一个很棒的公园。"}],"states":[{"characterId":"角色id","mood":"期待","affection":"66 (明显在意)","clothing":"浅色上衣干净平整，袖口随手挽起一点，整体看起来轻松又利落。","action":"说话时朝你这边看过来，语气放轻，指尖在桌面上轻轻点了一下。","innerThoughts":"我其实挺想把这次邀约说得再自然一点，可还是忍不住想看看你会不会答应。"}]}
 [qzone]久违的阳光！准备去公园抓光影啦 ✨ [picture:阳光洒在窗台上的照片][/qzone]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
@@ -20347,7 +20347,7 @@ const NARRATIVE_BASE_PROMPT = `
 普通叙事聊天不要主动输出 \`[diary]\`。只有在用户明确要求写日记，或系统任务明确要求单独生成日记时，才允许输出 \`[diary]\`。
 
 [示例回复格式]
-{"responses":[{"characterId":"${contact.id}","text":"下雨了呢。你晚饭想吃什么？"}],"states":[{"characterId":"${contact.id}","mood":"柔和","affection":"62 (在意中)","clothing":"深色针织外套搭在肩上，里面的衬衫领口整齐，整体收拾得很干净。","action":"站在窗边看了一眼雨势，又回过头轻声问你，手指在窗台边沿轻轻点了两下。","innerThoughts":"我其实有点想顺着这场雨继续和你聊下去，也想知道你今晚会不会把时间分给我。"}]}
+{"responses":[{"characterId":"角色id","text":"下雨了呢。你晚饭想吃什么？"}],"states":[{"characterId":"角色id","mood":"柔和","affection":"62 (在意中)","clothing":"深色针织外套搭在肩上，里面的衬衫领口整齐，整体收拾得很干净。","action":"站在窗边看了一眼雨势，又回过头轻声问你，手指在窗台边沿轻轻点了两下。","innerThoughts":"我其实有点想顺着这场雨继续和你聊下去，也想知道你今晚会不会把时间分给我。"}]}
 
 ${PRIVATE_UNIFIED_MEMORY_RULES}
 
@@ -46705,13 +46705,13 @@ ${mode === 'free'
 {
   "responses": [
     {
-      "characterId": "${refreshedContact.id}",
+      "characterId": "角色id",
       "text": "角色说出口的话"
     }
   ],
   "states": [
     {
-      "characterId": "${refreshedContact.id}",
+      "characterId": "角色id",
       "mood": "怒极反笑",
       "affection": "68 (极度恼火)",
       "clothing": "白色衬衫，袖口整齐地挽到小臂，深灰色西装裤没有一点褶皱，皮鞋擦得一尘不染。",
@@ -48118,7 +48118,9 @@ try {
 
     // 2. 游戏操作相关
     window.shareCpResultToChat = shareCpResultToChat;
-    window.switchCpSkin = switchCpSkin;
+    if (window.switchCpSkin) {
+        window.switchCpSkin = window.switchCpSkin;
+    }
     
     // 3. AI 邀请相关
     window.acceptAiSurvey = acceptAiSurvey;
@@ -48323,7 +48325,9 @@ await initApp();
     }
 
     function getActiveEchoesChat() {
-        return (state.contacts || []).find(c => c && c.id === state.activeChatId) || null;
+        const currentState = window.state || globalThis.state;
+        if (!currentState) return null;
+        return (currentState.contacts || []).find(c => c && c.id === currentState.activeChatId) || null;
     }
 
     function getMessageTextForEchoesState(message) {
@@ -49200,7 +49204,9 @@ await initApp();
     }
 
     function finalGetActiveChat() {
-        return (state.contacts || []).find(c => c && c.id === state.activeChatId) || null;
+        const currentState = window.state || globalThis.state;
+        if (!currentState) return null;
+        return (currentState.contacts || []).find(c => c && c.id === currentState.activeChatId) || null;
     }
 
     function finalFindMessage(chat, relatedMessageId) {
