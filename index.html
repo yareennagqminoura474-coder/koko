@@ -12055,7 +12055,11 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-2</div>
 <script>
+window.KOKO_RUNTIME_VERSION = '20260526-echoes-group-fix-2';
+console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
+
 (function () {
     window.__openHeartVoiceBasic = null;
     window.__openHeartVoiceHard = null;
@@ -47693,7 +47697,7 @@ await initApp();
 </script>
 <script>
   (function() {
-    const BUILD_VERSION = '20260526-echoes-group-fix-1';
+    const BUILD_VERSION = '20260526-echoes-group-fix-2';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -47716,25 +47720,13 @@ await initApp();
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      const SW_VERSION = '20260526-echoes-group-fix-1';
-      const swUrl = `./sw.js?v=${SW_VERSION}`;
-      (async () => {
-        try {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(registrations.map(registration => registration.unregister()));
-          if ('caches' in window) {
-            const cacheKeys = await caches.keys();
-            await Promise.all(cacheKeys.map(cacheKey => caches.delete(cacheKey)));
-            console.log('[SW CACHE CLEARED]', cacheKeys);
-          }
-        } catch (cleanupError) {
-          console.log('ServiceWorker 清理失败: ', cleanupError);
-        }
-
-        navigator.serviceWorker.register(swUrl)
-          .then(registration => console.log('ServiceWorker 注册成功: ', registration))
-          .catch(error => console.log('ServiceWorker 注册失败: ', error));
-      })();
+      const SW_VERSION = '20260526-echoes-group-fix-2';
+      navigator.serviceWorker.getRegistrations()
+        .then(registrations => Promise.all(registrations.map(r => r.unregister())))
+        .then(() => caches.keys())
+        .then(keys => Promise.all(keys.map(k => caches.delete(k))))
+        .then(() => console.log('[SW FULLY DISABLED AND CACHES CLEARED]'))
+        .catch(error => console.log('ServiceWorker 停用或缓存清理失败: ', error));
     });
   }
 </script>
