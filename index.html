@@ -12055,9 +12055,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-8</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-10</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-8';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-10';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -12148,7 +12148,7 @@ function withTimeout(promise, ms, label) {
         console[level] = function(...args) {
             nativeConsole[level](...args);
             const label = typeof args[0] === 'string' ? args[0] : '';
-            if (/\b(?:GROUP|ECHOES|API|FETCH)\b/.test(label)) {
+            if (/\b(?:AI|GROUP|ECHOES|API|FETCH)\b/.test(label)) {
                 appendDebugLog(label, args.length > 2 ? args.slice(1) : args[1]);
             }
         };
@@ -18578,16 +18578,13 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
             const heartVoiceAvatarAttrs = heartVoiceCharacterId
                 ? `data-heart-voice-character-id="${heartVoiceCharacterId}" data-heart-voice-chat-id="${contact.id}" title="查看状态"`
                 : '';
-            const heartVoiceAuthorAttrs = heartVoiceCharacterId
-                ? `data-heart-voice-character-id="${heartVoiceCharacterId}" data-heart-voice-chat-id="${contact.id}" title="查看状态"`
-                : '';
 
             wrapper.innerHTML = `
         <div class="message-avatar" ${avatarDataAttrs} ${heartVoiceAvatarAttrs}>
     <img src="${finalAvatarUrl}" ${avatarDataAttrs} onerror="this.onerror=null;this.src='https://via.placeholder.com/40/DDD/666?text=U';">
 </div>
         <div class="message-body">
-            ${showAuthorName ? `<div class="message-author-name" ${heartVoiceAuthorAttrs}>${finalSenderInfo.name}</div>` : ''}
+            ${showAuthorName ? `<div class="message-author-name">${finalSenderInfo.name}</div>` : ''}
             ${messageContentHTML}
             ${transcribedTextHTML}
             <div class="message-timestamp">${message.time}</div>
@@ -18605,15 +18602,8 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
                     avatarEl.style.setProperty('visibility', 'visible', 'important');
                 }
             }
-            if (authorNameEl && isVisibleAiMessageForState) {
-                authorNameEl.dataset.heartVoiceCharacterId = resolvedStateCharacterId || '';
-                authorNameEl.dataset.senderId = resolvedStateCharacterId || '';
-                authorNameEl.dataset.chatId = contact.id || '';
-                authorNameEl.classList.add('echoes-state-author-trigger');
-            }
-
             wrapper.addEventListener('click', (event) => {
-                if (event.target.closest('.message-avatar, .message-author-name[data-heart-voice-character-id], .echoes-state-author-trigger')) return;
+                if (event.target.closest('.message-avatar')) return;
                 handleMessageSelection(wrapper, message);
             });
             return wrapper;
@@ -19329,12 +19319,11 @@ async function sendMessage() {
     messageInput.style.height = '38px'; 
     cancelReply(); 
 
-    await runKokoAiRound({
-        chat: contact,
-        mode: contact.isGroup ? 'group-reply' : 'private-reply',
-        userText: content,
-        reason: 'send'
-    });
+    if (contact.isGroup) {
+        await triggerGroupChatAiReply(contact);
+    } else {
+        await triggerAiReply(contact);
+    }
 }
 
         const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -19459,15 +19448,11 @@ async function requestAiReply(systemInstruction = null, targetContactId = null) 
         return;
     }
 
-    const latestUserMessage = [...(contact.history || [])].reverse().find(message =>
-        message && (message.sender === 'user' || message.sender === 'myProfile')
-    );
-    await runKokoAiRound({
-        chat: contact,
-        mode: contact.isGroup ? 'group-reply' : 'private-reply',
-        userText: systemInstruction || getKokoMessagePlainText(latestUserMessage),
-        reason: 'requestAiReply'
-    });
+    if (contact.isGroup) {
+        await triggerGroupChatAiReply(contact);
+    } else {
+        await triggerAiReply(contact);
+    }
 }
 async function triggerAiReply(contact) {
             if (contact.needsNarrativeModeExitPrompt === true) { 
@@ -24669,10 +24654,7 @@ function setupEchoesStateAvatarClick() {
 async function handleEchoesStateAvatarClick(event) {
     const trigger = event.target.closest(
         '#chat-messages .message-avatar, ' +
-        '#chat-messages .message-avatar img, ' +
-        '#chat-messages .message-author-name[data-heart-voice-character-id], ' +
-        '#chat-messages .echoes-state-author-trigger, ' +
-        '#chat-messages .message-wrapper[data-echoes-state-clickable="true"] .message'
+        '#chat-messages .message-avatar img'
     );
 
     if (!trigger) return;
@@ -26798,8 +26780,6 @@ async function handleRewind() {
     );
 
     if (confirmed) {
-        const lastUserMessage = contact.history[lastUserMessageIndex];
-        const lastUserText = getKokoMessagePlainText(lastUserMessage);
         const removedMessageIds = contact.history
             .slice(lastUserMessageIndex + 1)
             .map(message => message.id)
@@ -26813,12 +26793,7 @@ async function handleRewind() {
         await openChat(contact.id); // 这会用截断后的历史记录重新渲染聊天界面
 
         // 6. 重新请求AI回复
-        await runKokoAiRound({
-            chat: contact,
-            mode: contact.isGroup ? 'group-reply' : 'private-reply',
-            userText: lastUserText,
-            reason: 'regenerate'
-        });
+        await requestAiReply(null, contact.id);
     }
 }
 // --- 手动总结聊天记录功能核心函数 (V10 - 包含视频通话内容版) ---
@@ -41424,7 +41399,7 @@ document.getElementById('refresh-post-comments-btn').addEventListener('click', a
     document.getElementById('send-btn').addEventListener('click', sendMessage);
 // (V5 - 最终版：支持私聊+群聊的自由聊天)
 // 粘贴到 attachEventListeners() 函数内部
-document.getElementById('request-reply-btn').addEventListener('click', () => {
+document.getElementById('request-reply-btn').addEventListener('click', async () => {
     const contact = state.contacts.find(c => c.id === state.activeChatId);
     if (!contact) return; 
 
@@ -41442,22 +41417,17 @@ document.getElementById('request-reply-btn').addEventListener('click', () => {
         // --- Case 1: 用户刚说完 (无论私聊还是群聊) ---
         // 100% 执行“回复你”的逻辑
         console.log("用户刚发言，触发AI回复用户...");
-        runKokoAiRound({
-            chat: contact,
-            mode: contact.isGroup ? 'group-reply' : 'private-reply',
-            userText: getKokoMessagePlainText(lastRealMessage),
-            reason: 'request-reply'
-        });
+        await requestAiReply(null, contact.id);
     } else {
         // --- Case 2: 用户没说话 (AI说的，或没记录) ---
         if (contact.isGroup) {
             // 2a. 如果是群聊，调用【群聊】自由聊天
             console.log("群聊：用户未发言，触发AI自由聊天...");
-            runKokoAiRound({ chat: contact, mode: 'group-free', userText: '', reason: 'request-reply' });
+            await triggerGroupFreeChat(contact);
         } else {
             // 2b. 如果是私聊，调用【私聊】自由聊天 (新功能!)
             console.log("私聊：用户未发言，触发AI自由聊天...");
-            runKokoAiRound({ chat: contact, mode: 'private-free', userText: '', reason: 'request-reply' });
+            await triggerPrivateFreeChat(contact);
         }
     }
 });
@@ -42754,7 +42724,7 @@ document.getElementById('chat-messages').addEventListener('click', async (e) => 
     const contact = state.contacts.find(c => c.id === state.activeChatId);
     if (!contact) return;
 
-    if (e.target.closest('.message-avatar, .message-author-name[data-heart-voice-character-id]')) {
+    if (e.target.closest('.message-avatar')) {
         return;
     }
 
@@ -46070,7 +46040,6 @@ async function buildPrivateChatRequestMessages(contact, mode = 'reply') {
         ];
     }
 
-    await maybeRecapChatKnowledge(liveContact);
     const refreshedContact = ensureContactRelationshipSettings(state.contacts.find(item => item.id === liveContact.id) || liveContact);
     const myProfile = state.myProfile;
     const isNarrativeMode = !!refreshedContact.isNarrativeMode;
@@ -47227,7 +47196,7 @@ async function triggerAiReply(contact) {
             fallbackSenderProfile: contact,
             requestId,
             source: 'private-reply',
-            maxAttempts: 2
+            maxAttempts: 1
         });
         if (!requestResult) return;
         const { rawResponse, parsed, statesMissing, plainText } = requestResult;
@@ -47296,7 +47265,7 @@ async function triggerPrivateFreeChat(contact) {
             fallbackSenderProfile: contact,
             requestId,
             source: 'private-free',
-            maxAttempts: 2
+            maxAttempts: 1
         });
         if (!requestResult) return;
         const { rawResponse, parsed, statesMissing, plainText } = requestResult;
@@ -48209,7 +48178,7 @@ await initApp();
 </script>
 <script>
   (function() {
-    const BUILD_VERSION = '20260526-fix-8';
+const BUILD_VERSION = '20260526-fix-10';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -48232,7 +48201,7 @@ await initApp();
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      const SW_VERSION = '20260526-fix-8';
+const SW_VERSION = '20260526-fix-10';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -48524,31 +48493,10 @@ await initApp();
         const target = event.target;
         if (!target || !target.closest) return null;
 
-        const hardTrigger = target.closest(
+        return target.closest(
             '#chat-messages .message-avatar, ' +
-            '#chat-messages .message-avatar img, ' +
-            '#chat-messages .message-author-name[data-heart-voice-character-id], ' +
-            '#chat-messages .echoes-state-author-trigger'
+            '#chat-messages .message-avatar img'
         );
-
-        if (hardTrigger) {
-            return hardTrigger;
-        }
-
-        const messageEl = target.closest('#chat-messages .message');
-        if (!messageEl) return null;
-
-        const wrapper = messageEl.closest('.message-wrapper');
-        if (!wrapper || wrapper.dataset.echoesStateClickable !== 'true') {
-            return null;
-        }
-
-        const messageType = wrapper.dataset.messageType || '';
-        if (SPECIAL_STATE_SKIP_TYPES.has(messageType)) {
-            return null;
-        }
-
-        return messageEl;
     }
 
     async function handleEchoesStateBridgeClick(event) {
@@ -48624,27 +48572,16 @@ await initApp();
             if (!chat.isGroup) characterId = safeNormalizeId(chat.id);
             if (chat.isGroup && (characterId === 'contact' || characterId === safeNormalizeId(chat.id))) return;
 
-            wrapper.dataset.echoesStateClickable = 'true';
             wrapper.dataset.senderId = characterId;
             wrapper.dataset.sender = characterId;
             wrapper.dataset.chatId = chat.id;
             wrapper.dataset.messageType = message.type || 'text';
-            wrapper.classList.add('echoes-state-clickable-message');
-            wrapper.classList.add('is-first-in-sequence');
 
             const avatar = wrapper.querySelector('.message-avatar');
             if (avatar) {
                 avatar.dataset.senderId = characterId;
                 avatar.dataset.heartVoiceCharacterId = characterId;
                 avatar.dataset.chatId = chat.id;
-            }
-
-            const author = wrapper.querySelector('.message-author-name');
-            if (author) {
-                author.dataset.senderId = characterId;
-                author.dataset.heartVoiceCharacterId = characterId;
-                author.dataset.chatId = chat.id;
-                author.classList.add('echoes-state-author-trigger');
             }
         });
     }
@@ -48674,27 +48611,16 @@ await initApp();
             if (!contact.isGroup) characterId = safeNormalizeId(contact.id);
             if (contact.isGroup && (characterId === 'contact' || characterId === safeNormalizeId(contact.id))) return wrapper;
 
-            wrapper.dataset.echoesStateClickable = 'true';
             wrapper.dataset.senderId = characterId;
             wrapper.dataset.sender = characterId;
             wrapper.dataset.chatId = contact.id;
             wrapper.dataset.messageType = message.type || 'text';
-            wrapper.classList.add('echoes-state-clickable-message');
-            wrapper.classList.add('is-first-in-sequence');
 
             const avatar = wrapper.querySelector('.message-avatar');
             if (avatar) {
                 avatar.dataset.senderId = characterId;
                 avatar.dataset.heartVoiceCharacterId = characterId;
                 avatar.dataset.chatId = contact.id;
-            }
-
-            const author = wrapper.querySelector('.message-author-name');
-            if (author) {
-                author.dataset.senderId = characterId;
-                author.dataset.heartVoiceCharacterId = characterId;
-                author.dataset.chatId = contact.id;
-                author.classList.add('echoes-state-author-trigger');
             }
 
             return wrapper;
@@ -49234,24 +49160,15 @@ await initApp();
             if (!sender || finalIsUserId(sender) || sender === 'system' || sender === 'system_instruction') return;
             if (!chat.isGroup) sender = finalNormalizeId(chat.id);
             if (chat.isGroup && (sender === 'contact' || sender === finalNormalizeId(chat.id))) return;
-            wrapper.dataset.echoesStateClickable = 'true';
             wrapper.dataset.senderId = sender;
             wrapper.dataset.sender = sender;
             wrapper.dataset.chatId = chat.id;
             wrapper.dataset.messageType = message.type || 'text';
-            wrapper.classList.add('echoes-state-clickable-message', 'is-first-in-sequence');
             const avatar = wrapper.querySelector('.message-avatar');
             if (avatar) {
                 avatar.dataset.senderId = sender;
                 avatar.dataset.heartVoiceCharacterId = sender;
                 avatar.dataset.chatId = chat.id;
-            }
-            const author = wrapper.querySelector('.message-author-name');
-            if (author) {
-                author.dataset.senderId = sender;
-                author.dataset.heartVoiceCharacterId = sender;
-                author.dataset.chatId = chat.id;
-                author.classList.add('echoes-state-author-trigger');
             }
         });
     }
@@ -49975,7 +49892,7 @@ await initApp();
         };
     }
 
-    async function requestEchoesMainResponseWithRetry({ chat, requestMessages, fallbackSenderProfile = null, requestId = null, source = 'echoes-main', maxAttempts = 2 }) {
+    async function requestEchoesMainResponseWithRetry({ chat, requestMessages, fallbackSenderProfile = null, requestId = null, source = 'echoes-main', maxAttempts = 1 }) {
         console.log('[ECHOES MAIN STEP 1] entered requestEchoesMainResponseWithRetry', {
             chatId: chat?.id,
             source,
@@ -50064,25 +49981,30 @@ await initApp();
         const previousState = typeof getLatestCharacterStateSnapshot === 'function'
             ? getLatestCharacterStateSnapshot(chat, id)
             : null;
-        const explicitMood = String(payloadObject.mood || payloadObject.emotion || '').trim();
-        const explicitAffection = String(payloadObject.affection || '').trim();
-        const hasLegacyFavorability = payloadObject.favorability !== undefined
-            && payloadObject.favorability !== null
-            && payloadObject.favorability !== '';
-        const explicitClothing = String(payloadObject.clothing || payloadObject.outfit || '').trim();
-        const explicitAction = String(payloadObject.action || '').trim();
-        const explicitThoughts = normalizeInnerThoughtsToFirstPerson(String(payloadObject.innerThoughts || payloadObject.thoughts || '').trim());
-        const normalized = {
-            mood: explicitMood || String(previousState?.mood || '').trim(),
-            affection: explicitAffection
-                ? formatEchoesAffection(explicitAffection, parseAffectionLabel(explicitAffection), explicitMood || previousState?.mood || '')
-                : (hasLegacyFavorability
-                    ? formatEchoesAffection(payloadObject.favorability, payloadObject.favorabilityLabel, explicitMood || previousState?.mood || '')
-                    : String(previousState?.affection || '').trim()),
-            clothing: explicitClothing || String(previousState?.clothing || previousState?.outfit || '').trim(),
-            action: explicitAction || String(previousState?.action || '').trim(),
-            innerThoughts: explicitThoughts || normalizeInnerThoughtsToFirstPerson(String(previousState?.innerThoughts || previousState?.thoughts || '').trim())
+        const explicitCandidate = {
+            characterId: id,
+            ...payloadObject
         };
+        const explicitStateIsComplete = isCompleteEchoesState(explicitCandidate);
+        const normalized = explicitStateIsComplete
+            ? buildNextCharacterState(previousState, {
+                chat,
+                speakerProfile,
+                visibleText,
+                roundUserText,
+                roundAiText,
+                explicitState: payloadObject
+            })
+            : buildEchoesDerivedState({
+                character: speakerProfile,
+                chat,
+                roundUserText,
+                roundResponsesText: roundAiText,
+                ownResponseText: visibleText,
+                previousState,
+                explicitState: payloadObject,
+                didSpeak: !!visibleText
+            });
 
         if (!normalized.mood || !normalized.affection || !normalized.clothing || !normalized.action || !normalized.innerThoughts) {
             console.warn('[ECHOES STATE SAVE FAILED]', 'incomplete_state_payload', {
@@ -50096,6 +50018,15 @@ await initApp();
 
         state.characterStates = Array.isArray(state.characterStates) ? state.characterStates : [];
         const targetRelatedMessageId = relatedMessageId || payloadObject.relatedMessageId || null;
+        const targetRoundId = options.roundId || payloadObject.roundId || activeRound?.roundId || null;
+        const sameRoundRecord = targetRoundId
+            ? state.characterStates.find(record =>
+                record &&
+                normalizeId(record.chatId) === normalizeId(chat.id) &&
+                normalizeId(record.characterId) === id &&
+                String(record.roundId || '') === String(targetRoundId)
+            )
+            : null;
         const sameRelatedRecord = state.characterStates.find(record =>
             record &&
             normalizeId(record.chatId) === normalizeId(chat.id) &&
@@ -50109,6 +50040,7 @@ await initApp();
             chatId: chat.id,
             characterId: id,
             timestamp,
+            roundId: targetRoundId,
             relatedMessageId: targetRelatedMessageId,
             mood: normalized.mood,
             affection: normalized.affection,
@@ -50118,8 +50050,9 @@ await initApp();
         };
 
         let record;
-        if (sameRelatedRecord) {
-            record = Object.assign(sameRelatedRecord, nextFields, { id: sameRelatedRecord.id });
+        if (sameRoundRecord || sameRelatedRecord) {
+            const existingRecord = sameRoundRecord || sameRelatedRecord;
+            record = Object.assign(existingRecord, nextFields, { id: existingRecord.id });
         } else {
             record = {
                 id: `state_${timestamp}_${Math.random().toString(36).slice(2)}`,
@@ -50178,23 +50111,73 @@ await initApp();
         });
     }
 
+    function buildEchoesDerivedState({
+        character,
+        chat,
+        roundUserText = '',
+        roundResponsesText = '',
+        ownResponseText = '',
+        previousState = null,
+        explicitState = null,
+        didSpeak = true
+    }) {
+        if (!chat || !character || !didSpeak) return null;
+        const characterId = normalizeCharacterIdForChat(chat, character.id, character);
+        if (!characterId) return null;
+        const visibleText = String(ownResponseText || roundResponsesText || '').trim();
+        const roundAiText = String(roundResponsesText || visibleText || '').trim();
+        const derived = buildNextCharacterState(previousState, {
+            chat,
+            speakerProfile: character,
+            visibleText,
+            roundUserText,
+            roundAiText,
+            explicitState: explicitState || {}
+        });
+        if (!derived) return null;
+        kokoDebugLog('[ECHOES STATE DERIVED]', {
+            chatId: chat.id,
+            characterId,
+            visibleText: snippet(visibleText, 80),
+            roundUserText: snippet(roundUserText, 80)
+        });
+        return {
+            characterId,
+            mood: derived.mood,
+            affection: derived.affection,
+            clothing: derived.clothing,
+            action: derived.action,
+            innerThoughts: derived.innerThoughts,
+            visibleText: derived.visibleText,
+            roundUserText: derived.roundUserText,
+            roundAiText: derived.roundAiText,
+            __echoesFallback: true
+        };
+    }
+
     async function savePrivateRoundEchoesState({ chat, characterId, roundId, roundUserText, aiMessages = [], explicitState = null }) {
         if (!chat || !characterId) return null;
         const messages = aiMessages.filter(Boolean);
         const roundAiText = messages.map(getText).filter(Boolean).join('\n').trim()
             || String(explicitState?.roundAiText || explicitState?.visibleText || '').trim();
         if (!roundAiText && !explicitState) return null;
-        if (!explicitState) {
-            console.warn('[ECHOES STATE SAVE FAILED]', 'private_round_missing_states', {
-                chatId: chat?.id,
-                characterId,
-                roundId
-            });
-            return null;
-        }
         const relatedMessageId = messages[messages.length - 1]?.id || null;
+        const speakerProfile = getProfile(chat, characterId);
+        const previousState = typeof getLatestCharacterStateSnapshot === 'function'
+            ? getLatestCharacterStateSnapshot(chat, characterId)
+            : null;
+        const statePayload = explicitState || buildEchoesDerivedState({
+            character: speakerProfile,
+            chat,
+            roundUserText,
+            roundResponsesText: roundAiText,
+            ownResponseText: roundAiText,
+            previousState,
+            explicitState: null,
+            didSpeak: !!roundAiText
+        });
         return saveEchoesCharacterState(chat, characterId, {
-            ...(explicitState || {}),
+            ...(statePayload || {}),
             visibleText: roundAiText,
             roundUserText,
             roundAiText
@@ -50222,17 +50205,23 @@ await initApp();
             const roundAiText = messages.map(getText).filter(Boolean).join('\n').trim()
                 || String(explicitState?.roundAiText || explicitState?.visibleText || '').trim();
             if (!roundAiText && !explicitState) continue;
-            if (!explicitState) {
-                console.warn('[ECHOES STATE SAVE FAILED]', 'group_round_missing_states', {
-                    chatId: group?.id,
-                    characterId: id,
-                    roundId
-                });
-                continue;
-            }
             const relatedMessageId = messages[messages.length - 1]?.id || null;
+            const speakerProfile = getProfile(group, id);
+            const previousState = typeof getLatestCharacterStateSnapshot === 'function'
+                ? getLatestCharacterStateSnapshot(group, id)
+                : null;
+            const statePayload = explicitState || buildEchoesDerivedState({
+                character: speakerProfile,
+                chat: group,
+                roundUserText,
+                roundResponsesText: roundAiText,
+                ownResponseText: roundAiText,
+                previousState,
+                explicitState: null,
+                didSpeak: !!roundAiText
+            });
             const record = await saveEchoesCharacterState(group, id, {
-                ...(explicitState || {}),
+                ...(statePayload || {}),
                 visibleText: roundAiText,
                 roundUserText,
                 roundAiText
@@ -50357,14 +50346,14 @@ await initApp();
     }
 
     function parseEchoesStateResult(rawText, chat = null, fallbackSenderProfile = null) {
-        console.log('[ECHOES RAW]', rawText);
+        kokoDebugLog('[AI RAW]', String(rawText || '').slice(0, 500));
         const fallbackCharacterId = fallbackSenderProfile?.id || (!chat?.isGroup ? chat?.id : '') || '';
         const parsed = tryParseEchoesJson(rawText, fallbackCharacterId);
         if (!parsed) return null;
         const responses = Array.isArray(parsed.responses) ? parsed.responses.filter(item => item && item.characterId && item.text) : [];
         const states = Array.isArray(parsed.states) ? [...parsed.states] : [];
-        console.log('[ECHOES PARSED RESPONSES]', responses);
-        console.log('[ECHOES PARSED STATES]', states);
+        kokoDebugLog('[AI PARSED RESPONSES]', responses);
+        kokoDebugLog('[AI PARSED STATES]', states);
         return {
             responsesSource: parsed.responsesSource || '',
             statesSource: parsed.statesSource || '',
@@ -50525,23 +50514,36 @@ await initApp();
         if (parsedMessages.length === 0) {
             return displayAiTextInBubbles(rawResponse, allMemberProfiles[0] || group, group, 'chat', { requestId });
         }
-        for (const parsedMessage of parsedMessages) {
-            try {
-                const rendered = await renderParsedGroupMessage(parsedMessage, group, requestId, staleLogLabel);
-                if (!rendered) return null;
-            } catch (renderError) {
-                if (!isLatestAiRequest(group.id, requestId)) {
-                    console.warn(staleLogLabel, { chatId: group.id, requestId });
-                    return null;
+        const begin = beginEchoesRound(group, 'group-legacy', { requestId });
+        const ctx = begin.ctx;
+        try {
+            for (const parsedMessage of parsedMessages) {
+                try {
+                    const rendered = await renderParsedGroupMessage(parsedMessage, group, requestId, staleLogLabel);
+                    if (!rendered) return null;
+                } catch (renderError) {
+                    if (!isLatestAiRequest(group.id, requestId)) {
+                        console.warn(staleLogLabel, { chatId: group.id, requestId });
+                        return null;
+                    }
+                    const { speaker, content } = parsedMessage;
+                    console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
+                    await createAndAddMessage({
+                        type: 'text',
+                        sender: speaker.id,
+                        senderId: speaker.id,
+                        content: String(content || '').trim()
+                    }, speaker.id, group, true, 'chat');
                 }
-                const { speaker, content } = parsedMessage;
-                console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
-                await createAndAddMessage({
-                    type: 'text',
-                    sender: speaker.id,
-                    senderId: speaker.id,
-                    content: String(content || '').trim()
-                }, speaker.id, group, true, 'chat');
+            }
+            if (begin.owner) {
+                await finishEchoesRound(ctx, true);
+            }
+        } catch (error) {
+            throw error;
+        } finally {
+            if (begin.owner && ctx && activeRoundByChatId.get(ctx.chatId) === ctx) {
+                activeRoundByChatId.delete(ctx.chatId);
             }
         }
         return true;
@@ -50590,7 +50592,7 @@ await initApp();
                     fallbackSenderProfile: allMemberProfiles[0] || null,
                     requestId,
                     source: 'group-reply',
-                    maxAttempts: 2
+                    maxAttempts: 1
                 }),
                 60000,
                 'group-reply requestEchoesMainResponseWithRetry'
@@ -50705,7 +50707,7 @@ await initApp();
                     fallbackSenderProfile: allMemberProfiles[0] || null,
                     requestId,
                     source: 'group-free',
-                    maxAttempts: 2
+                    maxAttempts: 1
                 }),
                 60000,
                 'group-free requestEchoesMainResponseWithRetry'
