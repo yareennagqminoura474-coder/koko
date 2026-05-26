@@ -49621,168 +49621,298 @@ await initApp();
     }
 
     function ensureEchoesStatePanelStyles() {
-        if (document.getElementById('echoes-state-panel-final-v2-style')) return;
+        if (document.getElementById('echoes-state-panel-final-v3-style')) return;
         const style = document.createElement('style');
-        style.id = 'echoes-state-panel-final-v2-style';
+        style.id = 'echoes-state-panel-final-v3-style';
         style.textContent = `
             #echoes-state-panel,
             #echoes-state-history-panel {
                 position: fixed !important;
-                left: 50% !important;
-                bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
-                transform: translateX(-50%) !important;
-                width: min(92vw, 420px) !important;
-                max-height: 82vh !important;
-                overflow-y: auto !important;
-                z-index: 2147483647 !important;
+                inset: 0 !important;
                 display: none;
-                flex-direction: column !important;
-                padding: 0 0 18px !important;
-                border-radius: 30px !important;
-                background: rgba(243, 246, 248, 0.86) !important;
-                border: 1px solid rgba(255,255,255,0.82) !important;
-                box-shadow: 0 26px 80px rgba(31, 41, 55, 0.30) !important;
-                backdrop-filter: blur(22px) saturate(1.08) !important;
-                -webkit-backdrop-filter: blur(22px) saturate(1.08) !important;
-                color: #1f2937 !important;
+                align-items: flex-end;
+                justify-content: center;
+                padding: 20px 16px calc(92px + env(safe-area-inset-bottom, 0px));
+                z-index: 2147483647 !important;
+                pointer-events: auto !important;
+            }
+            #echoes-state-history-panel {
+                z-index: 2147483648 !important;
+            }
+            #echoes-state-panel .echoes-state-backdrop,
+            #echoes-state-history-panel .echoes-state-backdrop {
+                position: absolute;
+                inset: 0;
+                background: rgba(15, 23, 42, 0.18);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+            }
+            #echoes-state-panel .echoes-state-dialog,
+            #echoes-state-history-panel .echoes-state-dialog {
+                position: relative;
+                width: min(92vw, 432px);
+                max-height: min(82vh, 760px);
+                overflow: hidden;
+                border-radius: 32px;
+                background: rgba(244, 248, 251, 0.82);
+                border: 1px solid rgba(255, 255, 255, 0.82);
+                box-shadow: 0 32px 90px rgba(15, 23, 42, 0.28);
+                backdrop-filter: blur(22px) saturate(1.12);
+                -webkit-backdrop-filter: blur(22px) saturate(1.12);
+                color: #1f2937;
+            }
+            #echoes-state-panel .echoes-state-scroll,
+            #echoes-state-history-panel .echoes-state-scroll {
+                max-height: min(82vh, 760px);
+                overflow-y: auto;
+                overscroll-behavior: contain;
             }
             #echoes-state-panel .echoes-state-header,
             #echoes-state-history-panel .echoes-state-header {
+                position: sticky;
+                top: 0;
+                z-index: 2;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 padding: 22px 24px 18px;
-                border-bottom: 1px solid rgba(255,255,255,0.78);
+                background: linear-gradient(180deg, rgba(244, 248, 251, 0.94), rgba(244, 248, 251, 0.82));
+                border-bottom: 1px solid rgba(255, 255, 255, 0.76);
+                backdrop-filter: blur(18px);
+                -webkit-backdrop-filter: blur(18px);
             }
             #echoes-state-panel .echoes-state-title,
             #echoes-state-history-panel .echoes-state-title {
                 font-size: 23px;
                 font-weight: 800;
-                color: #17212f;
+                color: #18212d;
+                letter-spacing: 0;
+            }
+            #echoes-state-panel .echoes-state-close,
+            #echoes-state-history-panel .echoes-state-close,
+            #echoes-state-panel .echoes-state-history-trigger,
+            #echoes-state-history-panel .echoes-history-delete {
+                border: none;
+                cursor: pointer;
+                transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
             }
             #echoes-state-panel .echoes-state-close,
             #echoes-state-history-panel .echoes-state-close {
                 width: 42px;
                 height: 42px;
-                border: none;
-                border-radius: 50%;
-                background: rgba(255,255,255,0.72);
-                color: #5f6f82;
-                font-size: 30px;
-                line-height: 38px;
-                cursor: pointer;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.74);
+                color: #667789;
+                font-size: 28px;
+                line-height: 42px;
+                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
             }
-            #echoes-state-panel .echoes-state-profile {
-                display: grid;
-                grid-template-columns: 64px 1fr;
+            #echoes-state-panel .echoes-state-close:hover,
+            #echoes-state-history-panel .echoes-state-close:hover {
+                transform: translateY(-1px);
+                background: rgba(255, 255, 255, 0.9);
+                color: #334155;
+            }
+            #echoes-state-panel .echoes-state-body,
+            #echoes-state-history-panel .echoes-state-body {
+                padding: 0 22px 24px;
+            }
+            #echoes-state-panel .echoes-state-profile,
+            #echoes-state-history-panel .echoes-state-profile {
+                display: flex;
                 align-items: center;
                 gap: 14px;
-                padding: 20px 24px 16px;
+                padding: 22px 2px 18px;
             }
-            #echoes-state-panel .echoes-state-avatar {
+            #echoes-state-panel .echoes-state-identity,
+            #echoes-state-history-panel .echoes-state-identity {
+                flex: 1;
+                min-width: 0;
+                display: flex;
+                align-items: center;
+                gap: 14px;
+            }
+            #echoes-state-panel .echoes-state-avatar,
+            #echoes-state-history-panel .echoes-state-avatar {
                 width: 64px;
                 height: 64px;
-                border-radius: 50%;
+                border-radius: 999px;
                 object-fit: cover;
-                background: rgba(255,255,255,0.8);
-                box-shadow: 0 8px 22px rgba(15,23,42,0.15);
+                background: rgba(255, 255, 255, 0.86);
+                box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+                flex-shrink: 0;
             }
-            #echoes-state-panel .echoes-state-name {
-                font-size: 22px;
+            #echoes-state-panel .echoes-state-name,
+            #echoes-state-history-panel .echoes-state-name {
+                font-size: 21px;
                 font-weight: 800;
-                color: #162033;
+                color: #1d2836;
+                line-height: 1.2;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
-            #echoes-state-panel .echoes-state-sync {
-                margin-top: 4px;
-                color: #758195;
-                font-size: 14px;
+            #echoes-state-panel .echoes-state-sync,
+            #echoes-state-history-panel .echoes-state-sync {
+                margin-top: 5px;
+                color: #748396;
+                font-size: 13px;
+                font-weight: 600;
+                line-height: 1.4;
+            }
+            #echoes-state-panel .echoes-state-history-trigger {
+                width: 44px;
+                height: 44px;
+                border-radius: 999px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(255, 255, 255, 0.74);
+                color: #5f7387;
+                box-shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
+                flex-shrink: 0;
+            }
+            #echoes-state-panel .echoes-state-history-trigger:hover {
+                transform: translateY(-1px);
+                background: rgba(255, 255, 255, 0.92);
+                color: #3f556a;
+            }
+            #echoes-state-panel .echoes-state-history-trigger svg {
+                width: 19px;
+                height: 19px;
+                stroke: currentColor;
+                fill: none;
+                stroke-width: 1.8;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+            #echoes-state-panel .echoes-state-empty,
+            #echoes-state-history-panel .echoes-state-empty {
+                padding: 20px 18px;
+                border-radius: 22px;
+                background: rgba(255, 255, 255, 0.64);
+                border: 1px solid rgba(255, 255, 255, 0.84);
+                color: #748396;
+                font-size: 15px;
+                font-weight: 600;
+                text-align: center;
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 8px 22px rgba(15, 23, 42, 0.07);
             }
             #echoes-state-panel .echoes-state-content {
                 display: flex;
                 flex-direction: column;
                 gap: 14px;
-                padding: 0 22px;
             }
             #echoes-state-panel .echoes-state-grid {
                 display: grid;
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
                 gap: 14px;
             }
             #echoes-state-panel .echoes-state-card,
             #echoes-state-history-panel .echoes-history-card {
-                padding: 16px 18px;
-                border-radius: 22px;
-                background: rgba(255,255,255,0.66);
-                border: 1px solid rgba(255,255,255,0.86);
-                box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 6px 18px rgba(15,23,42,0.07);
+                border-radius: 24px;
+                background: rgba(255, 255, 255, 0.68);
+                border: 1px solid rgba(255, 255, 255, 0.86);
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 10px 28px rgba(15, 23, 42, 0.08);
+            }
+            #echoes-state-panel .echoes-state-card {
+                padding: 17px 18px;
             }
             #echoes-state-panel .echoes-state-card-label,
             #echoes-state-history-panel .echoes-history-label {
-                color: #728195;
-                font-size: 14px;
+                color: #718196;
+                font-size: 13px;
                 font-weight: 800;
-                margin-bottom: 8px;
+                margin-bottom: 10px;
+                line-height: 1.3;
             }
             #echoes-state-panel .echoes-state-card-value,
             #echoes-state-history-panel .echoes-history-value {
-                color: #1f2a37;
+                color: #1f2b38;
                 font-size: 16px;
                 line-height: 1.72;
                 white-space: pre-wrap;
                 word-break: break-word;
             }
-            #echoes-state-panel .echoes-state-favorability {
-                color: #4f8eab;
+            #echoes-state-panel .echoes-state-card.is-affection .echoes-state-card-value {
+                color: #4f89a6;
                 font-size: 20px;
                 font-weight: 800;
+                line-height: 1.4;
             }
-            #echoes-state-panel .echoes-state-thought-card .echoes-state-card-value {
+            #echoes-state-panel .echoes-state-card.is-thought .echoes-state-card-value {
                 font-size: 17px;
                 line-height: 1.82;
-            }
-            #echoes-state-panel .echoes-state-history {
-                border-radius: 22px;
-                background: rgba(255,255,255,0.52);
-                border: 1px solid rgba(255,255,255,0.78);
-                padding: 8px 12px 12px;
-            }
-            #echoes-state-panel .echoes-state-history summary {
-                list-style: none;
-                cursor: pointer;
-                color: #60748a;
-                font-size: 15px;
-                font-weight: 800;
-                padding: 6px 4px;
-            }
-            #echoes-state-panel .echoes-state-history summary::-webkit-details-marker {
-                display: none;
-            }
-            #echoes-state-panel .echoes-state-history-list {
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-                margin-top: 10px;
-            }
-            #echoes-state-panel .echoes-history-card-head {
-                display: flex;
-                justify-content: space-between;
-                gap: 12px;
-                color: #6f8294;
-                font-weight: 700;
-                margin-bottom: 10px;
             }
             #echoes-state-history-panel .echoes-history-list {
                 display: flex;
                 flex-direction: column;
                 gap: 14px;
-                padding: 18px 22px 0;
+            }
+            #echoes-state-history-panel .echoes-history-card {
+                padding: 16px 16px 14px;
+            }
+            #echoes-state-history-panel .echoes-history-card-head {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 12px;
+                margin-bottom: 10px;
+            }
+            #echoes-state-history-panel .echoes-history-meta {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                min-width: 0;
+            }
+            #echoes-state-history-panel .echoes-history-time {
+                color: #708195;
+                font-size: 12px;
+                font-weight: 700;
+                line-height: 1.4;
+            }
+            #echoes-state-history-panel .echoes-history-affection {
+                display: inline-flex;
+                align-items: center;
+                padding: 5px 10px;
+                border-radius: 999px;
+                background: rgba(122, 173, 201, 0.14);
+                color: #4f89a6;
+                font-size: 12px;
+                font-weight: 800;
+                max-width: 100%;
+                width: fit-content;
+            }
+            #echoes-state-history-panel .echoes-history-delete {
+                width: 34px;
+                height: 34px;
+                border-radius: 999px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(255, 255, 255, 0.82);
+                color: #9b6b72;
+                box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+                flex-shrink: 0;
+            }
+            #echoes-state-history-panel .echoes-history-delete:hover {
+                transform: translateY(-1px);
+                background: rgba(255, 239, 241, 0.96);
+                color: #c04557;
+            }
+            #echoes-state-history-panel .echoes-history-delete svg {
+                width: 16px;
+                height: 16px;
+                stroke: currentColor;
+                fill: none;
+                stroke-width: 1.9;
+                stroke-linecap: round;
+                stroke-linejoin: round;
             }
             #echoes-state-history-panel .echoes-history-row {
-                display: grid;
-                grid-template-columns: 92px 1fr;
-                gap: 10px;
-                padding: 8px 0;
-                border-top: 1px solid rgba(148,163,184,0.22);
+                padding-top: 10px;
+                margin-top: 10px;
+                border-top: 1px solid rgba(148, 163, 184, 0.20);
             }
             #chat-messages .message-wrapper.echoes-state-clickable-message .message-avatar {
                 visibility: visible !important;
@@ -49795,23 +49925,152 @@ await initApp();
             @media (max-width: 420px) {
                 #echoes-state-panel,
                 #echoes-state-history-panel {
-                    width: min(92vw, 390px) !important;
-                    max-height: 82vh !important;
-                    border-radius: 28px !important;
+                    padding: 16px 12px calc(88px + env(safe-area-inset-bottom, 0px));
+                }
+                #echoes-state-panel .echoes-state-dialog,
+                #echoes-state-history-panel .echoes-state-dialog {
+                    width: min(94vw, 400px);
+                    border-radius: 28px;
+                }
+                #echoes-state-panel .echoes-state-header,
+                #echoes-state-history-panel .echoes-state-header {
+                    padding: 18px 18px 15px;
+                }
+                #echoes-state-panel .echoes-state-body,
+                #echoes-state-history-panel .echoes-state-body {
+                    padding: 0 16px 18px;
                 }
                 #echoes-state-panel .echoes-state-grid {
-                    grid-template-columns: 1fr 1fr;
                     gap: 12px;
                 }
                 #echoes-state-panel .echoes-state-card {
-                    padding: 14px 16px;
-                }
-                #echoes-state-panel .echoes-state-card-value {
-                    font-size: 15px;
+                    padding: 15px 15px;
                 }
             }
         `;
         document.head.appendChild(style);
+    }
+
+    function getEchoesStatePanelProfile(chat, characterId) {
+        return (typeof getProfile === 'function' && getProfile(chat, characterId))
+            || (typeof finalGetProfile === 'function' && finalGetProfile(chat, characterId))
+            || {};
+    }
+
+    function getEchoesStatePanelAvatar(profile, name) {
+        return profile?.avatar || `https://via.placeholder.com/80/DDD/666?text=${encodeURIComponent((name || '角').slice(0, 1))}`;
+    }
+
+    function escapeEchoesStatePanelHtml(value) {
+        const text = value === undefined || value === null ? '' : String(value);
+        if (typeof escapeHtml === 'function') return escapeHtml(text);
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function closeEchoesStateHistoryPanel() {
+        const panel = document.getElementById('echoes-state-history-panel');
+        if (!panel) return;
+        panel.style.setProperty('display', 'none', 'important');
+        panel.dataset.chatId = '';
+        panel.dataset.characterId = '';
+    }
+
+    function closeEchoesStatePanel() {
+        const panel = document.getElementById('echoes-state-panel');
+        if (!panel) return;
+        panel.style.setProperty('display', 'none', 'important');
+        panel.dataset.chatId = '';
+        panel.dataset.characterId = '';
+        closeEchoesStateHistoryPanel();
+        if (state.heartVoicePanel) {
+            state.heartVoicePanel.isOpen = false;
+            state.heartVoicePanel.chatId = null;
+            state.heartVoicePanel.characterId = null;
+        }
+    }
+
+    async function deleteEchoesStateHistoryRecord(chatId, characterId, recordId) {
+        if (!chatId || !characterId || !recordId) return;
+        const chat = (state.contacts || []).find(item => item && item.id === chatId);
+        if (!chat) return;
+
+        const normalizedChatId = normalizeId(chatId);
+        const normalizedCharacterId = normalizeId(characterId);
+        let removedStateRecord = false;
+        let removedLegacyRecord = false;
+
+        if (Array.isArray(state.characterStates)) {
+            state.characterStates = state.characterStates.filter(record => {
+                const match = record
+                    && String(record.id || '') === String(recordId)
+                    && normalizeId(record.chatId) === normalizedChatId
+                    && normalizeId(record.characterId) === normalizedCharacterId;
+                if (match) removedStateRecord = true;
+                return !match;
+            });
+        }
+
+        if (Array.isArray(chat.history)) {
+            const nextHistory = chat.history.filter(message => {
+                const match = message
+                    && message.type === 'heart_voice'
+                    && String(message.id || '') === String(recordId)
+                    && normalizeId(message.characterId || message.senderId || message.sender) === normalizedCharacterId;
+                if (match) removedLegacyRecord = true;
+                return !match;
+            });
+            if (nextHistory.length !== chat.history.length) {
+                chat.history = nextHistory;
+            }
+        }
+
+        if (!removedStateRecord && !removedLegacyRecord) return;
+
+        state.characterStateSnapshots = rebuildCharacterStateSnapshots(state.characterStates || []);
+
+        try {
+            if (removedStateRecord && typeof kokoMemory !== 'undefined' && kokoMemory?.delete) {
+                await kokoMemory.delete('character_states', recordId);
+            }
+        } catch (error) {
+            console.warn('[ECHOES STATE DELETE FAILED]', error, { chatId, characterId, recordId });
+        }
+
+        try {
+            if (removedLegacyRecord && typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
+                await kokoMemory.put('contacts', chat);
+            }
+        } catch (error) {
+            console.warn('[ECHOES LEGACY STATE DELETE FAILED]', error, { chatId, characterId, recordId });
+        }
+
+        window.state = state;
+
+        const records = getEchoesStateRecordsForPanel(chat, characterId);
+        const mainPanel = document.getElementById('echoes-state-panel');
+        if (
+            mainPanel
+            && mainPanel.style.display === 'flex'
+            && normalizeId(mainPanel.dataset.chatId) === normalizedChatId
+            && normalizeId(mainPanel.dataset.characterId) === normalizedCharacterId
+        ) {
+            renderEchoesStatePanel(chat, characterId, records[0] || null, records);
+        }
+
+        const historyPanel = document.getElementById('echoes-state-history-panel');
+        if (
+            historyPanel
+            && historyPanel.style.display === 'flex'
+            && normalizeId(historyPanel.dataset.chatId) === normalizedChatId
+            && normalizeId(historyPanel.dataset.characterId) === normalizedCharacterId
+        ) {
+            renderEchoesStateHistoryPanel(chat, characterId, records.slice(1));
+        }
     }
 
     function ensureEchoesStatePanel() {
@@ -49824,62 +50083,81 @@ await initApp();
         }
         panel.className = 'echoes-state-panel';
         panel.innerHTML = `
-            <div class="echoes-state-header">
-                <div class="echoes-state-title" id="echoes-state-title">角色的状态</div>
-                <button class="echoes-state-close" id="echoes-state-close" type="button">×</button>
-            </div>
-            <div class="echoes-state-profile">
-                <img id="echoes-state-avatar" class="echoes-state-avatar" alt="">
-                <div>
-                    <div id="echoes-state-name" class="echoes-state-name">角色</div>
-                    <div class="echoes-state-sync">实时状态同步中</div>
-                </div>
-            </div>
-            <div id="echoes-state-empty" class="echoes-state-empty" style="display:none;">还没有状态记录</div>
-            <div id="echoes-state-content" class="echoes-state-content">
-                <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">实时心情</div>
-                    <div class="echoes-state-card-value" id="echoes-state-mood"></div>
-                </div>
-                <div class="echoes-state-card">
-                    <div class="echoes-state-card-label">对你的好感度</div>
-                    <div class="echoes-state-card-value echoes-state-favorability" id="echoes-state-favorability"></div>
-                </div>
-                <div class="echoes-state-grid">
-                    <div class="echoes-state-card">
-                        <div class="echoes-state-card-label">穿着</div>
-                        <div class="echoes-state-card-value" id="echoes-state-clothing"></div>
+            <div class="echoes-state-backdrop" data-echoes-state-close="panel"></div>
+            <div class="echoes-state-dialog">
+                <div class="echoes-state-scroll">
+                    <div class="echoes-state-header">
+                        <div class="echoes-state-title" id="echoes-state-title">角色的状态</div>
+                        <button class="echoes-state-close" id="echoes-state-close" type="button" aria-label="关闭">×</button>
                     </div>
-                    <div class="echoes-state-card">
-                        <div class="echoes-state-card-label">动作</div>
-                        <div class="echoes-state-card-value" id="echoes-state-action"></div>
+                    <div class="echoes-state-body">
+                        <div class="echoes-state-profile">
+                            <div class="echoes-state-identity">
+                                <img id="echoes-state-avatar" class="echoes-state-avatar" alt="">
+                                <div class="echoes-state-meta">
+                                    <div id="echoes-state-name" class="echoes-state-name">角色</div>
+                                    <div class="echoes-state-sync">实时状态同步中</div>
+                                </div>
+                            </div>
+                            <button class="echoes-state-history-trigger" id="echoes-state-history-trigger" type="button" title="历史状态记录" aria-label="历史状态记录">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                                    <path d="M3 4v4h4"></path>
+                                    <path d="M12 7v5l3 2"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div id="echoes-state-empty" class="echoes-state-empty" style="display:none;">还没有状态记录</div>
+                        <div id="echoes-state-content" class="echoes-state-content">
+                            <div class="echoes-state-card is-wide">
+                                <div class="echoes-state-card-label">实时心情</div>
+                                <div class="echoes-state-card-value" id="echoes-state-mood"></div>
+                            </div>
+                            <div class="echoes-state-card is-wide is-affection">
+                                <div class="echoes-state-card-label">对你的好感度</div>
+                                <div class="echoes-state-card-value" id="echoes-state-favorability"></div>
+                            </div>
+                            <div class="echoes-state-grid">
+                                <div class="echoes-state-card">
+                                    <div class="echoes-state-card-label">穿着</div>
+                                    <div class="echoes-state-card-value" id="echoes-state-clothing"></div>
+                                </div>
+                                <div class="echoes-state-card">
+                                    <div class="echoes-state-card-label">动作</div>
+                                    <div class="echoes-state-card-value" id="echoes-state-action"></div>
+                                </div>
+                            </div>
+                            <div class="echoes-state-card is-thought">
+                                <div class="echoes-state-card-label">内心想法</div>
+                                <div class="echoes-state-card-value" id="echoes-state-inner-thoughts"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="echoes-state-card echoes-state-thought-card">
-                    <div class="echoes-state-card-label">内心想法</div>
-                    <div class="echoes-state-card-value" id="echoes-state-inner-thoughts"></div>
-                </div>
-                <details class="echoes-state-history">
-                    <summary>历史状态记录</summary>
-                    <div id="echoes-state-history-inline-list" class="echoes-state-history-list"></div>
-                </details>
             </div>
         `;
-        panel.querySelector('#echoes-state-close').onclick = () => {
-            panel.style.setProperty('display', 'none', 'important');
+        panel.querySelector('#echoes-state-close').onclick = () => closeEchoesStatePanel();
+        panel.querySelector('[data-echoes-state-close="panel"]').onclick = () => closeEchoesStatePanel();
+        panel.querySelector('#echoes-state-history-trigger').onclick = () => {
+            const currentChatId = panel.dataset.chatId;
+            const currentCharacterId = panel.dataset.characterId;
+            if (currentChatId && currentCharacterId) {
+                openEchoesStateHistoryPanel(currentChatId, currentCharacterId);
+            }
         };
-        document.body.appendChild(panel);
         return panel;
     }
 
     function renderEchoesStatePanel(chat, characterId, snapshot, historyRecords = []) {
         const panel = ensureEchoesStatePanel();
-        const profile = finalGetProfile(chat, characterId) || {};
+        const profile = getEchoesStatePanelProfile(chat, characterId);
         const name = profile.name || '角色';
-        const avatar = profile.avatar || `https://via.placeholder.com/80/DDD/666?text=${encodeURIComponent(name.slice(0, 1) || '角')}`;
+        const avatar = getEchoesStatePanelAvatar(profile, name);
         panel.querySelector('#echoes-state-title').textContent = `${name} 的状态`;
         panel.querySelector('#echoes-state-avatar').src = avatar;
+        panel.querySelector('#echoes-state-avatar').alt = `${name} 的头像`;
         panel.querySelector('#echoes-state-name').textContent = name;
+
         const emptyEl = panel.querySelector('#echoes-state-empty');
         const contentEl = panel.querySelector('#echoes-state-content');
         if (!snapshot) {
@@ -49887,27 +50165,34 @@ await initApp();
             contentEl.style.display = 'none';
             return;
         }
+
         emptyEl.style.display = 'none';
         contentEl.style.display = 'flex';
-        const affection = String(snapshot.affection || formatEchoesAffection(snapshot.favorability, snapshot.favorabilityLabel, snapshot.mood)).trim();
+
+        const affection = String(
+            snapshot.affection || formatEchoesAffection(snapshot.favorability, snapshot.favorabilityLabel, snapshot.mood)
+        ).trim();
+
         panel.querySelector('#echoes-state-mood').textContent = snapshot.mood || '平静';
         panel.querySelector('#echoes-state-favorability').textContent = affection;
-        panel.querySelector('#echoes-state-clothing').textContent = snapshot.clothing || snapshot.outfit || expandOutfitDescription('', profile, null, '');
-        panel.querySelector('#echoes-state-action').textContent = snapshot.action || expandActionDescription('', snapshot.visibleText || '', profile, null, snapshot.mood);
-        panel.querySelector('#echoes-state-inner-thoughts').textContent = snapshot.innerThoughts || '我还没把心里的话整理清楚。';
-        const inlineHistory = panel.querySelector('#echoes-state-history-inline-list');
-        const historicalRecords = (historyRecords || []).slice(1);
-        inlineHistory.innerHTML = historicalRecords.map((record, index) => `
-            <div class="echoes-history-card">
-                <div class="echoes-history-card-head">
-                    <span>${record.timestamp ? new Date(record.timestamp).toLocaleString() : `过去状态 ${index + 1}`}</span>
-                    <span>${escapeUiHtml(String(record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood)))}</span>
-                </div>
-                ${historyRow('实时心情', record.mood)}
-                ${historyRow('动作', record.action)}
-                ${historyRow('内心想法', record.innerThoughts)}
-            </div>
-        `).join('') || '<div class="echoes-history-card">暂无状态记录</div>';
+        panel.querySelector('#echoes-state-clothing').textContent =
+            snapshot.clothing || snapshot.outfit || expandOutfitDescription('', profile, null, '');
+        panel.querySelector('#echoes-state-action').textContent =
+            snapshot.action || expandActionDescription('', snapshot.visibleText || '', profile, null, snapshot.mood);
+        panel.querySelector('#echoes-state-inner-thoughts').textContent =
+            snapshot.innerThoughts || '我还没把心里的话整理清楚。';
+
+        const historyTrigger = panel.querySelector('#echoes-state-history-trigger');
+        if (historyTrigger) {
+            const historyCount = Math.max(0, (historyRecords || []).length - 1);
+            historyTrigger.title = historyCount > 0 ? `历史状态记录 (${historyCount})` : '历史状态记录';
+            historyTrigger.setAttribute('aria-label', historyTrigger.title);
+        }
+    }
+
+    function historyRow(label, value) {
+        if (value === undefined || value === null || String(value).trim() === '') return '';
+        return `<div class="echoes-history-row"><div class="echoes-history-label">${escapeEchoesStatePanelHtml(label)}</div><div class="echoes-history-value">${escapeEchoesStatePanelHtml(String(value))}</div></div>`;
     }
 
     function ensureEchoesStateHistoryPanel() {
@@ -49920,69 +50205,105 @@ await initApp();
         }
         panel.className = 'echoes-state-history-panel';
         panel.innerHTML = `
-            <div class="echoes-state-header">
-                <div class="echoes-state-title" id="echoes-state-history-title">状态历史</div>
-                <button class="echoes-state-close" id="echoes-state-history-close" type="button">×</button>
+            <div class="echoes-state-backdrop" data-echoes-state-close="history"></div>
+            <div class="echoes-state-dialog">
+                <div class="echoes-state-scroll">
+                    <div class="echoes-state-header">
+                        <div class="echoes-state-title" id="echoes-state-history-title">状态历史</div>
+                        <button class="echoes-state-close" id="echoes-state-history-close" type="button" aria-label="关闭">×</button>
+                    </div>
+                    <div class="echoes-state-body">
+                        <div class="echoes-state-profile">
+                            <div class="echoes-state-identity">
+                                <img id="echoes-state-history-avatar" class="echoes-state-avatar" alt="">
+                                <div class="echoes-state-meta">
+                                    <div id="echoes-state-history-name" class="echoes-state-name">角色</div>
+                                    <div class="echoes-state-sync">历史状态记录</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="echoes-state-history-empty" class="echoes-state-empty" style="display:none;">暂无历史状态记录</div>
+                        <div class="echoes-history-list" id="echoes-state-history-list"></div>
+                    </div>
+                </div>
             </div>
-            <div class="echoes-history-list" id="echoes-state-history-list"></div>
         `;
-        panel.querySelector('#echoes-state-history-close').onclick = () => {
-            panel.style.setProperty('display', 'none', 'important');
+        panel.querySelector('#echoes-state-history-close').onclick = () => closeEchoesStateHistoryPanel();
+        panel.querySelector('[data-echoes-state-close="history"]').onclick = () => closeEchoesStateHistoryPanel();
+        panel.onclick = async event => {
+            const deleteButton = event.target.closest('[data-echoes-state-delete]');
+            if (!deleteButton) return;
+            event.preventDefault();
+            event.stopPropagation();
+            await deleteEchoesStateHistoryRecord(
+                panel.dataset.chatId,
+                panel.dataset.characterId,
+                deleteButton.dataset.recordId
+            );
         };
         return panel;
     }
 
-    function historyRow(label, value) {
-        if (value === undefined || value === null || String(value).trim() === '') return '';
-        return `<div class="echoes-history-row"><div class="echoes-history-label">${label}</div><div class="echoes-history-value">${escapeUiHtml(String(value))}</div></div>`;
-    }
-
     function renderEchoesStateHistoryPanel(chat, characterId, historyRecords = []) {
         const panel = ensureEchoesStateHistoryPanel();
-        const profile = finalGetProfile(chat, characterId) || {};
+        const profile = getEchoesStatePanelProfile(chat, characterId);
         const name = profile.name || '角色';
+        const avatar = getEchoesStatePanelAvatar(profile, name);
         panel.querySelector('#echoes-state-history-title').textContent = `${name} 的状态历史`;
+        panel.querySelector('#echoes-state-history-name').textContent = name;
+        panel.querySelector('#echoes-state-history-avatar').src = avatar;
+        panel.querySelector('#echoes-state-history-avatar').alt = `${name} 的头像`;
+
         const list = panel.querySelector('#echoes-state-history-list');
-        list.innerHTML = historyRecords.map(record => `
-            <div class="echoes-history-card">
-                ${historyRow('时间', record.timestamp ? new Date(record.timestamp).toLocaleString() : '')}
-                ${historyRow('实时心情', record.mood)}
-                ${historyRow('好感度', `${record.favorability ?? ''}${record.favorabilityLabel ? `（${record.favorabilityLabel}）` : ''}`)}
-                ${historyRow('穿着', record.outfit || record.clothing)}
-                ${historyRow('动作', record.action)}
-                ${historyRow('内心想法', record.innerThoughts)}
-                ${historyRow('心率', record.heartRate)}
-                ${historyRow('嫉妒', record.jealousy)}
-                ${historyRow('source', record.source)}
-                ${historyRow('roundId', record.roundId)}
-                ${historyRow('relatedMessageId', record.relatedMessageId)}
-                ${historyRow('visibleText', record.visibleText)}
-                ${historyRow('roundUserText', record.roundUserText)}
-                ${historyRow('roundAiText', record.roundAiText)}
-            </div>
-        `).join('') || '<div class="echoes-history-card">暂无状态历史</div>';
+        const empty = panel.querySelector('#echoes-state-history-empty');
+        const records = Array.isArray(historyRecords) ? historyRecords : [];
+        if (!records.length) {
+            list.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+
+        empty.style.display = 'none';
+        list.innerHTML = records.map((record, index) => {
+            const affection = record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood);
+            const timeText = record.timestamp
+                ? new Date(record.timestamp).toLocaleString('zh-CN')
+                : `过去状态 ${index + 1}`;
+            return `
+                <div class="echoes-history-card">
+                    <div class="echoes-history-card-head">
+                        <div class="echoes-history-meta">
+                            <div class="echoes-history-time">${escapeEchoesStatePanelHtml(timeText)}</div>
+                            <div class="echoes-history-affection">${escapeEchoesStatePanelHtml(String(affection || ''))}</div>
+                        </div>
+                        <button class="echoes-history-delete" type="button" data-echoes-state-delete="true" data-record-id="${escapeEchoesStatePanelHtml(record.id || '')}" aria-label="删除历史状态">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M3 6h18"></path>
+                                <path d="M8 6V4h8v2"></path>
+                                <path d="M19 6l-1 14H6L5 6"></path>
+                                <path d="M10 11v6"></path>
+                                <path d="M14 11v6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    ${historyRow('实时心情', record.mood)}
+                    ${historyRow('动作', record.action)}
+                    ${historyRow('内心想法', record.innerThoughts)}
+                </div>
+            `;
+        }).join('');
     }
 
-    function openEchoesStateHistoryPanel(chatId, characterId) {
-        const chat = (state.contacts || []).find(contact => contact.id === chatId);
+    function openEchoesStateHistoryPanel(chatId, characterId, options = {}) {
+        const chat = (state.contacts || []).find(item => item && item.id === chatId);
         if (!chat || !characterId) return null;
         const records = getEchoesStateRecordsForPanel(chat, characterId);
+        const historyRecords = options.includeCurrent === true ? records : records.slice(1);
         const panel = ensureEchoesStateHistoryPanel();
-        renderEchoesStateHistoryPanel(chat, characterId, records);
+        renderEchoesStateHistoryPanel(chat, characterId, historyRecords);
         panel.dataset.chatId = chat.id;
         panel.dataset.characterId = characterId;
         panel.style.setProperty('display', 'flex', 'important');
-        panel.style.setProperty('position', 'fixed', 'important');
-        panel.style.setProperty('left', '50%', 'important');
-        panel.style.setProperty('bottom', 'calc(72px + env(safe-area-inset-bottom, 0px))', 'important');
-        panel.style.setProperty('transform', 'translateX(-50%)', 'important');
-        panel.style.setProperty('width', 'min(92vw, 420px)', 'important');
-        panel.style.setProperty('max-height', '82vh', 'important');
-        panel.style.setProperty('overflow-y', 'auto', 'important');
-        panel.style.setProperty('z-index', '2147483647', 'important');
-        panel.style.setProperty('visibility', 'visible', 'important');
-        panel.style.setProperty('opacity', '1', 'important');
-        panel.style.setProperty('pointer-events', 'auto', 'important');
         return panel;
     }
 
@@ -50002,19 +50323,13 @@ await initApp();
         renderEchoesStatePanel(chat, id, latest, records);
         panel.dataset.chatId = chat.id;
         panel.dataset.characterId = id;
-        document.body.appendChild(panel);
         panel.style.setProperty('display', 'flex', 'important');
-        panel.style.setProperty('position', 'fixed', 'important');
-        panel.style.setProperty('left', '50%', 'important');
-        panel.style.setProperty('bottom', 'calc(72px + env(safe-area-inset-bottom, 0px))', 'important');
-        panel.style.setProperty('transform', 'translateX(-50%)', 'important');
-        panel.style.setProperty('width', 'min(92vw, 420px)', 'important');
-        panel.style.setProperty('max-height', '82vh', 'important');
-        panel.style.setProperty('overflow-y', 'auto', 'important');
-        panel.style.setProperty('z-index', '2147483647', 'important');
-        panel.style.setProperty('visibility', 'visible', 'important');
-        panel.style.setProperty('opacity', '1', 'important');
-        panel.style.setProperty('pointer-events', 'auto', 'important');
+        state.heartVoicePanel = {
+            isOpen: true,
+            chatId: chat.id,
+            characterId: id
+        };
+        window.state = state;
         console.log('[ECHOES STATE PANEL OPEN DONE]', {
             chatId: chat.id,
             characterId: id,
@@ -51226,80 +51541,7 @@ await initApp();
     }
 
     function ensureEchoesStateHistoryPanelStyles() {
-        if (document.getElementById('echoes-state-history-panel-round-style')) return;
-        const style = document.createElement('style');
-        style.id = 'echoes-state-history-panel-round-style';
-        style.textContent = `
-            #echoes-state-history-panel {
-                position: fixed !important;
-                left: 50% !important;
-                bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
-                transform: translateX(-50%) !important;
-                width: min(92vw, 430px) !important;
-                max-height: 82vh !important;
-                overflow-y: auto !important;
-                z-index: 2147483647 !important;
-                display: none;
-                flex-direction: column !important;
-                padding: 0 0 18px !important;
-                border-radius: 28px !important;
-                background: rgba(246, 248, 251, 0.94) !important;
-                border: 1px solid rgba(255,255,255,0.8) !important;
-                box-shadow: 0 24px 70px rgba(31, 41, 55, 0.28) !important;
-                backdrop-filter: blur(20px) !important;
-                -webkit-backdrop-filter: blur(20px) !important;
-                color: #1f2933 !important;
-            }
-            #echoes-state-history-panel .echoes-state-profile {
-                display: flex !important;
-                align-items: center !important;
-                gap: 14px !important;
-                margin: 16px 18px 4px !important;
-                padding: 14px !important;
-                border-radius: 22px !important;
-                background: rgba(255,255,255,0.62) !important;
-            }
-            #echoes-state-history-panel .echoes-state-avatar {
-                width: 58px !important;
-                height: 58px !important;
-                border-radius: 50% !important;
-                object-fit: cover !important;
-                background: #e5e7eb !important;
-            }
-            #echoes-state-history-panel .echoes-history-card {
-                margin: 12px 18px 0 !important;
-                padding: 15px !important;
-                border-radius: 20px !important;
-                background: rgba(255,255,255,0.72) !important;
-                border: 1px solid rgba(255,255,255,0.86) !important;
-                box-shadow: 0 8px 24px rgba(31, 41, 55, 0.08) !important;
-            }
-            #echoes-state-history-panel .echoes-history-card-head {
-                display: flex !important;
-                justify-content: space-between !important;
-                gap: 12px !important;
-                color: #6f8294 !important;
-                font-weight: 700 !important;
-                margin-bottom: 10px !important;
-            }
-            #echoes-state-history-panel .echoes-history-row {
-                margin-top: 9px !important;
-            }
-            #echoes-state-history-panel .echoes-history-label {
-                font-size: 12px !important;
-                font-weight: 800 !important;
-                color: #7c90a1 !important;
-                margin-bottom: 3px !important;
-            }
-            #echoes-state-history-panel .echoes-history-value {
-                font-size: 14px !important;
-                line-height: 1.65 !important;
-                color: #263238 !important;
-                white-space: pre-wrap !important;
-                word-break: break-word !important;
-            }
-        `;
-        document.head.appendChild(style);
+        ensureEchoesStatePanelStyles();
     }
 
     function ensureEchoesStateHistoryPanel() {
@@ -51312,52 +51554,98 @@ await initApp();
         }
         panel.className = 'echoes-state-history-panel';
         panel.innerHTML = `
-            <div class="echoes-state-header">
-                <div class="echoes-state-title" id="echoes-state-history-title">状态历史</div>
-                <button class="echoes-state-close" id="echoes-state-history-close" type="button">×</button>
-            </div>
-            <div class="echoes-state-profile">
-                <img id="echoes-state-history-avatar" class="echoes-state-avatar" alt="">
-                <div>
-                    <div id="echoes-state-history-name" class="echoes-state-name">角色</div>
-                    <div class="echoes-state-sync">过去轮次记录</div>
+            <div class="echoes-state-backdrop" data-echoes-state-close="history"></div>
+            <div class="echoes-state-dialog">
+                <div class="echoes-state-scroll">
+                    <div class="echoes-state-header">
+                        <div class="echoes-state-title" id="echoes-state-history-title">状态历史</div>
+                        <button class="echoes-state-close" id="echoes-state-history-close" type="button" aria-label="关闭">×</button>
+                    </div>
+                    <div class="echoes-state-body">
+                        <div class="echoes-state-profile">
+                            <div class="echoes-state-identity">
+                                <img id="echoes-state-history-avatar" class="echoes-state-avatar" alt="">
+                                <div class="echoes-state-meta">
+                                    <div id="echoes-state-history-name" class="echoes-state-name">角色</div>
+                                    <div class="echoes-state-sync">历史状态记录</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="echoes-state-history-empty" class="echoes-state-empty" style="display:none;">暂无历史状态记录</div>
+                        <div class="echoes-history-list" id="echoes-state-history-list"></div>
+                    </div>
                 </div>
             </div>
-            <div class="echoes-history-list" id="echoes-state-history-list"></div>
         `;
-        panel.querySelector('#echoes-state-history-close').onclick = () => {
-            panel.style.setProperty('display', 'none', 'important');
+        panel.querySelector('#echoes-state-history-close').onclick = () => closeEchoesStateHistoryPanel();
+        panel.querySelector('[data-echoes-state-close="history"]').onclick = () => closeEchoesStateHistoryPanel();
+        panel.onclick = async event => {
+            const deleteButton = event.target.closest('[data-echoes-state-delete]');
+            if (!deleteButton) return;
+            event.preventDefault();
+            event.stopPropagation();
+            await deleteEchoesStateHistoryRecord(
+                panel.dataset.chatId,
+                panel.dataset.characterId,
+                deleteButton.dataset.recordId
+            );
         };
         return panel;
     }
 
     function historyRow(label, value) {
         if (value === undefined || value === null || String(value).trim() === '') return '';
-        return `<div class="echoes-history-row"><div class="echoes-history-label">${label}</div><div class="echoes-history-value">${escapeHtml(String(value))}</div></div>`;
+        return `<div class="echoes-history-row"><div class="echoes-history-label">${escapeEchoesStatePanelHtml(label)}</div><div class="echoes-history-value">${escapeEchoesStatePanelHtml(String(value))}</div></div>`;
     }
 
     function renderEchoesStateHistoryPanel(chat, characterId, historyRecords = []) {
         const panel = ensureEchoesStateHistoryPanel();
-        const profile = getProfile(chat, characterId) || {};
+        const profile = getEchoesStatePanelProfile(chat, characterId);
         const name = profile.name || '角色';
-        const avatar = profile.avatar || `https://via.placeholder.com/80/DDD/666?text=${encodeURIComponent(name.slice(0, 1) || '角')}`;
+        const avatar = getEchoesStatePanelAvatar(profile, name);
         panel.querySelector('#echoes-state-history-title').textContent = `${name} 的状态历史`;
         panel.querySelector('#echoes-state-history-name').textContent = name;
         panel.querySelector('#echoes-state-history-avatar').src = avatar;
+        panel.querySelector('#echoes-state-history-avatar').alt = `${name} 的头像`;
+
         const list = panel.querySelector('#echoes-state-history-list');
-        list.innerHTML = historyRecords.map((record, index) => `
-            <div class="echoes-history-card">
-                <div class="echoes-history-card-head">
-                    <span>${record.timestamp ? new Date(record.timestamp).toLocaleString() : `过去轮次 ${index + 1}`}</span>
-                    <span>${escapeHtml(String(record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood)))}</span>
+        const empty = panel.querySelector('#echoes-state-history-empty');
+        const records = Array.isArray(historyRecords) ? historyRecords : [];
+        if (!records.length) {
+            list.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+
+        empty.style.display = 'none';
+        list.innerHTML = records.map((record, index) => {
+            const affection = record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood);
+            const timeText = record.timestamp
+                ? new Date(record.timestamp).toLocaleString('zh-CN')
+                : `过去状态 ${index + 1}`;
+            return `
+                <div class="echoes-history-card">
+                    <div class="echoes-history-card-head">
+                        <div class="echoes-history-meta">
+                            <div class="echoes-history-time">${escapeEchoesStatePanelHtml(timeText)}</div>
+                            <div class="echoes-history-affection">${escapeEchoesStatePanelHtml(String(affection || ''))}</div>
+                        </div>
+                        <button class="echoes-history-delete" type="button" data-echoes-state-delete="true" data-record-id="${escapeEchoesStatePanelHtml(record.id || '')}" aria-label="删除历史状态">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M3 6h18"></path>
+                                <path d="M8 6V4h8v2"></path>
+                                <path d="M19 6l-1 14H6L5 6"></path>
+                                <path d="M10 11v6"></path>
+                                <path d="M14 11v6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    ${historyRow('实时心情', record.mood)}
+                    ${historyRow('动作', record.action)}
+                    ${historyRow('内心想法', record.innerThoughts)}
                 </div>
-                ${historyRow('实时心情', record.mood)}
-                ${historyRow('对你的好感度', record.affection || formatEchoesAffection(record.favorability, record.favorabilityLabel, record.mood))}
-                ${historyRow('穿着', record.clothing || record.outfit)}
-                ${historyRow('动作', record.action)}
-                ${historyRow('内心想法', record.innerThoughts)}
-            </div>
-        `).join('') || '<div class="echoes-history-card"><div class="echoes-history-value">暂无过去轮次记录</div></div>';
+            `;
+        }).join('');
     }
 
     function openEchoesStateHistoryPanel(chatId, characterId, options = {}) {
@@ -51370,17 +51658,6 @@ await initApp();
         panel.dataset.chatId = chat.id;
         panel.dataset.characterId = characterId;
         panel.style.setProperty('display', 'flex', 'important');
-        panel.style.setProperty('position', 'fixed', 'important');
-        panel.style.setProperty('left', '50%', 'important');
-        panel.style.setProperty('bottom', 'calc(72px + env(safe-area-inset-bottom, 0px))', 'important');
-        panel.style.setProperty('transform', 'translateX(-50%)', 'important');
-        panel.style.setProperty('width', 'min(92vw, 430px)', 'important');
-        panel.style.setProperty('max-height', '82vh', 'important');
-        panel.style.setProperty('overflow-y', 'auto', 'important');
-        panel.style.setProperty('z-index', '2147483647', 'important');
-        panel.style.setProperty('visibility', 'visible', 'important');
-        panel.style.setProperty('opacity', '1', 'important');
-        panel.style.setProperty('pointer-events', 'auto', 'important');
         return panel;
     }
 
