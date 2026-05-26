@@ -46294,24 +46294,24 @@ function buildPrivateMemoryDigestForGroup(group, allMemberProfiles) {
     let usefulCount = 0;
 
     for (const profile of profiles) {
-        const normalizedId = normalizeMessageSenderId(profile?.id);
-        if (!normalizedId || isCurrentUserSenderId(normalizedId)) continue;
+        const memberId = normalizeMessageSenderId(profile?.id);
+        if (!memberId || isCurrentUserSenderId(memberId)) continue;
 
         const privateContact = (state.contacts || []).find(contact =>
             contact
             && !contact.isGroup
-            && normalizeMessageSenderId(contact.id) === normalizedId
+            && normalizeMessageSenderId(contact.id) === memberId
         );
         const hasUsefulPrivateMemory = !!(
             privateContact &&
             (
                 getVisibleUnrecappedMessagesForEntity(
-                    normalizedId,
+                    memberId,
                     getAllChatMessages(state.contacts),
                     state.contacts,
                     1
                 ).some(message => message.chatId === privateContact.id)
-                || getLatestCharacterStateSnapshot(privateContact, normalizedId)
+                || getLatestCharacterStateSnapshot(privateContact, memberId)
             )
         );
 
@@ -47690,6 +47690,28 @@ try {
     console.log("✅ 默契挑战功能已手动挂载到全局！");
 await initApp();
 }); 
+</script>
+<script>
+  (function() {
+    const BUILD_VERSION = '20260526-echoes-group-fix-1';
+    const BUILD_KEY = 'koko_build_version';
+    const RELOAD_KEY = 'koko_build_version_reload_once';
+    try {
+      const currentVersion = localStorage.getItem(BUILD_KEY);
+      const reloadVersion = sessionStorage.getItem(RELOAD_KEY);
+      if (currentVersion !== BUILD_VERSION) {
+        localStorage.setItem(BUILD_KEY, BUILD_VERSION);
+        if (reloadVersion !== BUILD_VERSION) {
+          sessionStorage.setItem(RELOAD_KEY, BUILD_VERSION);
+          const url = new URL(window.location.href);
+          url.searchParams.set('v', BUILD_VERSION);
+          window.location.replace(url.toString());
+        }
+      }
+    } catch (error) {
+      console.log('BUILD 版本刷新检查失败: ', error);
+    }
+  })();
 </script>
 <script>
   if ('serviceWorker' in navigator) {
