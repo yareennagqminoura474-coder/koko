@@ -12055,10 +12055,28 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-2</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-3</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-echoes-group-fix-2';
+window.KOKO_RUNTIME_VERSION = '20260526-echoes-group-fix-3';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
+
+window.addEventListener('error', event => {
+    console.error('[GLOBAL ERROR]', {
+        message: event.message,
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+        stack: event.error?.stack
+    });
+});
+
+window.addEventListener('unhandledrejection', event => {
+    console.error('[GLOBAL UNHANDLED REJECTION]', {
+        reason: event.reason,
+        message: event.reason?.message,
+        stack: event.reason?.stack
+    });
+});
 
 (function () {
     window.__openHeartVoiceBasic = null;
@@ -19338,7 +19356,10 @@ async function requestAiReply(systemInstruction = null, targetContactId = null) 
     // ▼▼▼ 核心改动：判断是群聊还是私聊 ▼▼▼
     if (contact.isGroup) {
         // 如果是群聊，调用群聊AI处理函数
-        await triggerGroupChatAiReply(contact);
+        if (typeof window.triggerGroupChatAiReply !== 'function') {
+            throw new Error('window.triggerGroupChatAiReply 未安装');
+        }
+        await window.triggerGroupChatAiReply(contact);
     } else {
         // 如果是私聊，调用原来的单聊AI处理函数
         await triggerAiReply(contact);
@@ -19661,71 +19682,6 @@ function getGlobalBuildGroupChatRequestContext() {
     return builder;
 }
 
-async function triggerGroupFreeChat(group) {
-    if (!group || !group.isGroup) return;
-
-    console.log("群聊：用户未发言，正在启动独立的自由聊天函数(可见性记忆版)...");
-    const chatStatusEl = document.getElementById('chat-contact-status');
-    state.aiTypingStatus[group.id] = true;
-    if (chatStatusEl && state.activeChatId === group.id) {
-        chatStatusEl.textContent = '群成员正在热烈讨论中...';
-    }
-    const requestId = createAiRequestId(group.id);
-
-    try {
-        const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
-        const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContextFn(group, 'free');
-        if (allMemberProfiles.length === 0) {
-            throw new Error("群里没有可以发言的AI成员。");
-        }
-
-        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-        if (!rawResponse || !String(rawResponse).trim()) {
-            throw new Error("AI未能生成有效的自由聊天内容。");
-        }
-        if (!isLatestAiRequest(group.id, requestId)) {
-            console.warn('[GROUP FREE RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-            return;
-        }
-
-        if (await handleEchoesStyleAiResult(rawResponse, group, allMemberProfiles[0] || null, { requestId })) {
-            return;
-        }
-
-        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
-        if (parsedMessages.length === 0) {
-            await createAndAddMessage({
-                type: 'system_notification',
-                sender: 'system',
-                content: '群聊格式解析失败'
-            }, 'system', group, false, 'chat');
-            return;
-        }
-
-        for (const parsedMessage of parsedMessages) {
-            const rendered = await renderParsedGroupMessage(
-                parsedMessage,
-                group,
-                requestId,
-                '[GROUP FREE MESSAGE SKIPPED] stale generation'
-            );
-            if (!rendered) return;
-        }
-
-    } catch (e) {
-        console.error("群聊自由聊天执行失败:", e);
-        await createAndAddMessage({
-            type: 'system_notification',
-            sender: 'system',
-            content: `AI自由聊天失败: ${e.message}`
-        }, 'system', group, false, 'chat');
-    } finally {
-        state.aiTypingStatus[group.id] = false; 
-        if (chatStatusEl && state.activeChatId === group.id) {
-            chatStatusEl.textContent = '在线';
-        }
-    }
-}
 function hasSpecialGroupMessageContent(content = '') {
     return /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_to|music|spin_wheel|claim_red_packet|location|create_location|action|search_music|recall|status|nudge|memory|start_survey|gift|takeout|change_avatar)(?:[\s:：]+([^\]]*))?\]/i.test(String(content || ''));
 }
@@ -19784,99 +19740,6 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
     return true;
 }
 
-async function triggerGroupChatAiReply(group) {
-    if (!group || !group.isGroup) return;
-    const chatStatusEl = document.getElementById('chat-contact-status');
-    state.aiTypingStatus[group.id] = true; // 👈 ✨ (新) 告诉“记录本”：我开工了！
-    if (chatStatusEl && state.activeChatId === group.id) {
-        chatStatusEl.textContent = '群成员正在热烈讨论中...';
-    }
-    const requestId = createAiRequestId(group.id);
-
-    try {
-        const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
-        const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContextFn(group, 'reply');
-        if (allMemberProfiles.length === 0) {
-            if (chatStatusEl && state.activeChatId === group.id) {
-                chatStatusEl.textContent = '在线';
-            }
-            return;
-        }
-
-        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-        if (!rawResponse || !String(rawResponse).trim()) {
-            throw new Error("AI 未能生成有效的群聊内容。");
-        }
-        if (!isLatestAiRequest(group.id, requestId)) {
-            console.warn('[GROUP REPLY RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-            return;
-        }
-
-        if (await handleEchoesStyleAiResult(rawResponse, group, allMemberProfiles[0] || null, { requestId })) {
-            return;
-        }
-
-        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
-        if (parsedMessages.length === 0) {
-            await createAndAddMessage({
-                type: 'system_notification',
-                sender: 'system',
-                content: '群聊格式解析失败'
-            }, 'system', group, false, 'chat');
-            return;
-        }
-
-        for (const parsedMessage of parsedMessages) {
-            try {
-                const rendered = await renderParsedGroupMessage(
-                    parsedMessage,
-                    group,
-                    requestId,
-                    '[GROUP REPLY MESSAGE SKIPPED] stale generation'
-                );
-                if (!rendered) return;
-            } catch (renderError) {
-                if (!isLatestAiRequest(group.id, requestId)) {
-                    console.warn('[GROUP FALLBACK MESSAGE SKIPPED] stale generation', { chatId: group.id, requestId });
-                    return;
-                }
-                const { speaker, content, heartVoice } = parsedMessage;
-                console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
-                const messageStartedAt = Date.now();
-                const fallbackMessage = await createAndAddMessage({
-                    type: 'text',
-                    sender: speaker.id,
-                    senderId: speaker.id,
-                    content: String(content || '').trim()
-                }, speaker.id, group, true, 'chat');
-                await saveEchoesCharacterState(
-                    group,
-                    speaker.id,
-                    heartVoice || {
-                        mood: inferHeartVoiceEmotion(content),
-                        innerThoughts: makeLocalHeartVoiceThought(content, speaker, group),
-                        heartRate: '平稳',
-                        jealousy: inferHeartVoiceJealousy(content)
-                    },
-                    fallbackMessage?.id || `group_fallback_${group.id}_${speaker.id}_${messageStartedAt}`
-                );
-            }
-        }
-    } catch (e) {
-        console.error("群聊AI回复生成失败:", e);
-        await createAndAddMessage({
-            type: 'system_notification',
-            sender: 'system',
-            content: `群聊AI回复生成失败: ${e.message || e.name || '未知错误'}`
-        }, 'system', group, false, 'chat');
-    } finally {
-        state.aiTypingStatus[group.id] = false;
-
-        if (chatStatusEl && state.activeChatId === group.id) {
-            chatStatusEl.textContent = '在线';
-        }
-    }
-}
 // ▲▲▲ 复制到这里结束 ▲▲▲
 
 
@@ -41443,7 +41306,11 @@ document.getElementById('request-reply-btn').addEventListener('click', () => {
         if (contact.isGroup) {
             // 2a. 如果是群聊，调用【群聊】自由聊天
             console.log("群聊：用户未发言，触发AI自由聊天...");
-            triggerGroupFreeChat(contact); 
+            if (typeof window.triggerGroupFreeChat === 'function') {
+                window.triggerGroupFreeChat( contact );
+            } else {
+                console.error('window.triggerGroupFreeChat 未安装');
+            }
         } else {
             // 2b. 如果是私聊，调用【私聊】自由聊天 (新功能!)
             console.log("私聊：用户未发言，触发AI自由聊天...");
@@ -47697,7 +47564,7 @@ await initApp();
 </script>
 <script>
   (function() {
-    const BUILD_VERSION = '20260526-echoes-group-fix-2';
+    const BUILD_VERSION = '20260526-echoes-group-fix-3';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -47720,7 +47587,7 @@ await initApp();
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      const SW_VERSION = '20260526-echoes-group-fix-2';
+      const SW_VERSION = '20260526-echoes-group-fix-3';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -48824,8 +48691,6 @@ await initApp();
     const originalProcessAndDisplayAiResponse = window.processAndDisplayAiResponse || (typeof processAndDisplayAiResponse === 'function' ? processAndDisplayAiResponse : null);
     const originalSplitAiTextIntoBubbles = window.splitAiTextIntoBubbles || (typeof splitAiTextIntoBubbles === 'function' ? splitAiTextIntoBubbles : null);
     const originalParseGroupAiMessages = window.parseGroupAiMessages || (typeof parseGroupAiMessages === 'function' ? parseGroupAiMessages : null);
-    const originalTriggerGroupChatAiReply = window.triggerGroupChatAiReply || (typeof triggerGroupChatAiReply === 'function' ? triggerGroupChatAiReply : null);
-    const originalTriggerGroupFreeChat = window.triggerGroupFreeChat || (typeof triggerGroupFreeChat === 'function' ? triggerGroupFreeChat : null);
 
     const activeRoundByChatId = window.__echoesActiveRoundByChatId || (window.__echoesActiveRoundByChatId = new Map());
 
@@ -50074,11 +49939,15 @@ await initApp();
                 source: 'group-json'
             });
         } catch (error) {
-            console.error('群聊AI回复生成失败:', error);
+            console.error('[FINAL GROUP REPLY FAILED]', {
+                message: error?.message,
+                name: error?.name,
+                stack: error?.stack
+            });
             await createAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
-                content: `群聊AI回复生成失败: ${error.message || error.name || '未知错误'}`
+                content: `群聊AI回复生成失败: ${error?.message || error?.name || '未知错误'}`
             }, 'system', group, false, 'chat');
             return null;
         } finally {
@@ -50225,8 +50094,8 @@ await initApp();
     window.processAndDisplayAiResponse = processAndDisplayAiResponse;
     window.splitAiTextIntoBubbles = splitAiTextIntoBubbles;
     window.parseGroupAiMessages = parseGroupAiMessages;
-    if (originalTriggerGroupChatAiReply) window.triggerGroupChatAiReply = triggerGroupChatAiReply;
-    if (originalTriggerGroupFreeChat) window.triggerGroupFreeChat = triggerGroupFreeChat;
+    window.triggerGroupChatAiReply = triggerGroupChatAiReply;
+    window.triggerGroupFreeChat = triggerGroupFreeChat;
 
     try { createEchoesRoundId = window.createEchoesRoundId; } catch (error) {}
     try { parseEchoesStateResult = window.parseEchoesStateResult; } catch (error) {}
@@ -50246,9 +50115,6 @@ await initApp();
     try { requestEchoesMainResponseWithRetry = window.requestEchoesMainResponseWithRetry; } catch (error) {}
     try { saveEchoesCharacterState = window.saveEchoesCharacterState; } catch (error) {}
     try { ensureEchoesStateForVisibleMessage = window.ensureEchoesStateForVisibleMessage; } catch (error) {}
-    try { if (originalTriggerGroupChatAiReply) triggerGroupChatAiReply = window.triggerGroupChatAiReply; } catch (error) {}
-    try { if (originalTriggerGroupFreeChat) triggerGroupFreeChat = window.triggerGroupFreeChat; } catch (error) {}
-
     console.log('[ECHOES ROUND STATE ENGINE READY]');
 })();
 </script>
