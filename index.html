@@ -46705,25 +46705,28 @@ async function triggerAiReply(contact) {
 
     try {
         const requestMessages = await buildPrivateChatRequestMessages(contact, 'reply');
-        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+        const requestResult = await requestEchoesMainResponseWithRetry({
+            chat: contact,
+            requestMessages,
+            fallbackSenderProfile: contact,
+            requestId,
+            source: 'private-reply',
+            maxAttempts: 2
+        });
+        if (!requestResult) return;
+        const { rawResponse, parsed } = requestResult;
 
         console.log('[AI RAW RESPONSE]', rawResponse);
         console.log('[PRIVATE RAW RESPONSE]', rawResponse);
-
-        if (!rawResponse || !String(rawResponse).trim()) {
-            await createAndAddMessage({
-                type: 'system_notification',
-                sender: 'system',
-                content: 'AI 请求成功，但返回内容为空。'
-            }, 'system', contact, false, 'chat');
-            return;
-        }
 
         if (!isLatestAiRequest(contact.id, requestId)) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
-        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
+        await renderEchoesJsonResponses(parsed, contact, contact, {
+            requestId,
+            source: 'private-json'
+        });
     } finally {
         state.aiTypingStatus[contact.id] = false;
 
@@ -46753,24 +46756,27 @@ async function triggerPrivateFreeChat(contact) {
 
     try {
         const requestMessages = await buildPrivateChatRequestMessages(contact, 'free');
-        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+        const requestResult = await requestEchoesMainResponseWithRetry({
+            chat: contact,
+            requestMessages,
+            fallbackSenderProfile: contact,
+            requestId,
+            source: 'private-free',
+            maxAttempts: 2
+        });
+        if (!requestResult) return;
+        const { rawResponse, parsed } = requestResult;
         console.log('[AI RAW RESPONSE]', rawResponse);
         console.log('[PRIVATE RAW RESPONSE]', rawResponse);
-
-        if (!rawResponse || !String(rawResponse).trim()) {
-            await createAndAddMessage({
-                type: 'system_notification',
-                sender: 'system',
-                content: 'AI 请求成功，但返回内容为空。'
-            }, 'system', contact, false, 'chat');
-            return;
-        }
 
         if (!isLatestAiRequest(contact.id, requestId)) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
-        await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
+        await renderEchoesJsonResponses(parsed, contact, contact, {
+            requestId,
+            source: 'private-json'
+        });
     } catch (error) {
         console.error('私聊自由聊天执行失败:', error);
         await createAndAddMessage({
@@ -48977,18 +48983,32 @@ await initApp();
 
     function normalizeEchoesParsedPayload(payload, fallbackCharacterId = '') {
         if (!payload || typeof payload !== 'object') return null;
-        const responsesRaw = Array.isArray(payload.responses)
-            ? payload.responses
+        const responsesSource = Array.isArray(payload.responses)
+            ? 'responses'
             : Array.isArray(payload.messages)
-                ? payload.messages
+                ? 'messages'
                 : Array.isArray(payload.replies)
+                    ? 'replies'
+                    : '';
+        const statesSource = Array.isArray(payload.states)
+            ? 'states'
+            : Array.isArray(payload.characterStates)
+                ? 'characterStates'
+                : Array.isArray(payload.heartVoices)
+                    ? 'heartVoices'
+                    : '';
+        const responsesRaw = responsesSource === 'responses'
+            ? payload.responses
+            : responsesSource === 'messages'
+                ? payload.messages
+                : responsesSource === 'replies'
                     ? payload.replies
                     : [];
-        const statesRaw = Array.isArray(payload.states)
+        const statesRaw = statesSource === 'states'
             ? payload.states
-            : Array.isArray(payload.characterStates)
+            : statesSource === 'characterStates'
                 ? payload.characterStates
-                : Array.isArray(payload.heartVoices)
+                : statesSource === 'heartVoices'
                     ? payload.heartVoices
                     : [];
         if (!responsesRaw.length && !statesRaw.length) return null;
@@ -49028,6 +49048,8 @@ await initApp();
             })
             .filter(item => item && item.characterId);
         return {
+            responsesSource,
+            statesSource,
             responses,
             states
         };
@@ -49325,125 +49347,86 @@ await initApp();
         return String(value || '').trim().length > 0;
     }
 
-    function needsEchoesStateSecondPass(explicitState) {
-        if (!explicitState || typeof explicitState !== 'object') return true;
-        return !(
-            hasEchoesStateFieldValue(explicitState.mood || explicitState.emotion)
-            && hasEchoesStateFieldValue(explicitState.affection || explicitState.favorability)
-            && hasEchoesStateFieldValue(explicitState.clothing || explicitState.outfit)
-            && hasEchoesStateFieldValue(explicitState.action)
-            && hasEchoesStateFieldValue(explicitState.innerThoughts || explicitState.thoughts)
-        );
+    function isCompleteEchoesState(stateItem) {
+        if (!stateItem || typeof stateItem !== 'object') return false;
+        return hasEchoesStateFieldValue(stateItem.characterId || stateItem.id || stateItem.name)
+            && hasEchoesStateFieldValue(stateItem.mood || stateItem.emotion)
+            && hasEchoesStateFieldValue(stateItem.affection || stateItem.favorability)
+            && hasEchoesStateFieldValue(stateItem.clothing || stateItem.outfit)
+            && hasEchoesStateFieldValue(stateItem.action)
+            && hasEchoesStateFieldValue(stateItem.innerThoughts || stateItem.thoughts);
     }
 
-    function getEchoesStatePromptPreviousState(chat, characterId) {
-        const previousState = typeof getLatestCharacterStateSnapshot === 'function'
-            ? getLatestCharacterStateSnapshot(chat, characterId)
-            : null;
-        return previousState ? {
-            mood: previousState.mood || '',
-            affection: previousState.affection || '',
-            clothing: previousState.clothing || previousState.outfit || '',
-            action: previousState.action || '',
-            innerThoughts: previousState.innerThoughts || ''
-        } : null;
-    }
+    function validateEchoesParsedResult(parsed, chat = null, fallbackSenderProfile = null) {
+        const responses = Array.isArray(parsed?.responses) ? parsed.responses : [];
+        const states = Array.isArray(parsed?.states) ? parsed.states : [];
+        const speakingCharacterIds = new Set();
+        const completeStateIds = new Set();
+        const incompleteStateIds = new Set();
 
-    async function generateEchoesStateForMessage({ chat, speakerProfile, visibleMessage, roundUserText, roundAiText }) {
-        if (!chat || !speakerProfile?.id) return null;
-        const characterId = normalizeCharacterIdForChat(chat, speakerProfile.id, speakerProfile);
-        if (!characterId || isUserSender(characterId)) return null;
-
-        const previousState = getEchoesStatePromptPreviousState(chat, characterId);
-        const recentStatesPrompt = buildEchoesRecentStatesPromptBlock(
-            chat,
-            characterId,
-            speakerProfile.name || characterId,
-            state.myProfile?.name || '用户',
-            5
-        );
-        const forceMessages = [
-            {
-                role: 'system',
-                content: `
-你是 Echoes 的角色状态同步器。
-你只负责根据本轮对话生成角色当前状态。
-只输出 JSON，不要 Markdown，不要解释。
-
-输出格式：
-{
-  "states": [
-    {
-      "characterId": "角色id",
-      "mood": "实时心情",
-      "affection": "68 (极度恼火)",
-      "clothing": "穿着",
-      "action": "动作",
-      "innerThoughts": "第一人称内心想法"
-    }
-  ]
-}
-
-要求：
-1. innerThoughts 必须是角色第一人称，用“我”。
-2. innerThoughts 必须根据用户本轮消息和角色刚刚说出口的话生成。
-3. 不要写“表面上”“其实角色”“他/她觉得”。
-4. affection 必须是“数字 (状态名)”。
-5. clothing 没有换装就沿用上一状态。
-6. action 必须是具体动作、视线、手部动作、语气状态。
-7. 只输出 JSON。
-`.trim()
-            },
-            {
-                role: 'user',
-                content: `
-角色ID：${characterId}
-角色名：${speakerProfile.name || characterId}
-角色人设：${speakerProfile.persona || speakerProfile.description || speakerProfile.signature || ''}
-
-${recentStatesPrompt}
-
-上一状态：
-${JSON.stringify(previousState || {}, null, 2)}
-
-用户本轮消息：
-${String(roundUserText || '').trim() || '（本轮无用户发言，仅观察推进）'}
-
-角色刚刚说出口的话：
-${String(roundAiText || getText(visibleMessage) || '').trim()}
-
-请生成这个角色最新 states。
-`.trim()
+        responses.forEach(response => {
+            const characterId = chat
+                ? normalizeCharacterIdForChat(chat, response.characterId || response.id || response.name || response.speaker, fallbackSenderProfile)
+                : normalizeId(response.characterId || response.id || response.name || response.speaker);
+            if (characterId && !isUserSender(characterId)) {
+                speakingCharacterIds.add(characterId);
             }
-        ];
-
-        console.log('[ECHOES STATE SECOND PASS REQUEST]', {
-            chatId: chat.id,
-            characterId,
-            relatedMessageId: visibleMessage?.id || null
         });
 
-        try {
-            const rawResponse = await generateAiResponse(null, [], null, false, 'chat', forceMessages);
-            console.log('[ECHOES STATE SECOND PASS RAW]', rawResponse);
-            const parsed = tryParseEchoesJson(rawResponse, characterId);
-            const states = Array.isArray(parsed?.states) ? parsed.states : [];
-            const explicitState = states.find(item => {
-                const stateId = normalizeCharacterIdForChat(chat, item.characterId || item.id || item.name, speakerProfile);
-                return stateId === characterId;
-            }) || states[0] || null;
-            console.log('[ECHOES STATE SECOND PASS PARSED]', explicitState);
-            return explicitState ? {
-                ...explicitState,
-                characterId,
-                roundUserText,
-                roundAiText: String(roundAiText || getText(visibleMessage) || '').trim(),
-                visibleText: String(roundAiText || getText(visibleMessage) || '').trim()
-            } : null;
-        } catch (error) {
-            console.warn('[ECHOES STATE SAVE FAILED]', 'second_pass_request_error', error);
-            return null;
+        states.forEach(stateItem => {
+            const characterId = chat
+                ? normalizeCharacterIdForChat(chat, stateItem.characterId || stateItem.id || stateItem.name, fallbackSenderProfile)
+                : normalizeId(stateItem.characterId || stateItem.id || stateItem.name);
+            if (!characterId || isUserSender(characterId)) return;
+            if (isCompleteEchoesState(stateItem)) {
+                completeStateIds.add(characterId);
+            } else {
+                incompleteStateIds.add(characterId);
+            }
+        });
+
+        const missingStateIds = Array.from(speakingCharacterIds).filter(characterId => !completeStateIds.has(characterId));
+        const valid = parsed
+            && parsed.statesSource === 'states'
+            && states.length > 0
+            && incompleteStateIds.size === 0
+            && missingStateIds.length === 0;
+
+        return {
+            valid,
+            statesSource: parsed?.statesSource || '',
+            responsesSource: parsed?.responsesSource || '',
+            responseCount: responses.length,
+            stateCount: states.length,
+            speakingCharacterIds: Array.from(speakingCharacterIds),
+            completeStateIds: Array.from(completeStateIds),
+            incompleteStateIds: Array.from(incompleteStateIds),
+            missingStateIds
+        };
+    }
+
+    async function requestEchoesMainResponseWithRetry({ chat, requestMessages, fallbackSenderProfile = null, requestId = null, source = 'echoes-main', maxAttempts = 2 }) {
+        let lastError = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+            if (requestId && chat?.id && typeof isLatestAiRequest === 'function' && !isLatestAiRequest(chat.id, requestId)) {
+                console.warn('[ECHOES REQUEST DISCARDED] stale generation', { chatId: chat.id, requestId, source, attempt });
+                return null;
+            }
+            const parsed = parseEchoesStateResult(rawResponse, chat, fallbackSenderProfile);
+            const validation = validateEchoesParsedResult(parsed, chat, fallbackSenderProfile);
+            if (validation.valid) {
+                return { rawResponse, parsed, validation, attempt };
+            }
+            lastError = validation;
+            console.warn('[ECHOES MAIN RESPONSE INVALID]', {
+                chatId: chat?.id,
+                source,
+                attempt,
+                validation
+            });
         }
+        throw new Error(`Echoes 主请求未返回完整 states: ${JSON.stringify(lastError || {})}`);
     }
 
     async function saveEchoesCharacterState(chat, characterId, payload, relatedMessageId = null, options = {}) {
@@ -49564,17 +49547,8 @@ ${String(roundAiText || getText(visibleMessage) || '').trim()}
             rememberRoundMessage(activeRound, message, id, explicitState);
             return null;
         }
-        if (needsEchoesStateSecondPass(explicitState)) {
-            explicitState = await generateEchoesStateForMessage({
-                chat,
-                speakerProfile: speakerProfile || getProfile(chat, id),
-                visibleMessage: message,
-                roundUserText: latestUserText(chat, message.timestamp || Date.now()),
-                roundAiText: getText(message)
-            });
-        }
         if (!explicitState) {
-            console.warn('[ECHOES STATE SAVE FAILED]', 'second_pass_failed', {
+            console.warn('[ECHOES STATE SAVE FAILED]', 'missing_explicit_state_for_visible_message', {
                 chatId: chat?.id,
                 characterId: id,
                 relatedMessageId: message?.id || null
@@ -49601,27 +49575,15 @@ ${String(roundAiText || getText(visibleMessage) || '').trim()}
         const roundAiText = messages.map(getText).filter(Boolean).join('\n').trim()
             || String(explicitState?.roundAiText || explicitState?.visibleText || '').trim();
         if (!roundAiText && !explicitState) return null;
-        const relatedMessageId = messages[messages.length - 1]?.id || null;
-        const visibleMessage = relatedMessageId && Array.isArray(chat.history)
-            ? chat.history.find(message => String(message.id) === String(relatedMessageId))
-            : (messages[messages.length - 1] || null);
-        if (needsEchoesStateSecondPass(explicitState)) {
-            explicitState = await generateEchoesStateForMessage({
-                chat,
-                speakerProfile: getProfile(chat, characterId) || chat,
-                visibleMessage,
-                roundUserText,
-                roundAiText
-            });
-        }
         if (!explicitState) {
-            console.warn('[ECHOES STATE SAVE FAILED]', 'private_round_second_pass_failed', {
+            console.warn('[ECHOES STATE SAVE FAILED]', 'private_round_missing_states', {
                 chatId: chat?.id,
                 characterId,
                 roundId
             });
             return null;
         }
+        const relatedMessageId = messages[messages.length - 1]?.id || null;
         return saveEchoesCharacterState(chat, characterId, {
             ...(explicitState || {}),
             visibleText: roundAiText,
@@ -49647,31 +49609,19 @@ ${String(roundAiText || getText(visibleMessage) || '').trim()}
             const id = normalizeCharacterIdForChat(group, speakerId);
             if (!id) continue;
             const messages = speakerMessageMap?.get(id) || [];
-            let explicitState = explicitStateMap?.get(id) || null;
+            const explicitState = explicitStateMap?.get(id) || null;
             const roundAiText = messages.map(getText).filter(Boolean).join('\n').trim()
                 || String(explicitState?.roundAiText || explicitState?.visibleText || '').trim();
             if (!roundAiText && !explicitState) continue;
-            const relatedMessageId = messages[messages.length - 1]?.id || null;
-            const visibleMessage = relatedMessageId && Array.isArray(group.history)
-                ? group.history.find(message => String(message.id) === String(relatedMessageId))
-                : (messages[messages.length - 1] || null);
-            if (needsEchoesStateSecondPass(explicitState)) {
-                explicitState = await generateEchoesStateForMessage({
-                    chat: group,
-                    speakerProfile: getProfile(group, id) || { id, name: id },
-                    visibleMessage,
-                    roundUserText,
-                    roundAiText
-                });
-            }
             if (!explicitState) {
-                console.warn('[ECHOES STATE SAVE FAILED]', 'group_round_second_pass_failed', {
+                console.warn('[ECHOES STATE SAVE FAILED]', 'group_round_missing_states', {
                     chatId: group?.id,
                     characterId: id,
                     roundId
                 });
                 continue;
             }
+            const relatedMessageId = messages[messages.length - 1]?.id || null;
             const record = await saveEchoesCharacterState(group, id, {
                 ...(explicitState || {}),
                 visibleText: roundAiText,
@@ -49806,7 +49756,12 @@ ${String(roundAiText || getText(visibleMessage) || '').trim()}
         const states = Array.isArray(parsed.states) ? [...parsed.states] : [];
         console.log('[ECHOES PARSED RESPONSES]', responses);
         console.log('[ECHOES PARSED STATES]', states);
-        return { responses, states };
+        return {
+            responsesSource: parsed.responsesSource || '',
+            statesSource: parsed.statesSource || '',
+            responses,
+            states
+        };
     }
 
     async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null, options = {}) {
@@ -49968,15 +49923,24 @@ ${String(roundAiText || getText(visibleMessage) || '').trim()}
             const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
             const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContextFn(group, 'reply');
             if (!allMemberProfiles.length) return null;
-            const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-            if (!rawResponse || !String(rawResponse).trim()) {
-                throw new Error('AI 未能生成有效的群聊内容。');
-            }
+            const requestResult = await requestEchoesMainResponseWithRetry({
+                chat: group,
+                requestMessages,
+                fallbackSenderProfile: allMemberProfiles[0] || null,
+                requestId,
+                source: 'group-reply',
+                maxAttempts: 2
+            });
+            if (!requestResult) return null;
+            const { parsed } = requestResult;
             if (!isLatestAiRequest(group.id, requestId)) {
                 console.warn('[GROUP REPLY RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
                 return null;
             }
-            return await displayAiTextInBubbles(rawResponse, allMemberProfiles[0] || group, group, 'chat', { requestId });
+            return await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
+                requestId,
+                source: 'group-json'
+            });
         } catch (error) {
             console.error('群聊AI回复生成失败:', error);
             await createAndAddMessage({
@@ -50005,15 +49969,24 @@ ${String(roundAiText || getText(visibleMessage) || '').trim()}
             const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
             const { requestMessages, allMemberProfiles } = await buildGroupChatRequestContextFn(group, 'free');
             if (!allMemberProfiles.length) return null;
-            const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-            if (!rawResponse || !String(rawResponse).trim()) {
-                throw new Error('AI 未能生成有效的群聊内容。');
-            }
+            const requestResult = await requestEchoesMainResponseWithRetry({
+                chat: group,
+                requestMessages,
+                fallbackSenderProfile: allMemberProfiles[0] || null,
+                requestId,
+                source: 'group-free',
+                maxAttempts: 2
+            });
+            if (!requestResult) return null;
+            const { parsed } = requestResult;
             if (!isLatestAiRequest(group.id, requestId)) {
                 console.warn('[GROUP FREE RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
                 return null;
             }
-            return await displayAiTextInBubbles(rawResponse, allMemberProfiles[0] || group, group, 'chat', { requestId });
+            return await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
+                requestId,
+                source: 'group-json'
+            });
         } catch (error) {
             console.error('群聊自由聊天执行失败:', error);
             await createAndAddMessage({
@@ -50091,7 +50064,8 @@ ${String(roundAiText || getText(visibleMessage) || '').trim()}
     window.expandActionDescription = expandActionDescription;
     window.normalizeCharacterStateTransition = normalizeCharacterStateTransition;
     window.buildNextCharacterState = buildNextCharacterState;
-    window.generateEchoesStateForMessage = generateEchoesStateForMessage;
+    window.validateEchoesParsedResult = validateEchoesParsedResult;
+    window.requestEchoesMainResponseWithRetry = requestEchoesMainResponseWithRetry;
     window.saveEchoesCharacterState = saveEchoesCharacterState;
     window.ensureEchoesStateForVisibleMessage = ensureEchoesStateForVisibleMessage;
     window.savePrivateRoundEchoesState = savePrivateRoundEchoesState;
@@ -50120,7 +50094,8 @@ ${String(roundAiText || getText(visibleMessage) || '').trim()}
     try { expandActionDescription = window.expandActionDescription; } catch (error) {}
     try { normalizeCharacterStateTransition = window.normalizeCharacterStateTransition; } catch (error) {}
     try { buildNextCharacterState = window.buildNextCharacterState; } catch (error) {}
-    try { generateEchoesStateForMessage = window.generateEchoesStateForMessage; } catch (error) {}
+    try { validateEchoesParsedResult = window.validateEchoesParsedResult; } catch (error) {}
+    try { requestEchoesMainResponseWithRetry = window.requestEchoesMainResponseWithRetry; } catch (error) {}
     try { saveEchoesCharacterState = window.saveEchoesCharacterState; } catch (error) {}
     try { ensureEchoesStateForVisibleMessage = window.ensureEchoesStateForVisibleMessage; } catch (error) {}
     try { if (originalTriggerGroupChatAiReply) triggerGroupChatAiReply = window.triggerGroupChatAiReply; } catch (error) {}
