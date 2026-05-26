@@ -46714,7 +46714,7 @@ async function triggerAiReply(contact) {
             maxAttempts: 2
         });
         if (!requestResult) return;
-        const { rawResponse, parsed } = requestResult;
+        const { rawResponse, parsed, statesMissing, plainText } = requestResult;
 
         console.log('[AI RAW RESPONSE]', rawResponse);
         console.log('[PRIVATE RAW RESPONSE]', rawResponse);
@@ -46723,10 +46723,28 @@ async function triggerAiReply(contact) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
+        if (statesMissing) {
+            console.warn('[ECHOES STATES MISSING]', {
+                chatId: contact.id,
+                source: 'private-reply',
+                requestId
+            });
+        }
+        if (plainText || !parsed) {
+            await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
+            return;
+        }
         await renderEchoesJsonResponses(parsed, contact, contact, {
             requestId,
             source: 'private-json'
         });
+    } catch (error) {
+        console.error('私聊AI回复生成失败:', error);
+        await createAndAddMessage({
+            type: 'system_notification',
+            sender: 'system',
+            content: `AI回复失败: ${error.message || error.name || '未知错误'}`
+        }, 'system', contact, false, 'chat');
     } finally {
         state.aiTypingStatus[contact.id] = false;
 
@@ -46765,12 +46783,23 @@ async function triggerPrivateFreeChat(contact) {
             maxAttempts: 2
         });
         if (!requestResult) return;
-        const { rawResponse, parsed } = requestResult;
+        const { rawResponse, parsed, statesMissing, plainText } = requestResult;
         console.log('[AI RAW RESPONSE]', rawResponse);
         console.log('[PRIVATE RAW RESPONSE]', rawResponse);
 
         if (!isLatestAiRequest(contact.id, requestId)) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
+            return;
+        }
+        if (statesMissing) {
+            console.warn('[ECHOES STATES MISSING]', {
+                chatId: contact.id,
+                source: 'private-free',
+                requestId
+            });
+        }
+        if (plainText || !parsed) {
+            await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
             return;
         }
         await renderEchoesJsonResponses(parsed, contact, contact, {
@@ -49396,6 +49425,7 @@ await initApp();
             valid,
             statesSource: parsed?.statesSource || '',
             responsesSource: parsed?.responsesSource || '',
+            responsesValid: responses.length > 0,
             responseCount: responses.length,
             stateCount: states.length,
             speakingCharacterIds: Array.from(speakingCharacterIds),
@@ -49415,8 +49445,37 @@ await initApp();
             }
             const parsed = parseEchoesStateResult(rawResponse, chat, fallbackSenderProfile);
             const validation = validateEchoesParsedResult(parsed, chat, fallbackSenderProfile);
+            const visibleText = stripEchoesJsonFromVisibleText(String(rawResponse || ''));
             if (validation.valid) {
                 return { rawResponse, parsed, validation, attempt };
+            }
+            if (validation.responsesValid) {
+                lastError = validation;
+                console.warn('[ECHOES MAIN RESPONSE INVALID]', {
+                    chatId: chat?.id,
+                    source,
+                    attempt,
+                    validation
+                });
+                if (attempt < maxAttempts) {
+                    continue;
+                }
+                console.warn('[ECHOES STATES MISSING]', {
+                    chatId: chat?.id,
+                    source,
+                    attempt,
+                    validation
+                });
+                return { rawResponse, parsed, validation, attempt, statesMissing: true };
+            }
+            if (!parsed && String(visibleText || '').trim()) {
+                return {
+                    rawResponse,
+                    parsed: null,
+                    validation,
+                    attempt,
+                    plainText: true
+                };
             }
             lastError = validation;
             console.warn('[ECHOES MAIN RESPONSE INVALID]', {
@@ -49911,6 +49970,33 @@ await initApp();
         return originalParseGroupAiMessages ? originalParseGroupAiMessages(safeText, allMemberProfiles) : [];
     }
 
+    async function renderLegacyGroupResponses(rawResponse, group, allMemberProfiles, requestId, staleLogLabel) {
+        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
+        if (parsedMessages.length === 0) {
+            return displayAiTextInBubbles(rawResponse, allMemberProfiles[0] || group, group, 'chat', { requestId });
+        }
+        for (const parsedMessage of parsedMessages) {
+            try {
+                const rendered = await renderParsedGroupMessage(parsedMessage, group, requestId, staleLogLabel);
+                if (!rendered) return null;
+            } catch (renderError) {
+                if (!isLatestAiRequest(group.id, requestId)) {
+                    console.warn(staleLogLabel, { chatId: group.id, requestId });
+                    return null;
+                }
+                const { speaker, content } = parsedMessage;
+                console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
+                await createAndAddMessage({
+                    type: 'text',
+                    sender: speaker.id,
+                    senderId: speaker.id,
+                    content: String(content || '').trim()
+                }, speaker.id, group, true, 'chat');
+            }
+        }
+        return true;
+    }
+
     async function triggerGroupChatAiReply(group) {
         if (!group || !group.isGroup) return null;
         const chatStatusEl = document.getElementById('chat-contact-status');
@@ -49932,10 +50018,26 @@ await initApp();
                 maxAttempts: 2
             });
             if (!requestResult) return null;
-            const { parsed } = requestResult;
+            const { rawResponse, parsed, statesMissing, plainText } = requestResult;
             if (!isLatestAiRequest(group.id, requestId)) {
                 console.warn('[GROUP REPLY RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
                 return null;
+            }
+            if (statesMissing) {
+                console.warn('[ECHOES STATES MISSING]', {
+                    chatId: group.id,
+                    source: 'group-reply',
+                    requestId
+                });
+            }
+            if (plainText || !parsed) {
+                return await renderLegacyGroupResponses(
+                    rawResponse,
+                    group,
+                    allMemberProfiles,
+                    requestId,
+                    '[GROUP REPLY MESSAGE SKIPPED] stale generation'
+                );
             }
             return await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
                 requestId,
@@ -49978,10 +50080,26 @@ await initApp();
                 maxAttempts: 2
             });
             if (!requestResult) return null;
-            const { parsed } = requestResult;
+            const { rawResponse, parsed, statesMissing, plainText } = requestResult;
             if (!isLatestAiRequest(group.id, requestId)) {
                 console.warn('[GROUP FREE RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
                 return null;
+            }
+            if (statesMissing) {
+                console.warn('[ECHOES STATES MISSING]', {
+                    chatId: group.id,
+                    source: 'group-free',
+                    requestId
+                });
+            }
+            if (plainText || !parsed) {
+                return await renderLegacyGroupResponses(
+                    rawResponse,
+                    group,
+                    allMemberProfiles,
+                    requestId,
+                    '[GROUP FREE MESSAGE SKIPPED] stale generation'
+                );
             }
             return await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
                 requestId,
