@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-17">
+<link rel="manifest" href="manifest.json?v=20260526-fix-18">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-17</div>
+<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-18</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-17';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-18';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -19076,7 +19076,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     contact[historyArray].push(fullMessage);
     const committedMessageIndex = contact[historyArray].length - 1;
 
-    // fix-17: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+    // fix-18: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
     // 不再在 createAndAddMessage 底层按消息猜测并提交状态。
 
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
@@ -19227,7 +19227,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 8. 保存联系人数据到 IndexedDB
     await kokoMemory.put('contacts', contact);
 
-    // fix-17: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+    // fix-18: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
 
     // 9. 刷新对应的列表视图 (主聊天列表 或 短信列表)
     if (fullMessage.sender !== 'system_instruction') {
@@ -24748,19 +24748,12 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
     }
 
     const roundStartedAt = Date.now();
-    const isPrivateChat =
-        contextMode === 'chat'
-        && senderProfile
-        && senderProfile.id !== 'myProfile'
-        && senderProfile.id !== 'user'
-        && originContext
-        && !originContext.isGroup;
+    const beforeLength = Array.isArray(originContext?.history) ? originContext.history.length : 0;
 
     // 移除 heart_voice 标签，避免作为普通气泡显示
     const visibleText = removeHeartVoiceBlocks(rawText);
 
     const parts = splitAiTextIntoBubbles(visibleText);
-    const echoesStateCountBeforeFallback = (state.characterStates || []).length;
 
     console.log('[AI SPLIT PARTS]', parts);
 
@@ -24781,18 +24774,37 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
         }
     }
 
-    if (
-        isPrivateChat &&
-        String(rawText || '').trim() &&
-        (state.characterStates || []).length === echoesStateCountBeforeFallback &&
-        !isStaleGeneration()
-    ) {
-        await saveEchoesCharacterState(originContext, senderProfile.id, {
-            mood: senderProfile.status || '平静',
-            innerThoughts: buildFallbackInnerThought(visibleText || rawText, senderProfile, originContext),
-            heartRate: '平稳',
-            jealousy: inferHeartVoiceJealousy(visibleText || rawText)
-        }, `ai_turn_${originContext.id}_${senderProfile.id}_${roundStartedAt}`);
+    if (contextMode === 'chat' && originContext && !isStaleGeneration()) {
+        const renderedMessages = collectRenderedEchoesMessages(originContext, beforeLength);
+        if (renderedMessages.length > 0) {
+            kokoDebugLog('[ECHOES PLAIN TEXT FINALIZE START]', {
+                chatId: originContext?.id,
+                renderedCount: renderedMessages.length
+            });
+            const saved = await finalizeEchoesStatesForAiRound({
+                chat: originContext,
+                roundId: createEchoesRoundId(originContext, 'plain-text-fallback'),
+                roundUserText: latestUserText(originContext, Date.now()) || '',
+                aiMessages: renderedMessages,
+                parsedStates: [],
+                parsedResponses: renderedMessages.map(message => ({
+                    characterId: originContext.isGroup
+                        ? (message.senderId || message.sender)
+                        : originContext.id,
+                    text: getStateTextForMessage(message)
+                })),
+                fallbackSenderProfile: senderProfile
+            });
+            kokoDebugLog('[ECHOES PLAIN TEXT FINALIZE DONE]', {
+                chatId: originContext?.id,
+                savedCount: saved?.length || 0
+            });
+        } else {
+            kokoDebugLog('[ECHOES PLAIN TEXT FINALIZE SKIPPED NO MESSAGES]', {
+                chatId: originContext?.id,
+                rawPreview: String(rawText || '').slice(0, 120)
+            });
+        }
     }
 }
 
@@ -24921,6 +24933,7 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
     const commitHvTurnIfNeeded = async () => {
         if (hvTurnCommitted) return null;
         hvTurnCommitted = true;
+        if (options.skipHeartVoiceFallback === true) return null;
         if (
             contextMode === 'chat' &&
             senderProfile &&
@@ -48126,7 +48139,7 @@ await initApp();
 </script>
 <script>
   (function() {
-const BUILD_VERSION = '20260526-fix-17';
+const BUILD_VERSION = '20260526-fix-18';
     const BUILD_KEY = 'koko_build_version';
     const RELOAD_KEY = 'koko_build_version_reload_once';
     try {
@@ -48149,7 +48162,7 @@ const BUILD_VERSION = '20260526-fix-17';
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-const SW_VERSION = '20260526-fix-17';
+const SW_VERSION = '20260526-fix-18';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -49247,7 +49260,7 @@ function resolveEchoesStateClickTarget(event) {
         roundUserText = '',
         roundId = ''
     }) {
-        // fix-17: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
+        // fix-18: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
         return null;
     }
 
@@ -49891,13 +49904,40 @@ function resolveEchoesStateClickTarget(event) {
         const normalized = explicitCandidate ? normalizeEchoesStateObject(explicitCandidate, id) : null;
 
         if (!explicitCandidate || !isCompleteEchoesState(explicitCandidate) || !normalized) {
-            console.warn('[ECHOES STATE SAVE FAILED]', 'missing_explicit_echoes_state', {
-                chatId: chat?.id,
+            const visibleText =
+                payloadObject?.visibleText ||
+                payloadObject?.innerThoughts ||
+                payloadObject?.roundAiText ||
+                '';
+
+            const previousState = getLatestCharacterStateSnapshot(chat, id);
+
+            const derived = buildDerivedEchoesStateForRound({
+                chat,
+                character: getProfile(chat, id) || chat,
+                characterId: id,
+                roundUserText: latestUserText(chat, Date.now()) || '',
+                ownAiText: visibleText,
+                allAiText: visibleText,
+                previousState
+            });
+
+            if (!derived) {
+                kokoDebugLog('[ECHOES STATE SAVE FAILED INCOMPLETE_PAYLOAD]', {
+                    chatId: chat?.id,
+                    characterId: id,
+                    payload: payloadObject
+                });
+                return null;
+            }
+
+            return saveEchoesRoundStateRecord({
+                chat,
                 characterId: id,
                 relatedMessageId,
-                payload: payloadObject
+                roundId: options.roundId || createEchoesRoundId(chat, 'incomplete-payload-derived'),
+                payload: derived
             });
-            return null;
         }
 
         const targetRelatedMessageId = relatedMessageId || payloadObject.relatedMessageId || null;
@@ -50620,13 +50660,28 @@ function resolveEchoesStateClickTarget(event) {
                 }
                 renderedMessages.push(...collectRenderedEchoesMessages(group, beforeLength));
             }
-            await saveEchoesStatesFromParsedResult(group, {
-                responses: parsedResponses,
-                states: parsedStates
-            }, renderedMessages, allMemberProfiles[0] || null, {
-                requestId,
-                source: 'group-legacy'
-            });
+            if (renderedMessages.length > 0) {
+                kokoDebugLog('[ECHOES PLAIN TEXT FINALIZE START]', {
+                    chatId: group?.id,
+                    renderedCount: renderedMessages.length
+                });
+                const saved = await saveEchoesStatesFromParsedResult(group, {
+                    responses: parsedResponses,
+                    states: parsedStates
+                }, renderedMessages, allMemberProfiles[0] || null, {
+                    requestId,
+                    source: 'group-legacy'
+                });
+                kokoDebugLog('[ECHOES PLAIN TEXT FINALIZE DONE]', {
+                    chatId: group?.id,
+                    savedCount: saved?.length || 0
+                });
+            } else {
+                kokoDebugLog('[ECHOES PLAIN TEXT FINALIZE SKIPPED NO MESSAGES]', {
+                    chatId: group?.id,
+                    rawPreview: String(rawResponse || '').slice(0, 120)
+                });
+            }
         } catch (error) {
             throw error;
         }
@@ -50913,6 +50968,9 @@ function resolveEchoesStateClickTarget(event) {
     window.saveEchoesRoundStateRecord = saveEchoesRoundStateRecord;
     window.buildDerivedEchoesStateForRound = buildDerivedEchoesStateForRound;
     window.finalizeEchoesStatesForAiRound = finalizeEchoesStatesForAiRound;
+    window.collectRenderedEchoesMessages = collectRenderedEchoesMessages;
+    window.latestUserText = latestUserText;
+    window.getStateTextForMessage = getStateTextForMessage;
     window.savePrivateRoundEchoesState = savePrivateRoundEchoesState;
     window.saveGroupRoundEchoesStates = saveGroupRoundEchoesStates;
     window.getActiveEchoesRound = getActiveEchoesRound;

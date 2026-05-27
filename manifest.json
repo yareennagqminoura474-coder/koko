@@ -2,7 +2,7 @@
   "name": "koko小手机",
   "short_name": "koko",
   "description": "koko小手机",
-  "start_url": "./index.html?v=20260526-fix-17",
+  "start_url": "./index.html?v=20260526-fix-18",
   "scope": "./",
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone"],
