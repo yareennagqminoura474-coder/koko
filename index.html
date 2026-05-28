@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-21">
+<link rel="manifest" href="manifest.json?v=20260526-fix-24">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -2951,7 +2951,7 @@
 .message-wrapper.show-state-author-name .message-author-name,
 .message-wrapper.ai-html-message.show-state-author-name .message-author-name {
     display: block !important;
-    cursor: pointer;
+    cursor: default;
     color: #6c8f68;
     font-size: 12px;
     margin-bottom: 4px;
@@ -12049,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-runtime-fix-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-21</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-24 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-21';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-24';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -17562,6 +17562,9 @@ if (contact.customBubbleCss) {
     document.head.appendChild(styleTag);
 }
             state.activeChatId = contactId;
+            if (typeof window.updateEchoesStateDebugBadge === 'function') {
+                window.updateEchoesStateDebugBadge();
+            }
             // 在 openChat 函数中...
 
 // --- 核心修复：应用聊天背景 (防闪烁版) ---
@@ -18004,10 +18007,6 @@ if (message.isRecalled === true) {
             if (isVisibleAiMessageForState) {
                 isFirstInSequence = true;
                 wrapper.classList.add('is-first-in-sequence');
-                wrapper.classList.add('echoes-state-clickable-message');
-                if (!stateBubbleClickExcludedTypes.has(message.type)) {
-                    wrapper.dataset.echoesStateClickable = 'true';
-                }
             }
             wrapper.dataset.messageId = message.id || '';
             wrapper.dataset.senderId = resolvedStateCharacterId || '';
@@ -23231,6 +23230,13 @@ function normalizeEchoesResponseCharacterId(response, chat, fallbackSenderProfil
 }
 
 async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile = null, explicitStates = [], options = {}) {
+    console.warn('[ECHOES OLD RENDER PATH DISABLED] use renderEchoesJsonResponses instead');
+    if (typeof window.renderEchoesJsonResponses === 'function') {
+        return window.renderEchoesJsonResponses({
+            responses: responses || [],
+            states: explicitStates || []
+        }, chat, fallbackSenderProfile, options || {});
+    }
     if (!Array.isArray(responses) || !chat) return [];
     const rendered = [];
     const requestId = options.requestId || null;
@@ -23386,7 +23392,10 @@ function refreshHeartVoicePanelIfOpen(chat) {
 }
 
 async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null, options = {}) {
-    const parsed = parseEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile);
+    const parser = typeof window.parseEchoesStateResult === 'function'
+        ? window.parseEchoesStateResult
+        : parseEchoesStyleAiResult;
+    const parsed = parser(rawResponse, chat, fallbackSenderProfile);
     if (!parsed) return false;
     const requestId = options.requestId || null;
     const isStaleGeneration = () => requestId && chat?.id && !isLatestAiRequest(chat.id, requestId);
@@ -23394,37 +23403,20 @@ async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfil
         console.warn('[ECHOES_STYLE_DISCARDED] stale generation', { chatId: chat.id, requestId });
         return true;
     }
-
-    const responseCharacterIds = new Set((parsed.responses || [])
-        .map(item => normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile))
-        .filter(Boolean));
-    const renderedMessages = await renderEchoesStyleResponses(parsed.responses, chat, fallbackSenderProfile, parsed.states || [], { requestId });
-    if (isStaleGeneration()) {
-        console.warn('[ECHOES_STYLE_STATE_SAVE_SKIPPED] stale generation', { chatId: chat.id, requestId });
-        return true;
-    }
-    const extraStates = (parsed.states || [])
-        .filter(item => String(item?.innerThoughts || item?.thoughts || '').trim())
-        .filter(item => !responseCharacterIds.has(normalizeEchoesResponseCharacterId(item, chat, fallbackSenderProfile)));
-    const allStates = extraStates;
-
-    if (!parsed.responses.length && !allStates.length) {
-        console.warn('[ECHOES_STYLE_NOT_HANDLED_EMPTY]', { rawResponse, parsed });
-        return false;
-    }
-
-    const savedStates = await saveCharacterStateRecords(allStates, chat, fallbackSenderProfile);
-    refreshHeartVoicePanelIfOpen(chat);
-
-    console.log('[ECHOES_STYLE_HANDLED]', {
-        chatId: chat?.id,
-        responses: parsed.responses.length,
-        renderedMessages: renderedMessages.length,
-        states: (parsed.states || []).length,
-        fallbackStates: 0,
-        savedStates: savedStates.length
+    const renderer = typeof window.renderEchoesJsonResponses === 'function'
+        ? window.renderEchoesJsonResponses
+        : renderEchoesStyleResponses;
+    const renderedMessages = await renderer(parsed, chat, fallbackSenderProfile, {
+        ...options,
+        source: chat?.isGroup ? 'group-json' : 'private-json'
     });
-    return renderedMessages.length > 0 || savedStates.length > 0;
+    kokoDebugLog('[ECHOES JSON HANDLED]', {
+        chatId: chat?.id,
+        responseCount: parsed.responses?.length || 0,
+        stateCount: parsed.states?.length || 0,
+        renderedCount: renderedMessages?.length || 0
+    });
+    return true;
 }
 
 function inferHeartVoiceEmotion(text) {
@@ -24783,7 +24775,12 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
     }
 
     if (contextMode === 'chat' && originContext && !isStaleGeneration()) {
-        const renderedMessages = collectRenderedEchoesMessages(originContext, beforeLength);
+        const renderedMessages = collectRenderedEchoesMessagesRobust(
+            originContext,
+            beforeLength,
+            roundStartedAt,
+            senderProfile?.id || originContext?.id || ''
+        );
         kokoDebugLog('[ECHOES RENDERED RESPONSES]', {
             chatId: originContext?.id,
             source: 'legacy-plain-text',
@@ -49209,6 +49206,17 @@ function resolveEchoesStateClickTarget(event) {
         return `round_${chatId}_${source}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     }
 
+    function updateEchoesStateDebugBadge() {
+        const badge = document.getElementById('koko-version-badge');
+        if (!badge) return;
+        const chatId = state?.activeChatId || '';
+        const normalizedChatId = normalizeId(chatId);
+        const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
+            .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
+            .length;
+        badge.textContent = `fix-24 | 状态:${count}`;
+    }
+
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
         let id = normalizeId(rawId || fallbackProfile?.id || '');
         if (!chat?.isGroup && id && !isUserSender(id)) return normalizeId(chat.id);
@@ -50314,6 +50322,14 @@ function resolveEchoesStateClickTarget(event) {
             .filter(isStateVisibleMessage)
             .filter((message, index, list) => list.findIndex(item => String(item?.id || '') === String(message?.id || '')) === index);
 
+        kokoDebugLog('[ECHOES SAVE ENTERED]', {
+            chatId: chat?.id,
+            source,
+            renderedMessagesLength: renderedMessages?.length || 0,
+            parsedResponsesLength: parsed?.responses?.length || 0,
+            parsedStatesLength: parsed?.states?.length || 0
+        });
+
         kokoDebugLog('[ECHOES RENDERED RESPONSES]', {
             chatId: chat?.id,
             source,
@@ -50321,6 +50337,20 @@ function resolveEchoesStateClickTarget(event) {
         });
 
         if (!chat || visibleMessages.length === 0) {
+            kokoDebugLog('[ECHOES SAVE ZERO WHY]', {
+                chatId: chat?.id,
+                source,
+                renderedMessagesLength: renderedMessages?.length || 0,
+                visibleMessages: visibleMessages.map(m => ({
+                    id: m.id,
+                    sender: m.sender,
+                    senderId: m.senderId,
+                    type: m.type,
+                    contentPreview: String(m.content || '').slice(0, 80)
+                })),
+                parsedStates: parsed?.states,
+                targetIds: []
+            });
             kokoDebugLog('[ECHOES SAVE SKIPPED NO_RESPONSE_MATCH]', {
                 chatId: chat?.id,
                 source,
@@ -50363,6 +50393,20 @@ function resolveEchoesStateClickTarget(event) {
         });
 
         if (targetById.size === 0) {
+            kokoDebugLog('[ECHOES SAVE ZERO WHY]', {
+                chatId: chat?.id,
+                source,
+                renderedMessagesLength: renderedMessages?.length || 0,
+                visibleMessages: visibleMessages.map(m => ({
+                    id: m.id,
+                    sender: m.sender,
+                    senderId: m.senderId,
+                    type: m.type,
+                    contentPreview: String(m.content || '').slice(0, 80)
+                })),
+                parsedStates: parsed?.states,
+                targetIds: Array.from(typeof targetById?.keys === 'function' ? targetById.keys() : [])
+            });
             kokoDebugLog('[ECHOES SAVE SKIPPED NO_RESPONSE_MATCH]', {
                 chatId: chat?.id,
                 source,
@@ -50439,6 +50483,12 @@ function resolveEchoesStateClickTarget(event) {
                 });
                 if (record) {
                     savedRecords.push(record);
+                    kokoDebugLog('[ECHOES ONE STATE SAVED]', {
+                        chatId: chat?.id,
+                        characterId: record.characterId,
+                        relatedMessageId: record.relatedMessageId,
+                        innerThoughtsPreview: String(record.innerThoughts || '').slice(0, 80)
+                    });
                 } else {
                     kokoDebugLog('[ECHOES SAVE FAILED]', {
                         chatId: chat?.id,
@@ -50457,11 +50507,34 @@ function resolveEchoesStateClickTarget(event) {
             }
         }
 
+        const savedCount = savedRecords.length;
+        kokoDebugLog('[ECHOES SAVE FINAL COUNT]', {
+            chatId: chat?.id,
+            savedCount,
+            characterIds: savedRecords.map(record => record.characterId)
+        });
+        if (savedCount === 0) {
+            kokoDebugLog('[ECHOES SAVE ZERO WHY]', {
+                chatId: chat?.id,
+                source,
+                renderedMessagesLength: renderedMessages?.length || 0,
+                visibleMessages: visibleMessages.map(m => ({
+                    id: m.id,
+                    sender: m.sender,
+                    senderId: m.senderId,
+                    type: m.type,
+                    contentPreview: String(m.content || '').slice(0, 80)
+                })),
+                parsedStates: parsed?.states,
+                targetIds: Array.from(typeof targetById?.keys === 'function' ? targetById.keys() : [])
+            });
+        }
+
         kokoDebugLog('[ECHOES SAVED STATES]', {
             chatId: chat?.id,
             source,
             roundId: effectiveRoundId,
-            savedCount: savedRecords.length,
+            savedCount,
             characterIds: savedRecords.map(record => record.characterId)
         });
         return savedRecords;
@@ -50530,10 +50603,13 @@ function resolveEchoesStateClickTarget(event) {
         } catch (error) {
             console.warn('[ECHOES STATE STORE FAILED]', error, record);
         }
+        window.state = state;
+        if (typeof updateEchoesStateDebugBadge === 'function') {
+            updateEchoesStateDebugBadge();
+        }
         if (typeof refreshHeartVoicePanelIfOpen === 'function') {
             refreshHeartVoicePanelIfOpen(chat);
         }
-        window.state = state;
         console.log('[ECHOES STATE SAVED]', record);
         kokoDebugLog('[ECHOES STATE SAVED]', {
             chatId: chat.id,
@@ -50618,7 +50694,12 @@ function resolveEchoesStateClickTarget(event) {
     }
 
     async function saveFallbackStateForRoundText(chat, senderProfile, text, ctx, startIndex = 0, reason = 'fallback') {
-        const renderedMessages = collectRenderedEchoesMessages(chat, startIndex);
+        const renderedMessages = collectRenderedEchoesMessagesRobust(
+            chat,
+            startIndex,
+            ctx?.startedAt || Date.now(),
+            senderProfile?.id || chat?.id || ''
+        );
         const parsed = buildParsedEchoesFallbackFromRenderedMessages({
             chat,
             renderedMessages,
@@ -50638,9 +50719,45 @@ function resolveEchoesStateClickTarget(event) {
         });
     }
 
-    function collectRenderedEchoesMessages(chat, beforeLength) {
-        return (Array.isArray(chat?.history) ? chat.history.slice(Math.max(0, beforeLength || 0)) : [])
+    function collectRenderedEchoesMessagesRobust(chat, beforeLength, beforeTimestamp = 0, fallbackSenderId = '') {
+        const history = Array.isArray(chat?.history) ? chat.history : [];
+
+        let messages = history
+            .slice(Math.max(0, beforeLength || 0))
             .filter(isStateVisibleMessage);
+
+        if (messages.length === 0 && beforeTimestamp) {
+            messages = history.filter(message => {
+                const timestamp = Number(message?.timestamp) || 0;
+                if (timestamp < (Number(beforeTimestamp) || 0) - 1000) return false;
+                if (!isStateVisibleMessage(message)) return false;
+                const sender = message?.senderId || message?.sender;
+                if (!sender || isUserSender(sender)) return false;
+                return true;
+            });
+        }
+
+        if (messages.length === 0 && fallbackSenderId) {
+            const normalizedFallbackSenderId = normalizeId(fallbackSenderId);
+            messages = history
+                .slice()
+                .reverse()
+                .filter(message => {
+                    const sender = normalizeId(message?.senderId || message?.sender);
+                    if (sender !== normalizedFallbackSenderId) return false;
+                    return isStateVisibleMessage(message);
+                })
+                .slice(0, 3)
+                .reverse();
+        }
+
+        return messages.filter((message, index, list) =>
+            list.findIndex(item => String(item?.id || '') === String(message?.id || '')) === index
+        );
+    }
+
+    function collectRenderedEchoesMessages(chat, beforeLength, beforeTimestamp = 0, fallbackSenderId = '') {
+        return collectRenderedEchoesMessagesRobust(chat, beforeLength, beforeTimestamp, fallbackSenderId);
     }
 
     async function saveEchoesStatesFromParsedResult(chat, parsed, renderedMessages, fallbackSenderProfile = null, options = {}) {
@@ -50677,6 +50794,7 @@ function resolveEchoesStateClickTarget(event) {
             const content = stripEchoesJsonFromVisibleText(response.text || response.content || response.message || '').trim();
             if (!content) continue;
             const beforeLength = Array.isArray(chat.history) ? chat.history.length : 0;
+            const beforeTimestamp = Date.now();
             if (originalProcessAndDisplayAiResponse) {
                 await originalProcessAndDisplayAiResponse(content, speaker, chat, 'chat', {
                     ...options,
@@ -50692,9 +50810,22 @@ function resolveEchoesStateClickTarget(event) {
                     forceAvatar: true
                 }, speaker.id || characterId, chat, true, 'chat');
             }
-            rendered.push(...collectRenderedEchoesMessages(chat, beforeLength));
+            rendered.push(...collectRenderedEchoesMessagesRobust(
+                chat,
+                beforeLength,
+                beforeTimestamp,
+                speaker?.id || characterId || ''
+            ));
         }
-        await saveEchoesStatesFromParsedResult(chat, parsed, rendered, fallbackSenderProfile, options);
+        await saveEchoesParsedStatesAfterRender({
+            chat,
+            parsed,
+            renderedMessages: rendered,
+            fallbackSenderProfile,
+            roundId: options.roundId || createEchoesRoundId(chat, options.source || 'echoes-json'),
+            roundUserText: options.roundUserText || latestUserText(chat, Date.now()) || '',
+            source: options.source || 'echoes-json'
+        });
         return rendered;
     }
 
@@ -50742,15 +50873,28 @@ function resolveEchoesStateClickTarget(event) {
     async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null, options = {}) {
         const parsed = parseEchoesStateResult(rawResponse, chat, fallbackSenderProfile);
         if (!parsed) return false;
-        if (options.requestId && chat?.id && typeof isLatestAiRequest === 'function' && !isLatestAiRequest(chat.id, options.requestId)) {
-            console.warn('[ECHOES_STYLE_DISCARDED] stale generation', { chatId: chat.id, requestId: options.requestId });
+        if (
+            options.requestId &&
+            chat?.id &&
+            typeof isLatestAiRequest === 'function' &&
+            !isLatestAiRequest(chat.id, options.requestId)
+        ) {
+            console.warn('[ECHOES_STYLE_DISCARDED]', {
+                chatId: chat.id,
+                requestId: options.requestId
+            });
             return true;
         }
-        await renderEchoesJsonResponses(parsed, chat, fallbackSenderProfile, options);
-        console.log('[ECHOES_JSON_HANDLED_NO_LEAK]', {
+        const renderedMessages = await renderEchoesJsonResponses(parsed, chat, fallbackSenderProfile, {
+            ...options,
+            source: chat?.isGroup ? 'group-json' : 'private-json'
+        });
+
+        kokoDebugLog('[ECHOES JSON HANDLED]', {
             chatId: chat?.id,
-            responses: parsed.responses.length,
-            states: parsed.states.length
+            responseCount: parsed.responses?.length || 0,
+            stateCount: parsed.states?.length || 0,
+            renderedCount: renderedMessages?.length || 0
         });
         return true;
     }
@@ -50779,7 +50923,12 @@ function resolveEchoesStateClickTarget(event) {
             : (originalDisplayAiTextInBubbles
                 ? await originalDisplayAiTextInBubbles(safeText, senderProfile, originContext, contextMode, options)
                 : null);
-        const renderedMessages = collectRenderedEchoesMessages(chat, beforeLength);
+        const renderedMessages = collectRenderedEchoesMessagesRobust(
+            chat,
+            beforeLength,
+            beforeTimestamp,
+            senderProfile?.id || chat?.id || ''
+        );
         const parsedFallback = buildParsedEchoesFallbackFromRenderedMessages({
             chat,
             renderedMessages,
@@ -50884,6 +51033,7 @@ function resolveEchoesStateClickTarget(event) {
         try {
             for (const parsedMessage of parsedMessages) {
                 const beforeLength = Array.isArray(group.history) ? group.history.length : 0;
+                const beforeTimestamp = Date.now();
                 try {
                     const rendered = await renderParsedGroupMessage(parsedMessage, group, requestId, staleLogLabel);
                     if (!rendered) return null;
@@ -50901,7 +51051,12 @@ function resolveEchoesStateClickTarget(event) {
                         content: String(content || '').trim()
                     }, speaker.id, group, true, 'chat');
                 }
-                renderedMessages.push(...collectRenderedEchoesMessages(group, beforeLength));
+                renderedMessages.push(...collectRenderedEchoesMessagesRobust(
+                    group,
+                    beforeLength,
+                    beforeTimestamp,
+                    parsedMessage?.speaker?.id || ''
+                ));
             }
             const parsedFallback = buildParsedEchoesFallbackFromRenderedMessages({
                 chat: group,
@@ -51205,16 +51360,19 @@ function resolveEchoesStateClickTarget(event) {
     window.ensureEchoesStateForVisibleMessage = ensureEchoesStateForVisibleMessage;
     window.saveEchoesRoundStateRecord = saveEchoesRoundStateRecord;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
+    window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.buildParsedEchoesFallbackFromRenderedMessages = buildParsedEchoesFallbackFromRenderedMessages;
     window.buildDerivedEchoesStateForRound = buildDerivedEchoesStateForRound;
     window.finalizeEchoesStatesForAiRound = finalizeEchoesStatesForAiRound;
     window.collectRenderedEchoesMessages = collectRenderedEchoesMessages;
+    window.collectRenderedEchoesMessagesRobust = collectRenderedEchoesMessagesRobust;
     window.latestUserText = latestUserText;
     window.getStateTextForMessage = getStateTextForMessage;
     window.savePrivateRoundEchoesState = savePrivateRoundEchoesState;
     window.saveGroupRoundEchoesStates = saveGroupRoundEchoesStates;
     window.getActiveEchoesRound = getActiveEchoesRound;
     window.scheduleEchoesAutoFinalize = scheduleEchoesAutoFinalize;
+    window.updateEchoesStateDebugBadge = updateEchoesStateDebugBadge;
     window.__echoesRoundNormalizeId = normalizeId;
     window.__echoesRoundIsUserSender = isUserSender;
     window.__echoesRoundGetProfile = getProfile;
@@ -51248,6 +51406,18 @@ function resolveEchoesStateClickTarget(event) {
     try { requestEchoesMainResponseWithRetry = window.requestEchoesMainResponseWithRetry; } catch (error) {}
     try { saveEchoesCharacterState = window.saveEchoesCharacterState; } catch (error) {}
     try { ensureEchoesStateForVisibleMessage = window.ensureEchoesStateForVisibleMessage; } catch (error) {}
+    try { renderEchoesJsonResponses = window.renderEchoesJsonResponses; } catch (error) {}
+
+    setTimeout(() => {
+        try {
+            updateEchoesStateDebugBadge();
+        } catch (error) {}
+    }, 0);
+
+    window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
+    window.renderEchoesJsonResponses = renderEchoesJsonResponses;
+    window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-24]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
@@ -51342,6 +51512,23 @@ function resolveEchoesStateClickTarget(event) {
         return (Array.isArray(source) ? source : [])
             .map(record => normalizeEchoesOriginalState(record, profile))
             .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0));
+    }
+
+    function getLatestEchoesStateForPanel(chatId, characterId) {
+        const normalizedChatId = String(chatId || '').trim();
+        const normalizedCharacterId = typeof normalizeMessageSenderId === 'function'
+            ? normalizeMessageSenderId(characterId)
+            : normalizeEchoesOriginalId(characterId);
+
+        return (Array.isArray(state?.characterStates) ? state.characterStates : [])
+            .filter(record =>
+                record
+                && String(record.chatId || '').trim() === normalizedChatId
+                && (typeof normalizeMessageSenderId === 'function'
+                    ? normalizeMessageSenderId(record.characterId)
+                    : normalizeEchoesOriginalId(record.characterId)) === normalizedCharacterId
+            )
+            .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0))[0] || null;
     }
 
     function ensureEchoesOriginalStatePanelStyles() {
@@ -51657,13 +51844,9 @@ function resolveEchoesStateClickTarget(event) {
                 line-height: 20px !important;
                 color: #64748b !important;
             }
-            #chat-messages .message-wrapper.echoes-state-clickable-message .message-avatar {
-                visibility: visible !important;
-            }
-            #chat-messages .message-wrapper.echoes-state-clickable-message .message-author-name,
             #chat-messages .message-wrapper.show-state-author-name .message-author-name {
                 display: block !important;
-                cursor: pointer !important;
+                cursor: default !important;
             }
             #${PANEL_ID} svg {
                 width: 20px;
@@ -51965,17 +52148,23 @@ function resolveEchoesStateClickTarget(event) {
 
         const records = getEchoesOriginalRecords(chat, id);
         const profile = getEchoesOriginalProfile(chat, id);
-        const latest = records[0]
-            ? normalizeEchoesOriginalState(records[0], profile)
+        const latestRecord = getLatestEchoesStateForPanel(chat.id, id) || records[0] || null;
+        const latest = latestRecord
+            ? normalizeEchoesOriginalState(latestRecord, profile)
             : null;
 
         kokoDebugLog('[ECHOES STATE PANEL READ]', {
             chatId: chat.id,
             characterId: id,
-            recordCount: records.length
+            recordCount: records.length,
+            latestId: latest?.id || null,
+            latestThoughtPreview: String(latest?.innerThoughts || '').slice(0, 80)
         });
         const panel = renderEchoesOriginalStatePanel(chat, id, latest, records, resolvedOptions.showHistory === true);
         panel.style.setProperty('display', 'flex', 'important');
+        if (typeof window.updateEchoesStateDebugBadge === 'function') {
+            window.updateEchoesStateDebugBadge();
+        }
 
         if (state?.heartVoicePanel) {
             state.heartVoicePanel = {
