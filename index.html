@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-24">
+<link rel="manifest" href="manifest.json?v=20260526-fix-25">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-24 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-25 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-24';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-25';
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -49104,8 +49104,8 @@ function resolveEchoesStateClickTarget(event) {
         'recall_ai'
     ]);
 
-    const originalDisplayAiTextInBubbles = window.displayAiTextInBubbles || (typeof displayAiTextInBubbles === 'function' ? displayAiTextInBubbles : null);
-    const originalProcessAndDisplayAiResponse = window.processAndDisplayAiResponse || (typeof processAndDisplayAiResponse === 'function' ? processAndDisplayAiResponse : null);
+    const baseDisplayAiTextInBubbles = window.__kokoOriginalDisplayAiTextInBubbles ||= window.displayAiTextInBubbles || (typeof displayAiTextInBubbles === 'function' ? displayAiTextInBubbles : null);
+    const baseProcessAndDisplayAiResponse = window.__kokoOriginalProcessAndDisplayAiResponse ||= window.processAndDisplayAiResponse || (typeof processAndDisplayAiResponse === 'function' ? processAndDisplayAiResponse : null);
     const originalSplitAiTextIntoBubbles = window.splitAiTextIntoBubbles || (typeof splitAiTextIntoBubbles === 'function' ? splitAiTextIntoBubbles : null);
     const originalParseGroupAiMessages = window.parseGroupAiMessages || (typeof parseGroupAiMessages === 'function' ? parseGroupAiMessages : null);
 
@@ -49214,7 +49214,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-24 | 状态:${count}`;
+        badge.textContent = `fix-25 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -50795,13 +50795,24 @@ function resolveEchoesStateClickTarget(event) {
             if (!content) continue;
             const beforeLength = Array.isArray(chat.history) ? chat.history.length : 0;
             const beforeTimestamp = Date.now();
-            if (originalProcessAndDisplayAiResponse) {
-                await originalProcessAndDisplayAiResponse(content, speaker, chat, 'chat', {
+            if (baseDisplayAiTextInBubbles && baseDisplayAiTextInBubbles !== displayAiTextInBubbles) {
+                console.log('[ECHOES BASE DISPLAY USED]', { chatId: chat?.id, characterId, source: options?.source });
+                await baseDisplayAiTextInBubbles(content, speaker, chat, 'chat', {
                     ...options,
+                    __plainTextEchoesRendering: true,
+                    skipHeartVoiceFallback: true,
+                    forceShowAvatar: true
+                });
+            } else if (baseProcessAndDisplayAiResponse && baseProcessAndDisplayAiResponse !== processAndDisplayAiResponse) {
+                console.log('[ECHOES BASE PROCESS USED]', { chatId: chat?.id, characterId, source: options?.source });
+                await baseProcessAndDisplayAiResponse(content, speaker, chat, 'chat', {
+                    ...options,
+                    __plainTextEchoesRendering: true,
                     skipHeartVoiceFallback: true,
                     forceShowAvatar: true
                 });
             } else if (typeof createAndAddMessage === 'function') {
+                console.log('[ECHOES DIRECT CREATE USED]', { chatId: chat?.id, characterId, source: options?.source });
                 await createAndAddMessage({
                     type: 'text',
                     sender: speaker.id || characterId,
@@ -50903,6 +50914,25 @@ function resolveEchoesStateClickTarget(event) {
         const chat = originContext || senderProfile;
         if (!chat) return null;
 
+        if (options.__plainTextEchoesRendering) {
+            console.warn('[ECHOES RECURSION BLOCKED]', {
+                chatId: originContext?.id || senderProfile?.id,
+                contextMode,
+                source: options?.source
+            });
+            if (typeof createAndAddMessage === 'function') {
+                const speakerId = senderProfile?.id || chat?.id;
+                return createAndAddMessage({
+                    type: 'text',
+                    sender: speakerId,
+                    senderId: speakerId,
+                    content: String(rawText || '').trim(),
+                    forceAvatar: true
+                }, speakerId, chat, true, 'chat');
+            }
+            return null;
+        }
+
         let safeText = String(rawText || '');
         if (isRawEchoesJsonLeak(safeText)) {
             safeText = stripEchoesJsonFromVisibleText(safeText);
@@ -50914,15 +50944,36 @@ function resolveEchoesStateClickTarget(event) {
 
         const beforeLength = Array.isArray(chat.history) ? chat.history.length : 0;
         const beforeTimestamp = Date.now();
-        const result = originalProcessAndDisplayAiResponse
-            ? await originalProcessAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, {
+
+        let result = null;
+        if (baseDisplayAiTextInBubbles && baseDisplayAiTextInBubbles !== displayAiTextInBubbles) {
+            console.log('[ECHOES BASE DISPLAY USED]', { chatId: chat?.id, source: options?.source });
+            result = await baseDisplayAiTextInBubbles(safeText, senderProfile, originContext, contextMode, {
                 ...options,
+                __plainTextEchoesRendering: true,
                 skipHeartVoiceFallback: true,
                 forceShowAvatar: true
-            })
-            : (originalDisplayAiTextInBubbles
-                ? await originalDisplayAiTextInBubbles(safeText, senderProfile, originContext, contextMode, options)
-                : null);
+            });
+        } else if (baseProcessAndDisplayAiResponse && baseProcessAndDisplayAiResponse !== processAndDisplayAiResponse) {
+            console.log('[ECHOES BASE PROCESS USED]', { chatId: chat?.id, source: options?.source });
+            result = await baseProcessAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, {
+                ...options,
+                __plainTextEchoesRendering: true,
+                skipHeartVoiceFallback: true,
+                forceShowAvatar: true
+            });
+        } else if (typeof createAndAddMessage === 'function') {
+            console.log('[ECHOES DIRECT CREATE USED]', { chatId: chat?.id, source: options?.source });
+            const speakerId = senderProfile?.id || chat?.id;
+            result = await createAndAddMessage({
+                type: 'text',
+                sender: speakerId,
+                senderId: speakerId,
+                content: safeText,
+                forceAvatar: true
+            }, speakerId, chat, true, 'chat');
+        }
+
         const renderedMessages = collectRenderedEchoesMessagesRobust(
             chat,
             beforeLength,
@@ -50945,6 +50996,11 @@ function resolveEchoesStateClickTarget(event) {
             roundId: options.roundId || createEchoesRoundId(chat, options?.source || 'plain-text-fallback'),
             roundUserText: latestUserText(chat, beforeTimestamp) || '',
             source: options?.source || (chat.isGroup ? 'group-plain-text' : 'private-plain-text')
+        });
+        console.log('[ECHOES PLAIN TEXT SAVE DONE]', {
+            chatId: chat?.id,
+            source: options?.source || (chat.isGroup ? 'group-plain-text' : 'private-plain-text'),
+            renderedCount: renderedMessages?.length || 0
         });
         return result;
     }
@@ -50971,19 +51027,30 @@ function resolveEchoesStateClickTarget(event) {
         if (parsed && chat) {
             return renderEchoesJsonResponses(parsed, chat, senderProfile, options);
         }
-        let safeText = String(rawResponse || '');
-        if (isRawEchoesJsonLeak(safeText)) {
-            safeText = stripEchoesJsonFromVisibleText(safeText);
-            if (!safeText) {
-                console.warn('[ECHOES_JSON_LEAK_SUPPRESSED_PROCESS]', { chatId: chat?.id });
-                return null;
-            }
+
+        const safeText = isRawEchoesJsonLeak(rawResponse)
+            ? stripEchoesJsonFromVisibleText(rawResponse)
+            : String(rawResponse || '');
+
+        if (!safeText.trim()) return null;
+
+        if (options.__plainTextEchoesRendering) {
+            const speakerId = senderProfile?.id || chat?.id;
+            return createAndAddMessage({
+                type: 'text',
+                sender: speakerId,
+                senderId: speakerId,
+                content: safeText,
+                forceAvatar: true
+            }, speakerId, chat, true, 'chat');
         }
+
         if (contextMode !== 'chat' || !chat) {
-            return originalProcessAndDisplayAiResponse
-                ? originalProcessAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, options)
+            return baseProcessAndDisplayAiResponse
+                ? baseProcessAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, options)
                 : null;
         }
+
         return renderPlainTextEchoesAndSave(safeText, senderProfile, originContext, contextMode, {
             ...options,
             source: options?.source || (chat.isGroup ? 'group-plain-text' : 'private-plain-text')
@@ -51417,7 +51484,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-24]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-25]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
