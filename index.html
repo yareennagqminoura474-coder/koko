@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260530-fix-33">
+<link rel="manifest" href="manifest.json?v=20260530-fix-34">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12073,9 +12073,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-33 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-34 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260530-fix-33';
+window.KOKO_RUNTIME_VERSION = '20260530-fix-34';
 window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
     const fn =
         window.createAndAddMessage ||
@@ -19192,7 +19192,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     contact[historyArray].push(fullMessage);
     const committedMessageIndex = contact[historyArray].length - 1;
 
-// fix-33: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-34: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
     // 不再在 createAndAddMessage 底层按消息猜测并提交状态。
 
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
@@ -19349,7 +19349,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 8. 保存联系人数据到 IndexedDB
     await kokoMemory.put('contacts', contact);
 
-// fix-33: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-34: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
 
     // 9. 刷新对应的列表视图 (主聊天列表 或 短信列表)
     if (fullMessage.sender !== 'system_instruction') {
@@ -19723,10 +19723,8 @@ ${worldBookContextString}
 3. 继续当前最自然的话题，不要机械复述记录，不要强行输出日记。
 4. 不要输出 [diary]。
 
-[Echoes 式输出规则]
-你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出 JSON 以外的任何文字：
-{"responses":[{"characterId":"角色id","text":"角色说出口的话"}],"states":[{"characterId":"角色id","mood":"当前情绪","affection":"68 (当前关系/好感状态)","clothing":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
-responses[].text 是唯一可见聊天内容；states 只用于状态面板，里面的 mood / affection / clothing / action / innerThoughts 绝不能写进 text。每个发言角色必须有一条 state。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；clothing 没有明确换装/场景切换时保持上一状态。不要输出代码块、解释文字、[heart_voice]、characterStates、heartVoices、标签或额外字段。
+[注意]
+可见回复请以自然聊天内容为主；不要在普通自由聊天中强制要求模型只返回 JSON 或插入心声 JSON。Echoes 状态（如 states/innerThoughts/mood 等）将由系统在可见回复渲染完成后单独生成与保存，不作为可见聊天内容的一部分。
 `.trim() : `
 [！！！核心任务！！！]
 用户（${myProfile.name}）正在”观察”你，TA没有发言。
@@ -19737,10 +19735,8 @@ responses[].text 是唯一可见聊天内容；states 只用于状态面板，�
 4. 可以自然提到”刚刚群里””他们刚才”，但不要像机器人一样总结来源。
 5. 不要输出 [diary]。
 
-[Echoes 式输出规则]
-你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出 JSON 以外的任何文字：
-{"responses":[{"characterId":"角色id","text":"角色说出口的话"}],"states":[{"characterId":"角色id","mood":"当前情绪","affection":"68 (当前关系/好感状态)","clothing":"22-60字详细穿着；没有明确换装时沿用上一状态","action":"22-80字具体动作、视线和手部状态","innerThoughts":"50-180字第一人称心理独白，必须基于本轮对话，是没说出口的真实想法"}]}
-responses[].text 是唯一可见聊天内容；states 只用于状态面板，里面的 mood / affection / clothing / action / innerThoughts 绝不能写进 text。每个发言角色必须有一条 state。innerThoughts 必须用“我”写，不能写他/她/角色/名字觉得，不能写“表面上回得自然”这类分析；clothing 没有明确换装/场景切换时保持上一状态。不要输出代码块、解释文字、[heart_voice]、characterStates、heartVoices、标签或额外字段。
+[注意]
+可见回复请以自然聊天内容为主；不要在普通自由聊天中强制要求模型只返回 JSON 或插入心声 JSON。Echoes 状态（如 states/innerThoughts/mood 等）将由系统在可见回复渲染完成后单独生成与保存，不作为可见聊天内容的一部分。
 `.trim();
         
         const requestMessages = [
@@ -19769,6 +19765,207 @@ if (!window.isLatestAiRequest(contact.id, requestId)) {
         }
     }
 }
+
+async function renderLegacyGroupResponses(rawResponse, group, allMemberProfiles, requestId, staleLogLabel = '[GROUP LEGACY MESSAGE SKIPPED] stale generation') {
+    if (!group || !Array.isArray(allMemberProfiles)) return false;
+    const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
+    if (!parsedMessages.length) {
+        await displayAiTextInBubbles(rawResponse, allMemberProfiles[0] || group, group, 'chat', { requestId });
+        return true;
+    }
+
+    const beforeLength = Array.isArray(group.history) ? group.history.length : 0;
+    const beforeTimestamp = Date.now();
+
+    for (const parsedMessage of parsedMessages) {
+        window.ensureIsLatestAiRequest();
+        if (!window.isLatestAiRequest(group.id, requestId)) {
+            console.warn(staleLogLabel, { chatId: group.id, requestId });
+            return false;
+        }
+
+        try {
+            await renderParsedGroupMessage(parsedMessage, group, requestId, staleLogLabel);
+        } catch (renderError) {
+            window.ensureIsLatestAiRequest();
+            if (!window.isLatestAiRequest(group.id, requestId)) {
+                console.warn(staleLogLabel, { chatId: group.id, requestId });
+                return false;
+            }
+            console.error('[GROUP MESSAGE RENDER FAILED]', renderError, {
+                content: parsedMessage?.content,
+                speaker: parsedMessage?.speaker?.id
+            });
+            await window.safeCreateAndAddMessage({
+                type: 'text',
+                sender: parsedMessage?.speaker?.id || (allMemberProfiles[0] || group).id,
+                senderId: parsedMessage?.speaker?.id || (allMemberProfiles[0] || group).id,
+                content: String(parsedMessage?.content || '').trim(),
+                forceAvatar: true
+            }, parsedMessage?.speaker?.id || (allMemberProfiles[0] || group).id, group, true, 'chat');
+        }
+    }
+
+    const renderedMessages = collectRenderedEchoesMessagesRobust(
+        group,
+        beforeLength,
+        beforeTimestamp,
+        allMemberProfiles[0]?.id || ''
+    );
+
+    if (renderedMessages.length > 0 && typeof window.buildParsedEchoesFallbackFromRenderedMessages === 'function' && typeof window.saveEchoesParsedStatesAfterRender === 'function') {
+        const parsed = window.buildParsedEchoesFallbackFromRenderedMessages({
+            chat: group,
+            renderedMessages,
+            fallbackSenderProfile: allMemberProfiles[0] || null,
+            rawText: String(rawResponse || ''),
+            source: 'group-legacy',
+            roundUserText: typeof window.latestUserText === 'function'
+                ? (window.latestUserText(group, Date.now()) || '')
+                : ''
+        });
+        await window.saveEchoesParsedStatesAfterRender({
+            chat: group,
+            parsed,
+            renderedMessages,
+            fallbackSenderProfile: allMemberProfiles[0] || null,
+            roundId: typeof window.createEchoesRoundId === 'function'
+                ? window.createEchoesRoundId(group, 'group-legacy')
+                : `round_${group?.id || 'group'}_legacy_${Date.now()}`,
+            roundUserText: typeof window.latestUserText === 'function'
+                ? (window.latestUserText(group, Date.now()) || '')
+                : '',
+            source: 'group-legacy'
+        });
+    }
+
+    return true;
+}
+
+async function triggerGroupChatAiReply(group) {
+    if (!group || !group.isGroup) return null;
+    const chatStatusEl = document.getElementById('chat-contact-status');
+    state.aiTypingStatus[group.id] = true;
+    if (chatStatusEl && state.activeChatId === group.id) {
+        chatStatusEl.textContent = '群成员正在热烈讨论中...';
+    }
+
+    window.ensureCreateAiRequestId();
+    const requestId = window.createAiRequestId(group.id);
+
+    try {
+        const { requestMessages, allMemberProfiles } = await withTimeout(
+            buildGroupChatRequestContext(group, 'reply'),
+            20000,
+            'buildGroupChatRequestContext'
+        );
+
+        if (!Array.isArray(allMemberProfiles) || allMemberProfiles.length === 0) {
+            await window.safeCreateAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: '群聊没有可发言的 AI 成员，请检查群成员是否为空、是否全被禁言、或成员 ID 是否无法匹配。'
+            }, 'system', group, false, 'chat');
+            return null;
+        }
+
+        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+        window.ensureIsLatestAiRequest();
+        if (!window.isLatestAiRequest(group.id, requestId)) {
+            console.warn('[GROUP REPLY DISCARDED] not latest request', { chatId: group.id, requestId });
+            return null;
+        }
+
+        return await renderLegacyGroupResponses(
+            rawResponse,
+            group,
+            allMemberProfiles,
+            requestId,
+            '[GROUP REPLY MESSAGE SKIPPED] stale generation'
+        );
+    } catch (error) {
+        const errorMessage = error?.stack || error?.message || String(error);
+        console.error('[FINAL GROUP REPLY FAILED]', {
+            message: error?.message,
+            name: error?.name,
+            stack: error?.stack
+        });
+        await window.safeCreateAndAddMessage({
+            type: 'system_notification',
+            sender: 'system',
+            content: `群聊AI回复生成失败：\n${String(errorMessage).slice(0, 500)}`
+        }, 'system', group, false, 'chat');
+        return null;
+    } finally {
+        state.aiTypingStatus[group.id] = false;
+        if (chatStatusEl && state.activeChatId === group.id) {
+            chatStatusEl.textContent = '在线';
+        }
+    }
+}
+
+async function triggerGroupFreeChat(group) {
+    if (!group || !group.isGroup) return null;
+    const chatStatusEl = document.getElementById('chat-contact-status');
+    state.aiTypingStatus[group.id] = true;
+    if (chatStatusEl && state.activeChatId === group.id) {
+        chatStatusEl.textContent = '群成员正在热烈讨论中...';
+    }
+
+    window.ensureCreateAiRequestId();
+    const requestId = window.createAiRequestId(group.id);
+
+    try {
+        const { requestMessages, allMemberProfiles } = await withTimeout(
+            buildGroupChatRequestContext(group, 'free'),
+            20000,
+            'buildGroupChatRequestContext free'
+        );
+
+        if (!Array.isArray(allMemberProfiles) || allMemberProfiles.length === 0) {
+            await window.safeCreateAndAddMessage({
+                type: 'system_notification',
+                sender: 'system',
+                content: '群聊没有可发言的 AI 成员，请检查群成员是否为空、是否全被禁言、或成员 ID 是否无法匹配。'
+            }, 'system', group, false, 'chat');
+            return null;
+        }
+
+        const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
+        window.ensureIsLatestAiRequest();
+        if (!window.isLatestAiRequest(group.id, requestId)) {
+            console.warn('[GROUP FREE DISCARDED] not latest request', { chatId: group.id, requestId });
+            return null;
+        }
+
+        return await renderLegacyGroupResponses(
+            rawResponse,
+            group,
+            allMemberProfiles,
+            requestId,
+            '[GROUP FREE MESSAGE SKIPPED] stale generation'
+        );
+    } catch (error) {
+        const errorMessage = error?.stack || error?.message || String(error);
+        console.error('[FINAL GROUP FREE FAILED]', {
+            message: error?.message,
+            name: error?.name,
+            stack: error?.stack
+        });
+        await window.safeCreateAndAddMessage({
+            type: 'system_notification',
+            sender: 'system',
+            content: `群聊自由聊天失败：\n${String(errorMessage).slice(0, 500)}`
+        }, 'system', group, false, 'chat');
+        return null;
+    } finally {
+        state.aiTypingStatus[group.id] = false;
+        if (chatStatusEl && state.activeChatId === group.id) {
+            chatStatusEl.textContent = '在线';
+        }
+    }
+}
+
 /**
  * (V7 - 完整记忆 + API修复版) 触发群聊AI成员间的自由聊天
  * (由Koko用户指导，采用"刷新论坛"模式，不依赖 requestAiReply)
@@ -46229,35 +46426,8 @@ ${mode === 'free'
 3. 如果你刚在群里看到了相关内容，可以自然接上；如果没看见，就不要假装知道。
 4. 普通聊天不要输出 [diary]，日记只在定时日记任务里生成。`}
 
-[Echoes 式输出规则]
-你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出解释文字。格式如下：
-{
-  "responses": [
-    {
-      "characterId": "角色id",
-      "text": "角色说出口的话"
-    }
-  ],
-  "states": [
-    {
-      "characterId": "角色id",
-      "mood": "怒极反笑",
-      "affection": "68 (极度恼火)",
-      "clothing": "白色衬衫，袖口整齐地挽到小臂，深灰色西装裤没有一点褶皱，皮鞋擦得一尘不染。",
-      "action": "把手中的水杯重重放在桌上，身体微微前倾，目光沉沉地盯着对方。",
-      "innerThoughts": "我当然生气了，可我不想让她觉得自己能轻易看穿我。她越追问，我越不想承认。"
-    }
-  ]
-}
-
-规则：
-1. responses[].text 是唯一可见聊天内容，只负责显示聊天气泡。
-2. states 不显示成气泡，只用于状态面板；mood、affection、clothing、action、innerThoughts 等字段绝不能出现在 responses[].text 里。
-3. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
-4. innerThoughts 必须是第一人称，用“我”写；不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
-5. 不要输出代码块、解释文字、[heart_voice]、characterStates、heartVoices 或其他标签。
-6. 如果角色只想沉默，也必须在 states 里记录这一轮状态；responses 可以为空数组。
-7. 状态要连续：mood、affection、clothing、action、innerThoughts 都要承接上一轮；没有明确换衣/场景切换时 clothing 必须保持不变。
+[状态说明]
+注意：本轮可见回复请以自然聊天形式输出多条独立气泡（每条为独立 response），不要在普通聊天中强制要求模型只返回 JSON。心声（states、innerThoughts、mood、affection、clothing、action）由系统在可见回复渲染完成后单独生成并保存，仅用于状态面板，不应影响或决定可见回复数量或内容。
 8. clothing 要写颜色、款式、细节、整洁程度；action 要写身体动作、视线、手部动作和语气状态。affection 固定写成“数字 (状态名)”格式。
 `.trim();
 
@@ -47104,39 +47274,8 @@ ${replyGuidance.guidance}
 6. 不要总结式回复，不要客服味，要像真实微信群一样自然接话。
 7. 只要不是明确冷场，就不要长期只让一个角色单独回复。
 
-[Echoes 式输出格式]
-你必须只输出纯 JSON 对象，不要输出 Markdown 代码块，不要输出 json 代码块，不要输出解释文字。格式如下：
-{
-  "responses": [
-    {
-      "characterId": "角色id",
-      "text": "该角色说出口的话"
-    }
-  ],
-  "states": [
-    {
-      "characterId": "角色id",
-      "mood": "当前情绪",
-      "affection": "68 (当前关系/好感状态)",
-      "clothing": "22-60字详细穿着；没有明确换装时沿用上一状态",
-      "action": "22-80字具体动作、视线和手部状态",
-      "innerThoughts": "该角色自己的第一人称心声，50-180字，必须基于本轮群聊语境和自己的发言"
-    }
-  ]
-}
-
-规则：
-1. characterId 必须使用对应角色的真实 id，不要用角色名、代称或外号。
-2. responses[].text 是唯一可见聊天内容，responses 里的每个对象会显示成一个独立聊天气泡。
-3. states 不显示成气泡，只用于状态面板；mood、affection、clothing、action、innerThoughts 等字段绝不能出现在 responses[].text 里。
-4. 每个发言角色都必须有一条 state。
-5. states 里的 innerThoughts 必须严格属于对应 characterId，不能让 A 写 B 的心理。
-6. innerThoughts 必须和本轮用户消息、角色实际说出口的话相关。
-7. innerThoughts 必须是第一人称，用“我”写；不要写他/她/角色/名字觉得，不要写“表面上回得自然”这类旁观分析。
-8. 不要输出任何额外标签、Markdown 代码块、json 代码块、[heart_voice]、characterStates、heartVoices 或解释文字。
-9. 不要扮演用户“${myProfile.name}”。
-10. 每个角色的状态要各自连续：mood 不要大跳，affection 普通互动只小幅变化，clothing 没有明确换装/场景切换时必须延续上一状态，action 和 innerThoughts 要承接上一轮。
-11. clothing 要写颜色、款式、细节、整洁程度；action 要写身体动作、视线、手部动作和语气状态。affection 固定写成“数字 (状态名)”格式。
+.trim();
+        // 注意：把 Echoes 状态作为渲染后备份，不要在主回复流程中强制模型输出 JSON。
 `.trim();
 
     const requestMessages = mode === 'free'
@@ -47219,175 +47358,9 @@ function buildGroupEchoesRecentStatesPromptBlock(group, memberProfiles, currentU
 - 暂无记录`;
 }
 
-async function triggerAiReply(contact) {
-    if (!contact || contact.isGroup) return;
-
-    if (contact.needsNarrativeModeExitPrompt === true) {
-        const exitInstruction = `[SYSTEM COMMAND: CRITICAL! IMMEDIATE FORMAT CHANGE REQUIRED!] You have just exited Narrative Mode. Your response format MUST IMMEDIATELY and STRICTLY return to the standard multi-line chat format. - DO NOT write a single long paragraph. - DO NOT include any descriptions of actions, expressions, or thoughts (e.g., *...* or {...}). - You MUST use multi-line responses and commands like [sticker:name] where appropriate. This is a strict and immediate format change. Acknowledge and comply.`;
-        await window.safeCreateAndAddMessage({ type: 'text', content: exitInstruction }, 'system_instruction');
-        delete contact.needsNarrativeModeExitPrompt;
-    }
-
-    const chatStatusEl = document.getElementById('chat-contact-status');
-    state.aiTypingStatus[contact.id] = true;
-    if (chatStatusEl && state.activeChatId === contact.id) {
-        chatStatusEl.textContent = '对方正在输入...';
-    }
-
-    if (!contact.apiCallCounter) {
-        contact.apiCallCounter = 0;
-    }
-    contact.apiCallCounter++;
-    window.ensureCreateAiRequestId();
-    const requestId = window.createAiRequestId(contact.id);
-
-    try {
-        const currentUserStatus = state.myProfile.status;
-        if (contact) {
-            if (contact.lastKnownUserStatus && contact.lastKnownUserStatus !== currentUserStatus) {
-                const statusChangeInstruction = `[SYSTEM: 你的对话伙伴刚刚将状态从“${contact.lastKnownUserStatus}”改为了“${currentUserStatus}”。这是一个很好的机会，你可以自然地关心一下，比如问：“我看到你的状态变了，还好吗？”。这次之后就不用再提了。]`;
-                await window.safeCreateAndAddMessage({ type: 'text', content: statusChangeInstruction }, 'system_instruction');
-            }
-            contact.lastKnownUserStatus = currentUserStatus;
-        }
-    } catch (error) {
-        console.error('更新用户状态记忆时出错:', error);
-    }
-
-    const lastUnopenedMessage = contact.history.slice().reverse().find(message =>
-        message.sender === 'user' && (
-            (message.type === 'red_packet' && !message.content.opened) ||
-            (message.type === 'transfer' && !message.content.completed)
-        ) && !message.hasRemindedAI
-    );
-
-    if (lastUnopenedMessage) {
-        let systemInstruction = '';
-        if (lastUnopenedMessage.type === 'red_packet') {
-            systemInstruction = `[SYSTEM: 用户发给你一个红包（祝福语：“${lastUnopenedMessage.content.blessing}”）。如果你想收下，请在回复中自然地表达感谢或开心（如“谢谢”、“收下了”）。如果你不想收，可以忽略它或礼貌拒绝。]`;
-        } else if (lastUnopenedMessage.type === 'transfer') {
-            systemInstruction = `[SYSTEM: 用户给你转账了 ${lastUnopenedMessage.content.amount}元。如果你决定收下，请在回复中包含“收下”、“谢谢”等词。不想收可以忽略。]`;
-        }
-
-        await window.safeCreateAndAddMessage({ type: 'text', content: systemInstruction }, 'system_instruction');
-        lastUnopenedMessage.hasRemindedAI = true;
-        await kokoMemory.put('contacts', contact);
-    }
-
-    try {
-        const requestMessages = await buildPrivateChatRequestMessages(contact, 'reply');
-        const requestResult = await requestEchoesMainResponseWithRetry({
-            chat: contact,
-            requestMessages,
-            fallbackSenderProfile: contact,
-            requestId,
-            source: 'private-reply',
-            maxAttempts: 1
-        });
-        if (!requestResult) return;
-        const { rawResponse, parsed, statesMissing, plainText } = requestResult;
-
-        window.ensureIsLatestAiRequest();
-        if (!window.isLatestAiRequest(contact.id, requestId)) {
-            console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
-            return;
-        }
-        if (statesMissing) {
-            console.warn('[ECHOES STATES MISSING]', {
-                chatId: contact.id,
-                source: 'private-reply',
-                requestId
-            });
-        }
-        if (plainText || !parsed) {
-            await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
-            return;
-        }
-        await renderEchoesJsonResponses(parsed, contact, contact, {
-            requestId,
-            source: 'private-json'
-        });
-    } catch (error) {
-        console.error('私聊AI回复生成失败:', error);
-        await window.safeCreateAndAddMessage({
-            type: 'system_notification',
-            sender: 'system',
-            content: `AI回复失败: ${error.message || error.name || '未知错误'}`
-        }, 'system', contact, false, 'chat');
-    } finally {
-        state.aiTypingStatus[contact.id] = false;
-
-        if (state.activeChatId === contact.id) {
-            const statusEl = document.getElementById('chat-contact-status');
-            if (statusEl) {
-                statusEl.textContent = contact.status || '在线';
-            }
-        }
-
-        contact.history = contact.history.filter(message => message.sender !== 'system_instruction');
-        await kokoMemory.put('contacts', contact);
-    }
-}
-
-async function triggerPrivateFreeChat(contact) {
-    if (!contact || contact.isGroup) return;
-
-    console.log(`私聊：用户未发言，正在启动独立的自由聊天函数 for ${contact.name}...`);
-    const chatStatusEl = document.getElementById('chat-contact-status');
-    state.aiTypingStatus[contact.id] = true;
-    if (chatStatusEl && state.activeChatId === contact.id) {
-        chatStatusEl.textContent = '对方正在输入...';
-    }
-
-    window.ensureCreateAiRequestId();
-    const requestId = window.createAiRequestId(contact.id);
-
-    try {
-        const requestMessages = await buildPrivateChatRequestMessages(contact, 'free');
-        const requestResult = await requestEchoesMainResponseWithRetry({
-            chat: contact,
-            requestMessages,
-            fallbackSenderProfile: contact,
-            requestId,
-            source: 'private-free',
-            maxAttempts: 1
-        });
-        if (!requestResult) return;
-        const { rawResponse, parsed, statesMissing, plainText } = requestResult;
-        window.ensureIsLatestAiRequest();
-        if (!window.isLatestAiRequest(contact.id, requestId)) {
-            console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
-            return;
-        }
-        if (statesMissing) {
-            console.warn('[ECHOES STATES MISSING]', {
-                chatId: contact.id,
-                source: 'private-free',
-                requestId
-            });
-        }
-        if (plainText || !parsed) {
-            await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
-            return;
-        }
-        await renderEchoesJsonResponses(parsed, contact, contact, {
-            requestId,
-            source: 'private-json'
-        });
-    } catch (error) {
-        console.error('私聊自由聊天执行失败:', error);
-        await window.safeCreateAndAddMessage({
-            type: 'system_notification',
-            sender: 'system',
-            content: `AI自由聊天失败: ${error.message}`
-        }, 'system', contact, false, 'chat');
-    } finally {
-        state.aiTypingStatus[contact.id] = false;
-        if (chatStatusEl && state.activeChatId === contact.id) {
-            chatStatusEl.textContent = contact.status || '在线';
-        }
-    }
-}
+/* Duplicate Echoes-wrapped triggerAiReply/triggerPrivateFreeChat removed so
+   original implementations (defined earlier in the file) remain active and
+   control normal private/chat reply flows. */
 
 async function addTransaction(type, amount, description, relatedContactId = null, timestamp = Date.now()) {
     const newTransaction = {
@@ -49340,7 +49313,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-33 | 状态:${count}`;
+        badge.textContent = `fix-34 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -49397,7 +49370,7 @@ function resolveEchoesStateClickTarget(event) {
         roundUserText = '',
         roundId = ''
     }) {
-        // fix-33: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
+        // fix-34: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
         return null;
     }
 
@@ -51144,412 +51117,10 @@ function resolveEchoesStateClickTarget(event) {
         return result;
     }
 
-    async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat', options = {}) {
-        const chat = originContext || senderProfile;
-        if (!chat) return null;
-        const parsed = parseEchoesStateResult(rawText, chat, senderProfile);
-        if (parsed) {
-            return renderEchoesJsonResponses(parsed, chat, senderProfile, Object.assign({}, options || {}, {
-                source: chat.isGroup ? 'group-json' : 'private-json'
-            }));
-        }
-        return renderPlainTextEchoesAndSave(rawText, senderProfile, originContext, contextMode, Object.assign({}, options || {}, {
-            source: options?.source || (chat.isGroup ? 'group-plain-text' : 'private-plain-text')
-        }));
-    }
-
-    async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat', options = {}) {
-        const chat = originContext || senderProfile;
-        const parsed = parseEchoesStateResult(rawResponse, chat, senderProfile);
-        if (parsed && chat) {
-            return renderEchoesJsonResponses(parsed, chat, senderProfile, options);
-        }
-
-        const safeText = isRawEchoesJsonLeak(rawResponse)
-            ? stripEchoesJsonFromVisibleText(rawResponse)
-            : String(rawResponse || '');
-
-        if (!safeText.trim()) return null;
-
-        if (options.__plainTextEchoesRendering) {
-            const speakerId = senderProfile?.id || chat?.id;
-            return window.safeCreateAndAddMessage({
-                type: 'text',
-                sender: speakerId,
-                senderId: speakerId,
-                content: safeText,
-                forceAvatar: true
-            }, speakerId, chat, true, 'chat');
-        }
-
-        if (contextMode !== 'chat' || !chat) {
-            return baseProcessAndDisplayAiResponse
-                ? baseProcessAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, options)
-                : null;
-        }
-
-        return renderPlainTextEchoesAndSave(safeText, senderProfile, originContext, contextMode, Object.assign({}, options || {}, {
-            source: options?.source || (chat.isGroup ? 'group-plain-text' : 'private-plain-text')
-        }));
-    }
-
-    function splitAiTextIntoBubbles(text) {
-        const safeText = isRawEchoesJsonLeak(text) ? stripEchoesJsonFromVisibleText(text) : String(text || '');
-        if (!safeText.trim()) return [];
-        return originalSplitAiTextIntoBubbles ? originalSplitAiTextIntoBubbles(safeText) : safeText.split(/\n+/).map(item => item.trim()).filter(Boolean);
-    }
-
-    function parseEchoesStyleAiResult(rawText, chat = null, fallbackSenderProfile = null) {
-        return parseEchoesStateResult(rawText, chat, fallbackSenderProfile);
-    }
-
-    function parseGroupAiMessages(rawResponse, allMemberProfiles) {
-        const parsed = parseEchoesStateResult(rawResponse, null, null);
-        if (parsed) {
-            return (parsed.responses || []).map(response => {
-                const speaker = typeof resolveSpeakerProfile === 'function'
-                    ? resolveSpeakerProfile(response.characterId || response.name || response.speaker, allMemberProfiles)
-                    : (allMemberProfiles || []).find(item => normalizeId(item.id) === normalizeId(response.characterId));
-                if (!speaker) return null;
-                const heartVoice = (parsed.states || []).find(stateItem => {
-                    const rawId = stateItem.characterId || stateItem.id || stateItem.name;
-                    return normalizeId(rawId) === normalizeId(speaker.id) || rawId === speaker.name;
-                }) || null;
-                return {
-                    speaker,
-                    content: stripEchoesJsonFromVisibleText(response.text || response.content || ''),
-                    heartVoice
-                };
-            }).filter(item => item && item.content);
-        }
-        const safeText = isRawEchoesJsonLeak(rawResponse) ? stripEchoesJsonFromVisibleText(rawResponse) : rawResponse;
-        if (!String(safeText || '').trim()) return [];
-        return originalParseGroupAiMessages ? originalParseGroupAiMessages(safeText, allMemberProfiles) : [];
-    }
-
-    async function renderLegacyGroupResponses(rawResponse, group, allMemberProfiles, requestId, staleLogLabel) {
-        const parsedMessages = parseGroupAiMessages(rawResponse, allMemberProfiles);
-        if (parsedMessages.length === 0) {
-            return displayAiTextInBubbles(rawResponse, allMemberProfiles[0] || group, group, 'chat', { requestId });
-        }
-        const renderedMessages = [];
-        try {
-            for (const parsedMessage of parsedMessages) {
-                const beforeLength = Array.isArray(group.history) ? group.history.length : 0;
-                const beforeTimestamp = Date.now();
-                try {
-                    const rendered = await renderParsedGroupMessage(parsedMessage, group, requestId, staleLogLabel);
-                    if (!rendered) return null;
-                } catch (renderError) {
-                    window.ensureIsLatestAiRequest();
-                    if (!window.isLatestAiRequest(group.id, requestId)) {
-                        console.warn(staleLogLabel, { chatId: group.id, requestId });
-                        return null;
-                    }
-                    const { speaker, content } = parsedMessage;
-                    console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
-                    await window.safeCreateAndAddMessage({
-                        type: 'text',
-                        sender: speaker.id,
-                        senderId: speaker.id,
-                        content: String(content || '').trim()
-                    }, speaker.id, group, true, 'chat');
-                }
-                const collectedMessages = collectRenderedEchoesMessagesRobust(
-                    group,
-                    beforeLength,
-                    beforeTimestamp,
-                    parsedMessage?.speaker?.id || ''
-                );
-                collectedMessages.forEach(message => renderedMessages.push(message));
-            }
-            const parsedFallback = buildParsedEchoesFallbackFromRenderedMessages({
-                chat: group,
-                renderedMessages,
-                fallbackSenderProfile: allMemberProfiles[0] || null,
-                rawText: String(rawResponse || ''),
-                source: 'group-legacy',
-                roundUserText: latestUserText(group, Date.now()) || ''
-            });
-            await saveEchoesParsedStatesAfterRender({
-                chat: group,
-                parsed: parsedFallback,
-                renderedMessages,
-                fallbackSenderProfile: allMemberProfiles[0] || null,
-                roundId: createEchoesRoundId(group, 'group-legacy'),
-                roundUserText: latestUserText(group, Date.now()) || '',
-                source: 'group-legacy'
-            });
-        } catch (error) {
-            throw error;
-        }
-        return true;
-    }
-
-    async function triggerGroupChatAiReply(group) {
-        kokoDebugLog('[GROUP REPLY STEP 1]', { groupId: group?.id, members: group?.members, mutedMembers: group?.mutedMembers });
-        if (!group || !group.isGroup) return null;
-        const chatStatusEl = document.getElementById('chat-contact-status');
-        state.aiTypingStatus[group.id] = true;
-        if (chatStatusEl && state.activeChatId === group.id) {
-            chatStatusEl.textContent = '群成员正在热烈讨论中...';
-        }
-        const requestId = window.createAiRequestId(group.id);
-        try {
-            kokoDebugLog('[GROUP REPLY STEP 2] before context');
-            const { requestMessages, allMemberProfiles } = await withTimeout(
-                buildGroupChatRequestContext(group, 'reply'),
-                20000,
-                'buildGroupChatRequestContext'
-            );
-            kokoDebugLog('[GROUP REPLY STEP 3] after context', {
-                requestMessagesCount: requestMessages?.length,
-                allMemberProfilesCount: allMemberProfiles?.length,
-                allMemberProfiles: allMemberProfiles?.map(p => ({ id: p.id, name: p.name }))
-            });
-            if (!allMemberProfiles.length) {
-                kokoDebugLog('[GROUP REPLY NO AI MEMBERS]', {
-                    members: group?.members,
-                    mutedMembers: group?.mutedMembers,
-                    allMemberProfiles
-                });
-                await window.safeCreateAndAddMessage({
-                    type: 'system_notification',
-                    sender: 'system',
-                    content: '群聊没有可发言的 AI 成员，请检查群成员是否为空、是否全被禁言、或成员 ID 是否无法匹配。'
-                }, 'system', group, false, 'chat');
-                return null;
-            }
-            kokoDebugLog('[GROUP REPLY STEP 4] before main request');
-            const requestResult = await withTimeout(
-                requestEchoesMainResponseWithRetry({
-                    chat: group,
-                    requestMessages,
-                    fallbackSenderProfile: allMemberProfiles[0] || null,
-                    requestId,
-                    source: 'group-reply',
-                    maxAttempts: 1
-                }),
-                60000,
-                'group-reply requestEchoesMainResponseWithRetry'
-            );
-            kokoDebugLog('[GROUP REPLY STEP 5] after requestEchoesMainResponseWithRetry', requestResult);
-            if (!requestResult) return null;
-            const { rawResponse, parsed, statesMissing, plainText } = requestResult;
-            window.ensureIsLatestAiRequest();
-            if (!window.isLatestAiRequest(group.id, requestId)) {
-                console.warn('[GROUP REPLY RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
-                return null;
-            }
-            if (statesMissing) {
-                console.warn('[ECHOES STATES MISSING]', {
-                    chatId: group.id,
-                    source: 'group-reply',
-                    requestId
-                });
-            }
-            let renderedResult;
-            if (plainText || !parsed) {
-                renderedResult = await renderLegacyGroupResponses(
-                    rawResponse,
-                    group,
-                    allMemberProfiles,
-                    requestId,
-                    '[GROUP REPLY MESSAGE SKIPPED] stale generation'
-                );
-            } else {
-                renderedResult = await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
-                    requestId,
-                    source: 'group-json'
-                });
-            }
-
-            if (state.activeChatId === group.id && state.currentChatMode === 'chat') {
-                const messagesContainer = document.getElementById('chat-messages');
-                let visibleWrappers = messagesContainer ? messagesContainer.querySelectorAll('.message-wrapper').length : 0;
-
-                if (messagesContainer && visibleWrappers === 0 && Array.isArray(group.history) && group.history.length > 0) {
-                    messagesContainer.innerHTML = '';
-                    if (typeof window.renderChatMessages === 'function') {
-                        window.renderChatMessages(group);
-                    }
-                    visibleWrappers = messagesContainer.querySelectorAll('.message-wrapper').length;
-                }
-
-                console.log('[GROUP REPLY RENDER DONE]', {
-                    groupId: group.id,
-                    historyLength: Array.isArray(group.history) ? group.history.length : 0,
-                    visibleWrappers
-                });
-
-                if (typeof window.scrollChatMessagesToBottom === 'function') {
-                    window.scrollChatMessagesToBottom('triggerGroupChatAiReply done');
-                }
-            }
-
-            return renderedResult;
-        } catch (error) {
-            const errorMessage = error?.stack || error?.message || String(error);
-            kokoDebugLog('[GROUP REPLY ERROR STACK]', {
-                message: error?.message,
-                stack: error?.stack
-            });
-            console.error('[FINAL GROUP REPLY FAILED]', {
-                message: error?.message,
-                name: error?.name,
-                stack: error?.stack
-            });
-            const content = String(error?.message || '').includes('buildGroupChatRequestContext timeout')
-                ? '群聊上下文构建超时，还没有进入 API 调用。'
-                : `群聊AI回复生成失败：\n${String(errorMessage).slice(0, 500)}`;
-            await window.safeCreateAndAddMessage({
-                type: 'system_notification',
-                sender: 'system',
-                content
-            }, 'system', group, false, 'chat');
-            return null;
-        } finally {
-            state.aiTypingStatus[group.id] = false;
-            if (chatStatusEl && state.activeChatId === group.id) {
-                chatStatusEl.textContent = '在线';
-            }
-        }
-    }
-
-    async function triggerGroupFreeChat(group) {
-        kokoDebugLog('[GROUP FREE STEP 1]', {
-            groupId: group?.id,
-            members: group?.members,
-            mutedMembers: group?.mutedMembers
-        });
-
-        if (!group || !group.isGroup) return null;
-
-        const chatStatusEl = document.getElementById('chat-contact-status');
-        state.aiTypingStatus[group.id] = true;
-
-        if (chatStatusEl && state.activeChatId === group.id) {
-            chatStatusEl.textContent = '群成员正在热烈讨论中...';
-        }
-
-        const requestId = window.createAiRequestId(group.id);
-
-        try {
-            kokoDebugLog('[GROUP FREE STEP 2] before context');
-
-            const { requestMessages, allMemberProfiles } = await withTimeout(
-                buildGroupChatRequestContext(group, 'free'),
-                20000,
-                'buildGroupChatRequestContext free'
-            );
-
-            kokoDebugLog('[GROUP FREE STEP 3] after context', {
-                requestMessagesCount: requestMessages?.length,
-                allMemberProfilesCount: allMemberProfiles?.length,
-                allMemberProfiles: allMemberProfiles?.map(p => ({ id: p.id, name: p.name }))
-            });
-
-            if (!allMemberProfiles.length) {
-                kokoDebugLog('[GROUP FREE NO AI MEMBERS]', {
-                    members: group?.members,
-                    mutedMembers: group?.mutedMembers,
-                    allMemberProfiles
-                });
-
-                await window.safeCreateAndAddMessage({
-                    type: 'system_notification',
-                    sender: 'system',
-                    content: '群聊没有可发言的 AI 成员，请检查群成员是否为空、是否全被禁言、或成员 ID 是否无法匹配。'
-                }, 'system', group, false, 'chat');
-
-                return null;
-            }
-
-            kokoDebugLog('[GROUP FREE STEP 4] before main request');
-
-            const requestResult = await withTimeout(
-                requestEchoesMainResponseWithRetry({
-                    chat: group,
-                    requestMessages,
-                    fallbackSenderProfile: allMemberProfiles[0] || null,
-                    requestId,
-                    source: 'group-free',
-                    maxAttempts: 1
-                }),
-                60000,
-                'group-free requestEchoesMainResponseWithRetry'
-            );
-
-            kokoDebugLog('[GROUP FREE STEP 5] after requestEchoesMainResponseWithRetry', requestResult);
-
-            if (!requestResult) return null;
-
-            const { rawResponse, parsed, statesMissing, plainText } = requestResult;
-
-            window.ensureIsLatestAiRequest();
-            if (!window.isLatestAiRequest(group.id, requestId)) {
-                console.warn('[GROUP FREE RESPONSE DISCARDED] not latest request', {
-                    chatId: group.id,
-                    requestId
-                });
-                return null;
-            }
-
-            if (statesMissing) {
-                console.warn('[ECHOES STATES MISSING]', {
-                    chatId: group.id,
-                    source: 'group-free',
-                    requestId
-                });
-            }
-
-            if (plainText || !parsed) {
-                return await renderLegacyGroupResponses(
-                    rawResponse,
-                    group,
-                    allMemberProfiles,
-                    requestId,
-                    '[GROUP FREE MESSAGE SKIPPED] stale generation'
-                );
-            }
-
-            return await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
-                requestId,
-                source: 'group-json'
-            });
-
-        } catch (error) {
-            const errorMessage = error?.stack || error?.message || String(error);
-            kokoDebugLog('[GROUP FREE ERROR STACK]', {
-                message: error?.message,
-                stack: error?.stack
-            });
-            console.error('[FINAL GROUP FREE FAILED]', {
-                message: error?.message,
-                name: error?.name,
-                stack: error?.stack
-            });
-
-            const content = String(error?.message || '').includes('buildGroupChatRequestContext free timeout')
-                ? '群聊自由聊天上下文构建超时，还没有进入 API 调用。'
-                : `群聊自由聊天失败：\n${String(errorMessage).slice(0, 500)}`;
-
-            await window.safeCreateAndAddMessage({
-                type: 'system_notification',
-                sender: 'system',
-                content
-            }, 'system', group, false, 'chat');
-
-            return null;
-
-        } finally {
-            state.aiTypingStatus[group.id] = false;
-
-            if (chatStatusEl && state.activeChatId === group.id) {
-                chatStatusEl.textContent = '在线';
-            }
-        }
-    }
+    /* Echoes-prioritizing display/process/parse/group-trigger implementations
+       removed here so that the original legacy implementations (defined earlier
+       in the file) remain the active functions for visible chat rendering.
+       Echoes helpers remain available but must not override main reply flows. */
 
     function getEchoesStateRecordsForPanel(chat, characterId) {
         const id = normalizeId(characterId);
@@ -51658,7 +51229,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-33]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-34]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
