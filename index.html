@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-27">
+<link rel="manifest" href="manifest.json?v=20260526-fix-28">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,10 +12049,10 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-27 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-28 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-27';
-window.getCreateAndAddMessage = function getCreateAndAddMessageGlobal() {
+window.KOKO_RUNTIME_VERSION = '20260526-fix-28';
+window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
     const fn =
         window.createAndAddMessage ||
         (typeof createAndAddMessage !== 'undefined' ? createAndAddMessage : null);
@@ -12061,11 +12061,7 @@ window.getCreateAndAddMessage = function getCreateAndAddMessageGlobal() {
         throw new Error('createAndAddMessage 未定义：原始消息创建函数没有挂到 window');
     }
 
-    return fn;
-};
-
-window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
-    return window.getCreateAndAddMessage().apply(this, args);
+    return fn.apply(this, args);
 };
 
 window.createAiRequestId = function createAiRequestIdGlobal(chatId) {
@@ -19826,16 +19822,6 @@ function getRecentGroupSpeakers(group, limit = 12) {
         )
         .slice(-limit)
         .map(msg => msg.sender);
-}
-
-function getGlobalBuildGroupChatRequestContext() {
-    const builder = typeof buildGroupChatRequestContext === 'function'
-        ? buildGroupChatRequestContext
-        : globalThis.buildGroupChatRequestContext;
-    if (typeof builder !== 'function') {
-        throw new Error('群聊上下文构建器未加载，请刷新页面后重试');
-    }
-    return builder;
 }
 
 function hasSpecialGroupMessageContent(content = '') {
@@ -49301,7 +49287,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-27 | 状态:${count}`;
+        badge.textContent = `fix-28 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -51246,13 +51232,11 @@ function resolveEchoesStateClickTarget(event) {
         if (chatStatusEl && state.activeChatId === group.id) {
             chatStatusEl.textContent = '群成员正在热烈讨论中...';
         }
-        window.ensureCreateAiRequestId();
         const requestId = window.createAiRequestId(group.id);
         try {
-            const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
             kokoDebugLog('[GROUP REPLY STEP 2] before context');
             const { requestMessages, allMemberProfiles } = await withTimeout(
-                buildGroupChatRequestContextFn(group, 'reply'),
+                buildGroupChatRequestContext(group, 'reply'),
                 20000,
                 'buildGroupChatRequestContext'
             );
@@ -51354,16 +51338,13 @@ function resolveEchoesStateClickTarget(event) {
             chatStatusEl.textContent = '群成员正在热烈讨论中...';
         }
 
-        window.ensureCreateAiRequestId();
         const requestId = window.createAiRequestId(group.id);
 
         try {
-            const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
-
             kokoDebugLog('[GROUP FREE STEP 2] before context');
 
             const { requestMessages, allMemberProfiles } = await withTimeout(
-                buildGroupChatRequestContextFn(group, 'free'),
+                buildGroupChatRequestContext(group, 'free'),
                 20000,
                 'buildGroupChatRequestContext free'
             );
@@ -51578,7 +51559,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-27]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-28]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
