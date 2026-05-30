@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-28">
+<link rel="manifest" href="manifest.json?v=20260526-fix-29">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,7 +12049,7 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-28 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-29 | 状态:0</div>
 <script>
 window.KOKO_RUNTIME_VERSION = '20260526-fix-28';
 window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
@@ -51300,6 +51300,11 @@ function resolveEchoesStateClickTarget(event) {
                 source: 'group-json'
             });
         } catch (error) {
+            const errorMessage = error?.stack || error?.message || String(error);
+            kokoDebugLog('[GROUP REPLY ERROR STACK]', {
+                message: error?.message,
+                stack: error?.stack
+            });
             console.error('[FINAL GROUP REPLY FAILED]', {
                 message: error?.message,
                 name: error?.name,
@@ -51307,7 +51312,7 @@ function resolveEchoesStateClickTarget(event) {
             });
             const content = String(error?.message || '').includes('buildGroupChatRequestContext timeout')
                 ? '群聊上下文构建超时，还没有进入 API 调用。'
-                : `群聊AI回复生成失败: ${error?.message || error?.name || '未知错误'}`;
+                : `群聊AI回复生成失败：\n${String(errorMessage).slice(0, 500)}`;
             await window.safeCreateAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
@@ -51425,6 +51430,11 @@ function resolveEchoesStateClickTarget(event) {
             });
 
         } catch (error) {
+            const errorMessage = error?.stack || error?.message || String(error);
+            kokoDebugLog('[GROUP FREE ERROR STACK]', {
+                message: error?.message,
+                stack: error?.stack
+            });
             console.error('[FINAL GROUP FREE FAILED]', {
                 message: error?.message,
                 name: error?.name,
@@ -51433,7 +51443,7 @@ function resolveEchoesStateClickTarget(event) {
 
             const content = String(error?.message || '').includes('buildGroupChatRequestContext free timeout')
                 ? '群聊自由聊天上下文构建超时，还没有进入 API 调用。'
-                : `群聊自由聊天失败: ${error?.message || error?.name || '未知错误'}`;
+                : `群聊自由聊天失败：\n${String(errorMessage).slice(0, 500)}`;
 
             await window.safeCreateAndAddMessage({
                 type: 'system_notification',
