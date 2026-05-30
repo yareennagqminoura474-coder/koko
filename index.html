@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260530-fix-35">
+<link rel="manifest" href="manifest.json?v=20260530-fix-36">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12073,9 +12073,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-35 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-36 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260530-fix-35';
+window.KOKO_RUNTIME_VERSION = '20260530-fix-36';
 window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
     const fn =
         window.createAndAddMessage ||
@@ -19192,7 +19192,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     contact[historyArray].push(fullMessage);
     const committedMessageIndex = contact[historyArray].length - 1;
 
-// fix-35: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-36: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
     // 不再在 createAndAddMessage 底层按消息猜测并提交状态。
 
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
@@ -19349,7 +19349,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 8. 保存联系人数据到 IndexedDB
     await kokoMemory.put('contacts', contact);
 
-// fix-35: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-36: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
 
     // 9. 刷新对应的列表视图 (主聊天列表 或 短信列表)
     if (fullMessage.sender !== 'system_instruction') {
@@ -19813,7 +19813,7 @@ async function renderLegacyGroupResponses(rawResponse, group, allMemberProfiles,
         allMemberProfiles[0]?.id || ''
     );
 
-    if (renderedMessages.length > 0 && typeof window.buildParsedEchoesFallbackFromRenderedMessages === 'function' && typeof window.saveEchoesParsedStatesAfterRender === 'function') {
+    if (renderedMessages.length > 0 && typeof window.buildParsedEchoesFallbackFromRenderedMessages === 'function') {
         const parsed = window.buildParsedEchoesFallbackFromRenderedMessages({
             chat: group,
             renderedMessages,
@@ -19824,19 +19824,23 @@ async function renderLegacyGroupResponses(rawResponse, group, allMemberProfiles,
                 ? (window.latestUserText(group, Date.now()) || '')
                 : ''
         });
-        await window.saveEchoesParsedStatesAfterRender({
-            chat: group,
-            parsed,
-            renderedMessages,
-            fallbackSenderProfile: allMemberProfiles[0] || null,
-            roundId: typeof window.createEchoesRoundId === 'function'
-                ? window.createEchoesRoundId(group, 'group-legacy')
-                : `round_${group?.id || 'group'}_legacy_${Date.now()}`,
-            roundUserText: typeof window.latestUserText === 'function'
-                ? (window.latestUserText(group, Date.now()) || '')
-                : '',
-            source: 'group-legacy'
-        });
+        try {
+            await window.safeSaveEchoesStatesAfterVisibleReply({
+                chat: group,
+                parsed,
+                renderedMessages,
+                fallbackSenderProfile: allMemberProfiles[0] || null,
+                roundId: typeof window.createEchoesRoundId === 'function'
+                    ? window.createEchoesRoundId(group, 'group-legacy')
+                    : `round_${group?.id || 'group'}_legacy_${Date.now()}`,
+                roundUserText: typeof window.latestUserText === 'function'
+                    ? (window.latestUserText(group, Date.now()) || '')
+                    : '',
+                source: 'group-legacy'
+            });
+        } catch (error) {
+            console.warn('[ECHOES SIDE SAVE OUTER FAILED NON_BLOCKING]', error);
+        }
     }
 
     return true;
@@ -25113,7 +25117,7 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
             source: 'legacy-plain-text',
             renderedCount: renderedMessages.length
         });
-        if (renderedMessages.length > 0 && typeof window.buildParsedEchoesFallbackFromRenderedMessages === 'function' && typeof window.saveEchoesParsedStatesAfterRender === 'function') {
+        if (renderedMessages.length > 0 && typeof window.buildParsedEchoesFallbackFromRenderedMessages === 'function') {
             const parsed = window.buildParsedEchoesFallbackFromRenderedMessages({
                 chat: originContext,
                 renderedMessages,
@@ -25124,19 +25128,23 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
                     ? (window.latestUserText(originContext, Date.now()) || '')
                     : ''
             });
-            await window.saveEchoesParsedStatesAfterRender({
-                chat: originContext,
-                parsed,
-                renderedMessages,
-                fallbackSenderProfile: senderProfile,
-                roundId: typeof window.createEchoesRoundId === 'function'
-                    ? window.createEchoesRoundId(originContext, 'legacy-plain-text')
-                    : `round_${originContext?.id || 'chat'}_legacy_plain_text_${Date.now()}`,
-                roundUserText: typeof window.latestUserText === 'function'
-                    ? (window.latestUserText(originContext, Date.now()) || '')
-                    : '',
-                source: 'legacy-plain-text'
-            });
+            try {
+                await window.safeSaveEchoesStatesAfterVisibleReply({
+                    chat: originContext,
+                    parsed,
+                    renderedMessages,
+                    fallbackSenderProfile: senderProfile,
+                    roundId: typeof window.createEchoesRoundId === 'function'
+                        ? window.createEchoesRoundId(originContext, 'legacy-plain-text')
+                        : `round_${originContext?.id || 'chat'}_legacy_plain_text_${Date.now()}`,
+                    roundUserText: typeof window.latestUserText === 'function'
+                        ? (window.latestUserText(originContext, Date.now()) || '')
+                        : '',
+                    source: 'legacy-plain-text'
+                });
+            } catch (error) {
+                console.warn('[ECHOES SIDE SAVE OUTER FAILED NON_BLOCKING]', error);
+            }
         }
     }
 }
@@ -49309,7 +49317,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-35 | 状态:${count}`;
+        badge.textContent = `fix-36 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -49366,7 +49374,7 @@ function resolveEchoesStateClickTarget(event) {
         roundUserText = '',
         roundId = ''
     }) {
-        // fix-35: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
+        // fix-36: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
         return null;
     }
 
@@ -50655,6 +50663,26 @@ function resolveEchoesStateClickTarget(event) {
         return saveEchoesParsedStatesAfterRender(args);
     }
 
+    async function safeSaveEchoesStatesAfterVisibleReply(args) {
+        try {
+            if (typeof window.saveEchoesParsedStatesAfterRender !== 'function') {
+                console.warn('[ECHOES SIDE SAVE SKIPPED]', 'saveEchoesParsedStatesAfterRender missing');
+                return [];
+            }
+            return await window.saveEchoesParsedStatesAfterRender(args);
+        } catch (error) {
+            console.warn('[ECHOES SIDE SAVE FAILED NON_BLOCKING]', {
+                message: error?.message,
+                stack: error?.stack,
+                chatId: args?.chat?.id,
+                source: args?.source
+            });
+            return [];
+        }
+    }
+
+    window.safeSaveEchoesStatesAfterVisibleReply = safeSaveEchoesStatesAfterVisibleReply;
+
     async function saveEchoesRoundStateRecord({
         chat,
         characterId,
@@ -51225,7 +51253,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-35]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-36]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
