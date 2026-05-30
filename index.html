@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-29">
+<link rel="manifest" href="manifest.json?v=20260526-fix-30">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-29 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-30 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-28';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-30';
 window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
     const fn =
         window.createAndAddMessage ||
@@ -14178,7 +14178,7 @@ async function buildAddressingPromptForGroupChat(group) {
             if (relationshipLines.length > 0) {
                 lines.push('');
                 lines.push('[群成员之间的关系参考]');
-                lines.push(...relationshipLines);
+                relationshipLines.forEach(line => lines.push(line));
             }
         }
     } catch (error) {
@@ -19138,7 +19138,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     contact[historyArray].push(fullMessage);
     const committedMessageIndex = contact[historyArray].length - 1;
 
-// fix-19: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-30: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
     // 不再在 createAndAddMessage 底层按消息猜测并提交状态。
 
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
@@ -19290,7 +19290,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 8. 保存联系人数据到 IndexedDB
     await kokoMemory.put('contacts', contact);
 
-// fix-19: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-30: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
 
     // 9. 刷新对应的列表视图 (主聊天列表 或 短信列表)
     if (fullMessage.sender !== 'system_instruction') {
@@ -23471,10 +23471,9 @@ async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfil
     const renderer = typeof window.renderEchoesJsonResponses === 'function'
         ? window.renderEchoesJsonResponses
         : renderEchoesStyleResponses;
-    const renderedMessages = await renderer(parsed, chat, fallbackSenderProfile, {
-        ...options,
+    const renderedMessages = await renderer(parsed, chat, fallbackSenderProfile, Object.assign({}, options || {}, {
         source: chat?.isGroup ? 'group-json' : 'private-json'
-    });
+    }));
     kokoDebugLog('[ECHOES JSON HANDLED]', {
         chatId: chat?.id,
         responseCount: parsed.responses?.length || 0,
@@ -25362,10 +25361,9 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
         // 这样无论是 [voice:...] 还是 [picture:...]，都会走主流程的“超强正则”
         if (textResponse) {
             // 注意：这里一定要 await，确保气泡都发完了，再往下执行
-            await processAndDisplayAiResponse(textResponse, senderProfile, effectiveChatContext, contextMode, {
-                ...options,
+            await processAndDisplayAiResponse(textResponse, senderProfile, effectiveChatContext, contextMode, Object.assign({}, options || {}, {
                 forceShowAvatar: forceAvatarForThisReply
-            });
+            }));
         }
 
         // 3. 稍微停顿一下，给用户看清最后一条消息的时间
@@ -25972,10 +25970,9 @@ case 'status': {
                             // 处理同一行剩余的文本 (保持之前的递归修复)
                             const remainingText = line.replace(commandMatch[0], '').trim();
                             if (remainingText) {
-                                await processAndDisplayAiResponse(remainingText, senderProfile, effectiveChatContext, contextMode, {
-                                    ...options,
+                                await processAndDisplayAiResponse(remainingText, senderProfile, effectiveChatContext, contextMode, Object.assign({}, options || {}, {
                                     forceShowAvatar: forceAvatarForThisReply
-                                });
+                                }));
                             }
                             
                             processed = true; 
@@ -38873,7 +38870,7 @@ async function shareCpResultToChat() {
             
             // ▼▼▼ 核心修复：完整保存题目元数据！ ▼▼▼
             type: q.type,       // 保存题目类型 (single/multiple/text)
-            options: q.options, // 保存完整的选项列表！(不再丢弃)
+            options: q['options'], // 保存完整的选项列表！(不再丢弃)
             // ▲▲▲ 修复结束 ▲▲▲
 
             userAns: q.userAns, 
@@ -40001,7 +39998,7 @@ function openAddGroupMemberModal(group) {
         const addedMemberNames = selectedIds.map(id => state.contacts.find(c => c.id === id)?.name).filter(Boolean);
 
         // 更新群成员列表
-        group.members.push(...selectedIds);
+        selectedIds.forEach(id => group.members.push(id));
         await kokoMemory.put('contacts', group);
 
         // 在群聊中发送系统通知
@@ -47083,9 +47080,8 @@ ${replyGuidance.guidance}
             { role: 'user', content: '请根据上面的要求，自然继续这场群聊。' }
         ]
         : [
-            { role: 'system', content: finalSystemPrompt },
-            ...recentOpenAiMessages
-        ];
+            { role: 'system', content: finalSystemPrompt }
+        ].concat(recentOpenAiMessages);
 
     console.log('[GROUP CTX STEP 7] return requestMessages', {
         count: requestMessages.length,
@@ -48211,31 +48207,8 @@ await initApp();
 }); 
 </script>
 <script>
-  (function() {
-const BUILD_VERSION = '20260526-fix-19';
-    const BUILD_KEY = 'koko_build_version';
-    const RELOAD_KEY = 'koko_build_version_reload_once';
-    try {
-      const currentVersion = localStorage.getItem(BUILD_KEY);
-      const url = new URL(window.location.href);
-      const currentUrlVersion = url.searchParams.get('v');
-      if (currentVersion !== BUILD_VERSION) {
-        localStorage.setItem(BUILD_KEY, BUILD_VERSION);
-      }
-      if (currentUrlVersion !== BUILD_VERSION) {
-        sessionStorage.setItem(RELOAD_KEY, BUILD_VERSION);
-        url.searchParams.set('v', BUILD_VERSION);
-        window.location.replace(url.toString());
-      }
-    } catch (error) {
-      console.log('BUILD 版本刷新检查失败: ', error);
-    }
-  })();
-</script>
-<script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-const SW_VERSION = '20260526-fix-19';
       navigator.serviceWorker.getRegistrations()
         .then(registrations => Promise.all(registrations.map(r => r.unregister())))
         .then(() => caches.keys())
@@ -49287,7 +49260,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-28 | 状态:${count}`;
+        badge.textContent = `fix-30 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -49344,7 +49317,7 @@ function resolveEchoesStateClickTarget(event) {
         roundUserText = '',
         roundId = ''
     }) {
-        // fix-19: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
+        // fix-30: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
         return null;
     }
 
@@ -50871,20 +50844,18 @@ function resolveEchoesStateClickTarget(event) {
             const beforeTimestamp = Date.now();
             if (baseDisplayAiTextInBubbles && baseDisplayAiTextInBubbles !== displayAiTextInBubbles) {
                 console.log('[ECHOES BASE DISPLAY USED]', { chatId: chat?.id, characterId, source: options?.source });
-                await baseDisplayAiTextInBubbles(content, speaker, chat, 'chat', {
-                    ...options,
+                await baseDisplayAiTextInBubbles(content, speaker, chat, 'chat', Object.assign({}, options || {}, {
                     __plainTextEchoesRendering: true,
                     skipHeartVoiceFallback: true,
                     forceShowAvatar: true
-                });
+                }));
             } else if (baseProcessAndDisplayAiResponse && baseProcessAndDisplayAiResponse !== processAndDisplayAiResponse) {
                 console.log('[ECHOES BASE PROCESS USED]', { chatId: chat?.id, characterId, source: options?.source });
-                await baseProcessAndDisplayAiResponse(content, speaker, chat, 'chat', {
-                    ...options,
+                await baseProcessAndDisplayAiResponse(content, speaker, chat, 'chat', Object.assign({}, options || {}, {
                     __plainTextEchoesRendering: true,
                     skipHeartVoiceFallback: true,
                     forceShowAvatar: true
-                });
+                }));
             } else if (typeof window.safeCreateAndAddMessage === 'function') {
                 console.log('[ECHOES DIRECT CREATE USED]', { chatId: chat?.id, characterId, source: options?.source });
                 await window.safeCreateAndAddMessage({
@@ -50895,12 +50866,13 @@ function resolveEchoesStateClickTarget(event) {
                     forceAvatar: true
                 }, speaker.id || characterId, chat, true, 'chat');
             }
-            rendered.push(...collectRenderedEchoesMessagesRobust(
+            const collectedMessages = collectRenderedEchoesMessagesRobust(
                 chat,
                 beforeLength,
                 beforeTimestamp,
                 speaker?.id || characterId || ''
-            ));
+            );
+            collectedMessages.forEach(message => rendered.push(message));
         }
         await saveEchoesParsedStatesAfterRender({
             chat,
@@ -50934,7 +50906,7 @@ function resolveEchoesStateClickTarget(event) {
                     : (fallbackSenderProfile || chat),
                 roundUserText: latestUserText(chat, Date.now()) || ''
             })).filter(Boolean);
-            states.push(...derivedStates);
+            derivedStates.forEach(stateRecord => states.push(stateRecord));
             parsed.statesDerivedFromResponses = derivedStates.length > 0;
         }
         if (parsed.statesDerivedFromResponses) {
@@ -50971,10 +50943,9 @@ function resolveEchoesStateClickTarget(event) {
             });
             return true;
         }
-        const renderedMessages = await renderEchoesJsonResponses(parsed, chat, fallbackSenderProfile, {
-            ...options,
+        const renderedMessages = await renderEchoesJsonResponses(parsed, chat, fallbackSenderProfile, Object.assign({}, options || {}, {
             source: chat?.isGroup ? 'group-json' : 'private-json'
-        });
+        }));
 
         kokoDebugLog('[ECHOES JSON HANDLED]', {
             chatId: chat?.id,
@@ -51023,20 +50994,18 @@ function resolveEchoesStateClickTarget(event) {
         let result = null;
         if (baseDisplayAiTextInBubbles && baseDisplayAiTextInBubbles !== displayAiTextInBubbles) {
             console.log('[ECHOES BASE DISPLAY USED]', { chatId: chat?.id, source: options?.source });
-            result = await baseDisplayAiTextInBubbles(safeText, senderProfile, originContext, contextMode, {
-                ...options,
+            result = await baseDisplayAiTextInBubbles(safeText, senderProfile, originContext, contextMode, Object.assign({}, options || {}, {
                 __plainTextEchoesRendering: true,
                 skipHeartVoiceFallback: true,
                 forceShowAvatar: true
-            });
+            }));
         } else if (baseProcessAndDisplayAiResponse && baseProcessAndDisplayAiResponse !== processAndDisplayAiResponse) {
             console.log('[ECHOES BASE PROCESS USED]', { chatId: chat?.id, source: options?.source });
-            result = await baseProcessAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, {
-                ...options,
+            result = await baseProcessAndDisplayAiResponse(safeText, senderProfile, originContext, contextMode, Object.assign({}, options || {}, {
                 __plainTextEchoesRendering: true,
                 skipHeartVoiceFallback: true,
                 forceShowAvatar: true
-            });
+            }));
         } else if (typeof window.safeCreateAndAddMessage === 'function') {
             console.log('[ECHOES DIRECT CREATE USED]', { chatId: chat?.id, source: options?.source });
             const speakerId = senderProfile?.id || chat?.id;
@@ -51085,15 +51054,13 @@ function resolveEchoesStateClickTarget(event) {
         if (!chat) return null;
         const parsed = parseEchoesStateResult(rawText, chat, senderProfile);
         if (parsed) {
-            return renderEchoesJsonResponses(parsed, chat, senderProfile, {
-                ...options,
+            return renderEchoesJsonResponses(parsed, chat, senderProfile, Object.assign({}, options || {}, {
                 source: chat.isGroup ? 'group-json' : 'private-json'
-            });
+            }));
         }
-        return renderPlainTextEchoesAndSave(rawText, senderProfile, originContext, contextMode, {
-            ...options,
+        return renderPlainTextEchoesAndSave(rawText, senderProfile, originContext, contextMode, Object.assign({}, options || {}, {
             source: options?.source || (chat.isGroup ? 'group-plain-text' : 'private-plain-text')
-        });
+        }));
     }
 
     async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat', options = {}) {
@@ -51126,10 +51093,9 @@ function resolveEchoesStateClickTarget(event) {
                 : null;
         }
 
-        return renderPlainTextEchoesAndSave(safeText, senderProfile, originContext, contextMode, {
-            ...options,
+        return renderPlainTextEchoesAndSave(safeText, senderProfile, originContext, contextMode, Object.assign({}, options || {}, {
             source: options?.source || (chat.isGroup ? 'group-plain-text' : 'private-plain-text')
-        });
+        }));
     }
 
     function splitAiTextIntoBubbles(text) {
@@ -51194,12 +51160,13 @@ function resolveEchoesStateClickTarget(event) {
                         content: String(content || '').trim()
                     }, speaker.id, group, true, 'chat');
                 }
-                renderedMessages.push(...collectRenderedEchoesMessagesRobust(
+                const collectedMessages = collectRenderedEchoesMessagesRobust(
                     group,
                     beforeLength,
                     beforeTimestamp,
                     parsedMessage?.speaker?.id || ''
-                ));
+                );
+                collectedMessages.forEach(message => renderedMessages.push(message));
             }
             const parsedFallback = buildParsedEchoesFallbackFromRenderedMessages({
                 chat: group,
@@ -51516,8 +51483,8 @@ function resolveEchoesStateClickTarget(event) {
     window.buildParsedEchoesFallbackFromRenderedMessages = buildParsedEchoesFallbackFromRenderedMessages;
     window.buildDerivedEchoesStateForRound = buildDerivedEchoesStateForRound;
     window.finalizeEchoesStatesForAiRound = finalizeEchoesStatesForAiRound;
-    window.collectRenderedEchoesMessages = collectRenderedEchoesMessages;
-    window.collectRenderedEchoesMessagesRobust = collectRenderedEchoesMessagesRobust;
+    window['collectRenderedEchoesMessages'] = collectRenderedEchoesMessages;
+    window['collectRenderedEchoesMessagesRobust'] = collectRenderedEchoesMessagesRobust;
     window.latestUserText = latestUserText;
     window.getStateTextForMessage = getStateTextForMessage;
     window.savePrivateRoundEchoesState = savePrivateRoundEchoesState;
@@ -51569,7 +51536,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-28]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-30]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
@@ -52341,11 +52308,10 @@ function resolveEchoesStateClickTarget(event) {
     }
 
     function openEchoesOriginalStateHistoryPanel(chatId, characterId, options = {}) {
-        return openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, {
-            ...options,
+        return openEchoesOriginalStatePanel(chatId || state?.activeChatId, characterId, Object.assign({}, options || {}, {
             createFallbackIfEmpty: false,
             showHistory: true
-        });
+        }));
     }
 
     function refreshEchoesOriginalStatePanelIfOpen(chat) {
