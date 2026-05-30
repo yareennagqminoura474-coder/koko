@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-26">
+<link rel="manifest" href="manifest.json?v=20260526-fix-27">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,25 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-26 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-27 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-26';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-27';
+window.getCreateAndAddMessage = function getCreateAndAddMessageGlobal() {
+    const fn =
+        window.createAndAddMessage ||
+        (typeof createAndAddMessage !== 'undefined' ? createAndAddMessage : null);
+
+    if (typeof fn !== 'function') {
+        throw new Error('createAndAddMessage 未定义：原始消息创建函数没有挂到 window');
+    }
+
+    return fn;
+};
+
+window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
+    return window.getCreateAndAddMessage().apply(this, args);
+};
+
 window.createAiRequestId = function createAiRequestIdGlobal(chatId) {
     if (!window.state) {
         window.state = (typeof state !== 'undefined' ? state : {});
@@ -12578,7 +12594,7 @@ async function switchSong(index, autoPlay = true, notifyAI = false) { // 1. 这�
         const systemPrompt = `[SYSTEM: 歌曲已经切换为《${song.title}》，演唱者是 ${song.artist}。]`;
         
         // 核心改动：只创建一条隐藏的系统指令，不触发AI自动回复
-        await createAndAddMessage({ type: 'text', content: systemPrompt }, 'system_instruction');
+        await window.safeCreateAndAddMessage({ type: 'text', content: systemPrompt }, 'system_instruction');
     }
 }
 
@@ -16406,7 +16422,7 @@ function renderEmoticonPicker() {
                 <div class="emoticon-name">${emo.name}</div>
             `;
             item.addEventListener('click', async () => {
-                await createAndAddMessage({ 
+                await window.safeCreateAndAddMessage({ 
                     type: 'image', 
                     url: emo.url,
                     isEmoticon: true,
@@ -17241,9 +17257,9 @@ async function exitEditMode() {
                     const tempActiveChatId = state.activeChatId;
                     state.activeChatId = contactId; // 临时切换上下文
                     
-                    await createAndAddMessage({ type: 'post_share', content: { postId } });
+                    await window.safeCreateAndAddMessage({ type: 'post_share', content: { postId } });
                     if (accompanyingMessage) {
-                        await createAndAddMessage({ type: 'text', content: accompanyingMessage });
+                        await window.safeCreateAndAddMessage({ type: 'text', content: accompanyingMessage });
                     }
                     
                     state.activeChatId = tempActiveChatId; // 切换回来
@@ -18708,7 +18724,7 @@ if (message.sender === 'user' && message.type !== 'system_notification') { // 2.
     // ▼▼▼ 修改开始 ▼▼▼
     // 1. 创建一条系统指令消息，类型设为 'system_instruction'
     // 这样这条消息会进入历史记录，AI 下次聊天时能看到，但现在不会触发 AI 回复
-    await createAndAddMessage({
+    await window.safeCreateAndAddMessage({
         type: 'text',
         content: `[SYSTEM: 你们的宠物刚刚进化了！${evolutionMessage}]`
     }, 'system_instruction', contact);
@@ -19307,6 +19323,11 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 11. 返回创建的消息对象，方便其他函数使用
     return fullMessage;
 }
+window.createAndAddMessage = createAndAddMessage;
+window.safeCreateAndAddMessage = window.safeCreateAndAddMessage || async function(...args) {
+    return createAndAddMessage.apply(this, args);
+};
+console.log('[GLOBAL createAndAddMessage INSTALLED]', typeof window.createAndAddMessage);
 
 // (V2 修复版) 发送消息：正确记录引用对象的 NPC 名字
 async function sendMessage() {
@@ -19355,7 +19376,7 @@ async function sendMessage() {
     }
 
     // 3. 发送消息
-    await createAndAddMessage(messageData, 'user', contact, false, 'chat');
+    await window.safeCreateAndAddMessage(messageData, 'user', contact, false, 'chat');
 
     // 4. 清理工作
     messageInput.value = '';
@@ -19483,7 +19504,7 @@ async function requestAiReply(systemInstruction = null, targetContactId = null) 
     if (!contact) return;
 
     if (systemInstruction) {
-         await createAndAddMessage({ type: 'text', content: systemInstruction }, 'system_instruction', contact); // 把contact传进去
+         await window.safeCreateAndAddMessage({ type: 'text', content: systemInstruction }, 'system_instruction', contact); // 把contact传进去
     }
 
     if (contact.history.filter(m => m.sender !== 'system_instruction').length === 0) {
@@ -19500,7 +19521,7 @@ async function requestAiReply(systemInstruction = null, targetContactId = null) 
 async function triggerAiReply(contact) {
             if (contact.needsNarrativeModeExitPrompt === true) { 
                 const exitInstruction = `[SYSTEM COMMAND: CRITICAL! IMMEDIATE FORMAT CHANGE REQUIRED!] You have just exited Narrative Mode. Your response format MUST IMMEDIATELY and STRICTLY return to the standard multi-line chat format. - DO NOT write a single long paragraph. - DO NOT include any descriptions of actions, expressions, or thoughts (e.g., *...* or {...}). - You MUST use multi-line responses and commands like [sticker:name] where appropriate. This is a strict and immediate format change. Acknowledge and comply.`;
-                await createAndAddMessage({ type: 'text', content: exitInstruction }, 'system_instruction'); 
+                await window.safeCreateAndAddMessage({ type: 'text', content: exitInstruction }, 'system_instruction'); 
                 delete contact.needsNarrativeModeExitPrompt;
             } 
           
@@ -19522,7 +19543,7 @@ async function triggerAiReply(contact) {
                 if (contact) {
                     if (contact.lastKnownUserStatus && contact.lastKnownUserStatus !== currentUserStatus) {
                         const statusChangeInstruction = `[SYSTEM: 你的对话伙伴刚刚将状态从“${contact.lastKnownUserStatus}”改为了“${currentUserStatus}”。这是一个很好的机会，你可以自然地关心一下，比如问：“我看到你的状态变了，还好吗？”。这次之后就不用再提了。]`;
-                        await createAndAddMessage({ type: 'text', content: statusChangeInstruction }, 'system_instruction');
+                        await window.safeCreateAndAddMessage({ type: 'text', content: statusChangeInstruction }, 'system_instruction');
                     }
                     contact.lastKnownUserStatus = currentUserStatus;
                 }
@@ -19546,7 +19567,7 @@ async function triggerAiReply(contact) {
                     systemInstruction = `[SYSTEM: 用户给你转账了 ${lastUnopenedMessage.content.amount}元。如果你决定收下，请在回复中包含“收下”、“谢谢”等词。不想收可以忽略。]`;
                 }
                 
-                await createAndAddMessage({ type: 'text', content: systemInstruction }, 'system_instruction');
+                await window.safeCreateAndAddMessage({ type: 'text', content: systemInstruction }, 'system_instruction');
                 lastUnopenedMessage.hasRemindedAI = true;
                 await kokoMemory.put('contacts', contact);
             }
@@ -19681,7 +19702,7 @@ if (!window.isLatestAiRequest(contact.id, requestId)) {
         await displayAiTextInBubbles(rawResponse, contact, contact, 'chat', { requestId });
     } catch (e) {
         console.error("私聊自由聊天执行失败:", e);
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'system_notification',
             sender: 'system',
             content: `AI自由聊天失败: ${e.message}`
@@ -19839,7 +19860,7 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
 
     let addedMessage = null;
     if (!hasSpecialGroupMessageContent(text)) {
-        addedMessage = await createAndAddMessage({
+        addedMessage = await window.safeCreateAndAddMessage({
             type: 'text',
             sender: speaker.id,
             senderId: speaker.id,
@@ -22353,7 +22374,7 @@ case 'upload-image': document.getElementById('image-upload-input').click(); brea
                     addOneTimeListener('confirm-send-picture-btn', async () => {
                         const description = descriptionInput.value.trim();
                         if (description) {
-                            await createAndAddMessage({ type: 'picture_description', content: { description } });
+                            await window.safeCreateAndAddMessage({ type: 'picture_description', content: { description } });
                             modal.style.display = 'none';
                         }
                     });
@@ -22417,7 +22438,7 @@ case 'send-group-transfer': {
         await addTransaction('expense', amount, `在群聊中转账给 ${recipient.name}`, group.id);
         
         // 创建一个新的转账消息，带有收款人信息
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'transfer',
             content: {
                 amount: amount.toFixed(2),
@@ -22442,7 +22463,7 @@ case 'send-group-transfer': {
                         const voiceText = voiceTextInput.value.trim();
                         if (voiceText) {
                             const duration = Math.max(1, Math.round(voiceText.length / 4));
-                            await createAndAddMessage({ type: 'voice', content: { duration, text: voiceText } });
+                            await window.safeCreateAndAddMessage({ type: 'voice', content: { duration, text: voiceText } });
                             modal.style.display = 'none';
                         }
                     });
@@ -22512,7 +22533,7 @@ case 'send-red-packet': {
             state.myProfile.balance -= amount;
             await addTransaction('expense', amount, `在群聊"${contact.name}"中发红包`, contact.id);
 
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'red_packet',
                 content: {
                     totalAmount: amount,
@@ -22527,7 +22548,7 @@ case 'send-red-packet': {
             state.myProfile.balance -= amount;
             await addTransaction('expense', amount, `发红包给 ${contact.name}`, contact.id);
 
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'red_packet',
                 content: {
                     amount: amount.toFixed(2), // 私聊是单个红包
@@ -22560,7 +22581,7 @@ case 'send-red-packet': {
                             renderMyProfile();
                             await kokoMemory.put('myProfile', state.myProfile);
 
-                            await createAndAddMessage({
+                            await window.safeCreateAndAddMessage({
                                 type: 'transfer',
                                 content: { amount: transferAmount.toFixed(2), completed: false }
                             });
@@ -22609,7 +22630,7 @@ case 'share-music': {
         
         // 添加到播放列表并分享
         contact.sharedPlaylist.tracks.push(song);
-        await createAndAddMessage({ type: 'music_share', content: song }, 'user', contact, false, 'chat');
+        await window.safeCreateAndAddMessage({ type: 'music_share', content: song }, 'user', contact, false, 'chat');
         
         if (document.getElementById('notify-ai-checkbox').checked) {
             const systemPrompt = `[SYSTEM: 用户分享了一首歌曲《${title}》，来自${artist || '未知艺术家'}。请你发表一下你的感想。]`;
@@ -22714,7 +22735,7 @@ async function createSystemNotification(content, targetContact = null, contextMo
     const contact = targetContact || state.contacts.find(c => c.id === state.activeChatId);
     if (!contact) return;
 
-await createAndAddMessage({
+await window.safeCreateAndAddMessage({
         type: 'system_notification',
         sender: 'system',
         content: content
@@ -22785,7 +22806,7 @@ newConfirmBtn.addEventListener('click', async () => {
     await openChat(state.activeChatId);
 
     // 这条消息现在会正确地添加到群聊的记忆中
-    await createAndAddMessage({
+    await window.safeCreateAndAddMessage({
         type: 'text',
         content: `[SYSTEM: 我刚刚点击并接受了 ${senderProfile.name} 的转账。]`
     }, 'system_instruction');
@@ -22816,7 +22837,7 @@ newReturnBtn.addEventListener('click', async () => {
     await openChat(state.activeChatId);
 
     // 为了让AI在群聊中更清晰，优化了SYSTEM指令
-    await createAndAddMessage({
+    await window.safeCreateAndAddMessage({
         type: 'text',
         content: `[SYSTEM: 我刚刚退回了 ${senderProfile.name} 的转账。]`
     }, 'system_instruction');
@@ -23320,7 +23341,7 @@ async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile
                 : (state.contacts.find(item => normalizeMessageSenderId(item.id) === characterId) || fallbackSenderProfile || chat);
             if (!speaker || !speaker.id) continue;
 
-            const message = await createAndAddMessage({
+            const message = await window.safeCreateAndAddMessage({
                 type: 'text',
                 sender: speaker.id,
                 senderId: speaker.id,
@@ -24912,7 +24933,7 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
                 switch (command) {
                     case 'picture':
                         // (处理图片的逻辑不变)
-                        await createAndAddMessage({
+                        await window.safeCreateAndAddMessage({
                             type: 'picture_description',
                             sender: senderProfile.id,
                             content: { description: value.trim() }
@@ -24934,7 +24955,7 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
                             // 2. 在 'chat' 模式下发送系统通知到【主聊天】
                             //    注意：我们传入 senderProfile 作为目标，
                             //    这样 createAndAddMessage 会把消息添加到 senderProfile.history 数组中
-                            await createAndAddMessage({
+                            await window.safeCreateAndAddMessage({
                                 type: 'system_notification',
                                 sender: 'system',
                                 content: `${senderProfile.name} 已将你解除拉黑。`
@@ -24956,7 +24977,7 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
             
             // 4. 如果不是指令，并且不是空行，才作为普通文本发送
             if (!processed && line.trim()) {
-                await createAndAddMessage({
+                await window.safeCreateAndAddMessage({
                     type: 'text',
                     sender: senderProfile.id,
                     content: line.trim()
@@ -25042,7 +25063,7 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
         && contextMode === 'chat';
     let deferredExplicitHeartVoiceContent = null;
     const addSenderChatMessage = async (messageData, target = effectiveChatContext, mode = 'chat', forceAvatar = forceAvatarForThisReply) => {
-        const addedMessage = await createAndAddMessage(messageData, senderProfile.id, target, forceAvatar, mode);
+        const addedMessage = await window.safeCreateAndAddMessage(messageData, senderProfile.id, target, forceAvatar, mode);
         if (addedMessage && mode === 'chat' && target?.id === effectiveChatContext?.id) {
             hvRelatedMessageIds.push(addedMessage.id);
 
@@ -25112,7 +25133,7 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
             }
 
             // 2. 发送系统通知
-            await createAndAddMessage({ 
+            await window.safeCreateAndAddMessage({ 
                 type: 'system_notification', 
                 sender: 'system', 
                 content: `状态变更为：${newStatus}` 
@@ -25229,7 +25250,7 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
                 await kokoMemory.put('contacts', effectiveChatContext);
 
                 // 5. 发送系统提示 (视觉反馈)
-                await createAndAddMessage({ 
+                await window.safeCreateAndAddMessage({ 
                     type: 'system_notification', 
                     sender: 'system',
                     content: `💎 “${memoryContent}” 已刻入 Ta 的记忆核心。` 
@@ -25373,7 +25394,7 @@ if (/\[(heart_voice|心声)\]/i.test(conversation)) {
     // ▲▲▲▲▲▲▲▲▲▲ 修复结束 ▲▲▲▲▲▲▲▲▲▲
 
     if (contextMode === 'chat' && state.activeCall && state.activeCall.contactId === effectiveChatContext.id) {
-const activeCallMessage = await createAndAddMessage({
+const activeCallMessage = await window.safeCreateAndAddMessage({
             type: 'video_call_text',
             content: conversation
         }, senderProfile.id, senderProfile, false, 'chat');
@@ -25635,7 +25656,7 @@ if (fullDialogue) {
                 }
 
                 // 2. 发送系统通知 (让用户知道状态变了)
-                await createAndAddMessage({ 
+                await window.safeCreateAndAddMessage({ 
                     type: 'system_notification', 
                     sender: 'system',
                     content: `状态变更为：${extractedStatus}` 
@@ -25955,7 +25976,7 @@ case 'status': {
                                 }
 
                                 // 2. 发送系统通知
-                                await createAndAddMessage({ 
+                                await window.safeCreateAndAddMessage({ 
                                     type: 'system_notification', 
                                     sender: 'system',
                                     content: `状态变更为：${newStatus}` 
@@ -26140,7 +26161,7 @@ case 'takeout': {
                             }
 
                             // 1. 发送系统提示 (灰字)
-                            await createAndAddMessage({
+                            await window.safeCreateAndAddMessage({
                                 type: 'system_notification',
                                 sender: 'system',
                                 content: `${senderProfile.name} 拍了拍你的${suffix}`
@@ -26197,7 +26218,7 @@ case 'takeout': {
                                     await kokoMemory.put('contacts', effectiveChatContext);
 
                                     // 4. 发送一个唯美的系统提示
-                                    await createAndAddMessage({ 
+                                    await window.safeCreateAndAddMessage({ 
                                         type: 'system_notification', 
                                         sender: 'system',
                                         // 用一个脑子或者心的图标
@@ -26471,7 +26492,7 @@ async function startVideoCall(contactId, initiatedBy = 'user') {
         const decisionPrompt = `[SYSTEM: 用户正在向你发起视频通话请求。根据你们最近的对话和你当前的心情，请用一个词决定是否接听：“接听”或“拒绝”。\n\n- 如果你现在很忙、生气或不想说话，就回复“拒绝”。\n- 否则，回复“接听”。\n\n不要添加任何其他文字，只回复这两个词中的一个。]`;
         const decision = await generateAiResponse(contact, contact.history, decisionPrompt);
         if (decision.includes('拒绝')) {
-            await createAndAddMessage({ type: 'system_notification', sender: 'system', content: `${contact.name} 现在不想接电话` });
+            await window.safeCreateAndAddMessage({ type: 'system_notification', sender: 'system', content: `${contact.name} 现在不想接电话` });
             await requestAiReply(`[SYSTEM: 你刚刚拒绝了用户的视频通话请求，请发送一条简短的文字消息向用户解释原因（例如：在忙、心情不好等）。]`);
             return;
         }
@@ -26491,7 +26512,7 @@ async function startVideoCall(contactId, initiatedBy = 'user') {
     
     // 永久记录通话开始事件
     const startMessage = initiatedBy === 'user' ? `你向 ${contact.name} 发起了视频通话` : `${contact.name} 向你发起了视频通话`;
-    await createAndAddMessage({ type: 'system_notification', sender: 'system', content: startMessage });
+    await window.safeCreateAndAddMessage({ type: 'system_notification', sender: 'system', content: startMessage });
 
     if (callTimerInterval) clearInterval(callTimerInterval);
     callTimerInterval = setInterval(updateCallUI, 1000);
@@ -26526,9 +26547,9 @@ async function endVideoCall(endedBy = 'user', reason = '通话已挂断') {
     const durationText = `通话时长 ${durationMinutes}分${durationSeconds}秒`;
 
     // 2. 在调用时，把 contact 作为第三个参数传进去
-    await createAndAddMessage({ type: 'system_notification', sender: 'system', content: `${reason}，${durationText}` }, 'system', contact, false, 'chat'); 
+    await window.safeCreateAndAddMessage({ type: 'system_notification', sender: 'system', content: `${reason}，${durationText}` }, 'system', contact, false, 'chat'); 
     
-    await createAndAddMessage({ type: 'text', content: '[SYSTEM: 通话已正式结束，立刻恢复标准聊天模式。]' }, 'system_instruction', contact, false, 'chat');
+    await window.safeCreateAndAddMessage({ type: 'text', content: '[SYSTEM: 通话已正式结束，立刻恢复标准聊天模式。]' }, 'system_instruction', contact, false, 'chat');
 
     if (endedBy === 'user') {
         // (这部分功能可以保留或根据你的需要调整)
@@ -26565,7 +26586,7 @@ function handleIncomingCall(contact) {
     oldDeclineBtn.parentNode.replaceChild(newDeclineBtn, oldDeclineBtn);
     newDeclineBtn.addEventListener('click', async () => {
         screen.style.display = 'none';
-        await createAndAddMessage({ type: 'system_notification', sender: 'system', content: `你拒接了 ${contact.name} 的视频通话` }, 'system', contact, false, 'chat');
+        await window.safeCreateAndAddMessage({ type: 'system_notification', sender: 'system', content: `你拒接了 ${contact.name} 的视频通话` }, 'system', contact, false, 'chat');
         //await requestAiReply(`[SYSTEM: 用户刚刚拒接了你的视频通话请求。你可能会感到失落或好奇，请发送一条文字消息询问原因。]`);
     });
 }
@@ -26582,7 +26603,7 @@ async function sendVideoCallMessage() {
     if (!contact) return;
 
     // 使用我们之前修复好的方式，明确指定消息的接收者
-    await createAndAddMessage({ type: 'video_call_text', content: content }, 'user', contact, false, 'chat');
+    await window.safeCreateAndAddMessage({ type: 'video_call_text', content: content }, 'user', contact, false, 'chat');
 
     const narrativeFeed = document.getElementById('narrative-feed');
     narrativeFeed.innerHTML += `<div class="user-message"><p>${content}</p></div>`;
@@ -27844,7 +27865,7 @@ async function openSmsChat(contactId) {
                 // 确保我们是在短信模式下
                 if (contact && state.currentChatMode === 'sms') {
                     // 3. 创建 picture_description 消息
-                    await createAndAddMessage(
+                    await window.safeCreateAndAddMessage(
                         { 
                             type: 'picture_description', // 使用和主聊天一样的类型
                             content: { description } 
@@ -29765,7 +29786,7 @@ async function openLocationPicker(mapId) {
             // 【核心】为每个地点条目绑定点击事件
             item.addEventListener('click', async () => {
                 // 创建并发送位置消息
-                await createAndAddMessage({
+                await window.safeCreateAndAddMessage({
                     type: 'location_share',
                     content: {
                         mapId: mapId,
@@ -33350,7 +33371,7 @@ function openPsContactPicker() {
         for (const uid of selectedIds) {
             const contact = state.contacts.find(c => c.id === uid);
             if (contact) {
-                await createAndAddMessage({ 
+                await window.safeCreateAndAddMessage({ 
                     type: 'chat_history_share', 
                     content: finalForwardData 
                 }, 'user', contact);
@@ -35095,13 +35116,13 @@ async function openForwardChatModal() {
             if (!recipientContact) continue;
 
             // 发送这条【新类型】的消息
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'chat_history_share',
                 content: forwardData
             }, 'user', recipientContact, false, 'chat');
 
             if (accompanyingMessage) {
-                await createAndAddMessage({
+                await window.safeCreateAndAddMessage({
                     type: 'text',
                     content: accompanyingMessage
                 }, 'user', recipientContact, false, 'chat');
@@ -37997,7 +38018,7 @@ const commandRegex = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_t
             switch (command) {
                 case 'voice': {
                     const duration = Math.max(1, Math.round(value.length / 4));
-                    await createAndAddMessage({ type: 'voice', content: { text: value, duration: duration } }, speakerProfile.id, speakerProfile, isFirstLine, 'chat');
+                    await window.safeCreateAndAddMessage({ type: 'voice', content: { text: value, duration: duration } }, speakerProfile.id, speakerProfile, isFirstLine, 'chat');
                     break;
                 }
 // ... 省略了其他case ...
@@ -38008,15 +38029,15 @@ const commandRegex = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_t
                     // ▲▲▲ 修改结束 ▲▲▲
                     
                     if (emoticon) {
-                        await createAndAddMessage({ type: 'image', url: emoticon.url, isEmoticon: true, emoticonName: emoticon.name }, speakerProfile.id, speakerProfile, isFirstInSequence, 'chat');
+                        await window.safeCreateAndAddMessage({ type: 'image', url: emoticon.url, isEmoticon: true, emoticonName: emoticon.name }, speakerProfile.id, speakerProfile, isFirstInSequence, 'chat');
                     } else {
-                        await createAndAddMessage({ type: 'text', content: `[发送表情失败: ${value}]` }, speakerProfile.id, speakerProfile, isFirstInSequence, 'chat');
+                        await window.safeCreateAndAddMessage({ type: 'text', content: `[发送表情失败: ${value}]` }, speakerProfile.id, speakerProfile, isFirstInSequence, 'chat');
                     }
                     break;
 // ... 之后的代码
 // ... 省略了其他case ...
                 case 'picture': {
-                    await createAndAddMessage({ type: 'picture_description', content: { description: value } }, speakerProfile.id, speakerProfile, isFirstLine, 'chat');
+                    await window.safeCreateAndAddMessage({ type: 'picture_description', content: { description: value } }, speakerProfile.id, speakerProfile, isFirstLine, 'chat');
                     break;
                 }
                 // 你可以根据需要，把 processAndDisplayAiResponse 里的其他 case (如 sticker, music 等) 也复制到这里
@@ -38026,7 +38047,7 @@ const commandRegex = /\[\s*(sticker|voice|picture|red_packet|transfer|transfer_t
 
         // 5. 如果不是任何特殊指令，就当作普通文本处理
         if (!processed) {
-            await createAndAddMessage({ type: 'text', content: line }, speakerProfile.id, speakerProfile, isFirstLine, 'chat');
+            await window.safeCreateAndAddMessage({ type: 'text', content: line }, speakerProfile.id, speakerProfile, isFirstLine, 'chat');
         }
 
         // 6. 加入延迟，让对话看起来更自然
@@ -38884,7 +38905,7 @@ async function shareCpResultToChat() {
     hideAllScreens();
     state.activeChatId = targetId; 
     
-    await createAndAddMessage({ 
+    await window.safeCreateAndAddMessage({ 
         type: 'cp_share', 
         content: shareContent 
     }, 'user', contact);
@@ -40000,7 +40021,7 @@ function openAddGroupMemberModal(group) {
         // 在群聊中发送系统通知
         const tempActiveChatId = state.activeChatId;
         state.activeChatId = group.id;
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'system_notification',
             sender: 'system',
             content: `你邀请 "${addedMemberNames.join('", "')}" 加入了群聊`
@@ -40099,7 +40120,7 @@ document.getElementById('group-settings-screen').addEventListener('click', async
             
             const tempActiveChatId = state.activeChatId;
             state.activeChatId = group.id;
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
                 content: `你将 "${memberName}" 移出了群聊`
@@ -40418,7 +40439,7 @@ async function handleShareProduct(intent, contactId) {
     const originalActiveChatId = state.activeChatId; // 保存原始状态
     state.activeChatId = contact.id; // 临时设为目标联系人
     
-    await createAndAddMessage({
+    await window.safeCreateAndAddMessage({
         type: 'product_share',
         content: {
             productDetails: currentProductData,
@@ -40979,7 +41000,7 @@ function openGroupSettingsScreen(group) {
         // 临时切换 activeChatId 来正确添加第一条系统消息
         const tempActiveChatId = state.activeChatId;
         state.activeChatId = newGroup.id;
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'system_notification',
             sender: 'system',
             content: `你创建了群聊`
@@ -41796,7 +41817,7 @@ document.getElementById('clear-chat-history-btn').addEventListener('click', asyn
                     currentContact.pet.workFinishTimestamp = null;
                     await kokoMemory.put('contacts', currentContact);
                     state.contacts = await kokoMemory.getAll('contacts');
-                    await createAndAddMessage({
+                    await window.safeCreateAndAddMessage({
                         type: 'system_notification',
                         sender: 'system',
                         content: `你们的史莱姆'${currentContact.pet.name}'打工回来啦！赚了50金币！`
@@ -43810,7 +43831,7 @@ globalAudioPlayer.addEventListener('ended', async () => {
         }
 
         // 6. 发送系统提示 (这就够了，AI下次看历史记录会知道你拍过它)
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'system_notification',
             sender: 'system',
             content: systemText
@@ -43881,7 +43902,7 @@ document.getElementById('confirm-send-wheel-btn').addEventListener('click', asyn
         return alert('转盘至少需要2个有效的选项！');
     }
 
-    await createAndAddMessage({
+    await window.safeCreateAndAddMessage({
         type: 'game_wheel',
         content: {
             id: `wheel_${Date.now()}`,
@@ -44733,7 +44754,7 @@ newConfirmNpcBtn.addEventListener('click', async () => {
         
         // 如果是导入的，提示语稍微不同，显得更智能
         const actionText = importedId ? "被拉入" : "已加入";
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'system_notification',
             sender: 'system',
             content: `NPC角色 "${name}" ${actionText}群聊`
@@ -44936,7 +44957,7 @@ document.getElementById('image-upload-input').addEventListener('change', async (
         const base64String = await handleImageUpload(file);
         
         // 用新的消息类型发送
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'uploaded_image',
             content: {
                 base64: base64String
@@ -46602,7 +46623,7 @@ async function runKokoAiRound({ chat, mode, userText = '', reason = '' }) {
     try {
         const speakers = resolveKokoRoundSpeakers(liveChat);
         if (!speakers.length) {
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
                 content: '没有可发言的 AI 角色，请检查群成员。'
@@ -46634,7 +46655,7 @@ async function runKokoAiRound({ chat, mode, userText = '', reason = '' }) {
         }
 
         if (!String(rawText || '').trim()) {
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
                 content: 'AI 返回为空，请检查模型或 API 设置。'
@@ -46650,7 +46671,7 @@ async function runKokoAiRound({ chat, mode, userText = '', reason = '' }) {
         });
 
         if (!parsed.responses.length) {
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
                 content: 'AI 返回为空。'
@@ -46667,7 +46688,7 @@ async function runKokoAiRound({ chat, mode, userText = '', reason = '' }) {
             state.suppressEchoesStateCommit = true;
             let message = null;
             try {
-                message = await createAndAddMessage({
+                message = await window.safeCreateAndAddMessage({
                     type: 'text',
                     sender: characterId,
                     senderId: characterId,
@@ -46692,7 +46713,7 @@ async function runKokoAiRound({ chat, mode, userText = '', reason = '' }) {
         return savedMessages;
     } catch (error) {
         kokoDebugLog('[AI ROUND FAILED]', { message: error?.message, name: error?.name, stack: error?.stack });
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'system_notification',
             sender: 'system',
             content: getKokoRoundErrorMessage(error)
@@ -47146,7 +47167,7 @@ async function triggerAiReply(contact) {
 
     if (contact.needsNarrativeModeExitPrompt === true) {
         const exitInstruction = `[SYSTEM COMMAND: CRITICAL! IMMEDIATE FORMAT CHANGE REQUIRED!] You have just exited Narrative Mode. Your response format MUST IMMEDIATELY and STRICTLY return to the standard multi-line chat format. - DO NOT write a single long paragraph. - DO NOT include any descriptions of actions, expressions, or thoughts (e.g., *...* or {...}). - You MUST use multi-line responses and commands like [sticker:name] where appropriate. This is a strict and immediate format change. Acknowledge and comply.`;
-        await createAndAddMessage({ type: 'text', content: exitInstruction }, 'system_instruction');
+        await window.safeCreateAndAddMessage({ type: 'text', content: exitInstruction }, 'system_instruction');
         delete contact.needsNarrativeModeExitPrompt;
     }
 
@@ -47168,7 +47189,7 @@ async function triggerAiReply(contact) {
         if (contact) {
             if (contact.lastKnownUserStatus && contact.lastKnownUserStatus !== currentUserStatus) {
                 const statusChangeInstruction = `[SYSTEM: 你的对话伙伴刚刚将状态从“${contact.lastKnownUserStatus}”改为了“${currentUserStatus}”。这是一个很好的机会，你可以自然地关心一下，比如问：“我看到你的状态变了，还好吗？”。这次之后就不用再提了。]`;
-                await createAndAddMessage({ type: 'text', content: statusChangeInstruction }, 'system_instruction');
+                await window.safeCreateAndAddMessage({ type: 'text', content: statusChangeInstruction }, 'system_instruction');
             }
             contact.lastKnownUserStatus = currentUserStatus;
         }
@@ -47191,7 +47212,7 @@ async function triggerAiReply(contact) {
             systemInstruction = `[SYSTEM: 用户给你转账了 ${lastUnopenedMessage.content.amount}元。如果你决定收下，请在回复中包含“收下”、“谢谢”等词。不想收可以忽略。]`;
         }
 
-        await createAndAddMessage({ type: 'text', content: systemInstruction }, 'system_instruction');
+        await window.safeCreateAndAddMessage({ type: 'text', content: systemInstruction }, 'system_instruction');
         lastUnopenedMessage.hasRemindedAI = true;
         await kokoMemory.put('contacts', contact);
     }
@@ -47231,7 +47252,7 @@ async function triggerAiReply(contact) {
         });
     } catch (error) {
         console.error('私聊AI回复生成失败:', error);
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'system_notification',
             sender: 'system',
             content: `AI回复失败: ${error.message || error.name || '未知错误'}`
@@ -47298,7 +47319,7 @@ async function triggerPrivateFreeChat(contact) {
         });
     } catch (error) {
         console.error('私聊自由聊天执行失败:', error);
-        await createAndAddMessage({
+        await window.safeCreateAndAddMessage({
             type: 'system_notification',
             sender: 'system',
             content: `AI自由聊天失败: ${error.message}`
@@ -49280,7 +49301,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-26 | 状态:${count}`;
+        badge.textContent = `fix-27 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -50878,9 +50899,9 @@ function resolveEchoesStateClickTarget(event) {
                     skipHeartVoiceFallback: true,
                     forceShowAvatar: true
                 });
-            } else if (typeof createAndAddMessage === 'function') {
+            } else if (typeof window.safeCreateAndAddMessage === 'function') {
                 console.log('[ECHOES DIRECT CREATE USED]', { chatId: chat?.id, characterId, source: options?.source });
-                await createAndAddMessage({
+                await window.safeCreateAndAddMessage({
                     type: 'text',
                     sender: speaker.id || characterId,
                     senderId: speaker.id || characterId,
@@ -50988,9 +51009,9 @@ function resolveEchoesStateClickTarget(event) {
                 contextMode,
                 source: options?.source
             });
-            if (typeof createAndAddMessage === 'function') {
+            if (typeof window.safeCreateAndAddMessage === 'function') {
                 const speakerId = senderProfile?.id || chat?.id;
-                return createAndAddMessage({
+                return window.safeCreateAndAddMessage({
                     type: 'text',
                     sender: speakerId,
                     senderId: speakerId,
@@ -51030,10 +51051,10 @@ function resolveEchoesStateClickTarget(event) {
                 skipHeartVoiceFallback: true,
                 forceShowAvatar: true
             });
-        } else if (typeof createAndAddMessage === 'function') {
+        } else if (typeof window.safeCreateAndAddMessage === 'function') {
             console.log('[ECHOES DIRECT CREATE USED]', { chatId: chat?.id, source: options?.source });
             const speakerId = senderProfile?.id || chat?.id;
-            result = await createAndAddMessage({
+            result = await window.safeCreateAndAddMessage({
                 type: 'text',
                 sender: speakerId,
                 senderId: speakerId,
@@ -51104,7 +51125,7 @@ function resolveEchoesStateClickTarget(event) {
 
         if (options.__plainTextEchoesRendering) {
             const speakerId = senderProfile?.id || chat?.id;
-            return createAndAddMessage({
+            return window.safeCreateAndAddMessage({
                 type: 'text',
                 sender: speakerId,
                 senderId: speakerId,
@@ -51180,7 +51201,7 @@ function resolveEchoesStateClickTarget(event) {
                     }
                     const { speaker, content } = parsedMessage;
                     console.error('[GROUP MESSAGE RENDER FAILED]', renderError, { content, speaker });
-                    await createAndAddMessage({
+                    await window.safeCreateAndAddMessage({
                         type: 'text',
                         sender: speaker.id,
                         senderId: speaker.id,
@@ -51246,7 +51267,7 @@ function resolveEchoesStateClickTarget(event) {
                     mutedMembers: group?.mutedMembers,
                     allMemberProfiles
                 });
-                await createAndAddMessage({
+                await window.safeCreateAndAddMessage({
                     type: 'system_notification',
                     sender: 'system',
                     content: '群聊没有可发言的 AI 成员，请检查群成员是否为空、是否全被禁言、或成员 ID 是否无法匹配。'
@@ -51303,7 +51324,7 @@ function resolveEchoesStateClickTarget(event) {
             const content = String(error?.message || '').includes('buildGroupChatRequestContext timeout')
                 ? '群聊上下文构建超时，还没有进入 API 调用。'
                 : `群聊AI回复生成失败: ${error?.message || error?.name || '未知错误'}`;
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
                 content
@@ -51360,7 +51381,7 @@ function resolveEchoesStateClickTarget(event) {
                     allMemberProfiles
                 });
 
-                await createAndAddMessage({
+                await window.safeCreateAndAddMessage({
                     type: 'system_notification',
                     sender: 'system',
                     content: '群聊没有可发言的 AI 成员，请检查群成员是否为空、是否全被禁言、或成员 ID 是否无法匹配。'
@@ -51433,7 +51454,7 @@ function resolveEchoesStateClickTarget(event) {
                 ? '群聊自由聊天上下文构建超时，还没有进入 API 调用。'
                 : `群聊自由聊天失败: ${error?.message || error?.name || '未知错误'}`;
 
-            await createAndAddMessage({
+            await window.safeCreateAndAddMessage({
                 type: 'system_notification',
                 sender: 'system',
                 content
@@ -51557,7 +51578,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-26]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-27]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
