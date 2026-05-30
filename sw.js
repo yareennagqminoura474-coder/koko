@@ -1,4 +1,4 @@
-const SW_VERSION = '20260526-fix-30';
+const SW_VERSION = '20260530-fix-31';
 const CACHE_NAME = `koko-cache-${SW_VERSION}`;
 
 self.addEventListener('install', event => {

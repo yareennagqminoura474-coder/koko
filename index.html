@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-30">
+<link rel="manifest" href="manifest.json?v=20260530-fix-31">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-30 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-31 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-30';
+window.KOKO_RUNTIME_VERSION = '20260530-fix-31';
 window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
     const fn =
         window.createAndAddMessage ||
@@ -19138,7 +19138,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     contact[historyArray].push(fullMessage);
     const committedMessageIndex = contact[historyArray].length - 1;
 
-// fix-30: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-31: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
     // 不再在 createAndAddMessage 底层按消息猜测并提交状态。
 
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
@@ -19290,7 +19290,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 8. 保存联系人数据到 IndexedDB
     await kokoMemory.put('contacts', contact);
 
-// fix-30: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-31: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
 
     // 9. 刷新对应的列表视图 (主聊天列表 或 短信列表)
     if (fullMessage.sender !== 'system_instruction') {
@@ -47098,6 +47098,16 @@ ${replyGuidance.guidance}
 globalThis.buildGroupChatOpenAiMessages = buildGroupChatOpenAiMessages;
 globalThis.buildGroupChatRequestContext = buildGroupChatRequestContext;
 
+function normalizeEchoesPromptId(value) {
+    if (typeof window !== 'undefined' && typeof window.__echoesRoundNormalizeId === 'function') {
+        return window.__echoesRoundNormalizeId(value);
+    }
+    if (typeof normalizeMessageSenderId === 'function') {
+        return normalizeMessageSenderId(value);
+    }
+    return String(value ?? '').trim();
+}
+
 function getRecentEchoesStateRecordsForPrompt(chat, characterId, limit = 5) {
     const chatId = typeof chat === 'string' ? chat : chat?.id;
     const normalizedCharacterId = normalizeMessageSenderId(characterId);
@@ -47105,7 +47115,7 @@ function getRecentEchoesStateRecordsForPrompt(chat, characterId, limit = 5) {
     return (state.characterStates || [])
         .filter(record =>
             record
-            && normalizeId(record.chatId) === normalizeId(chatId)
+            && normalizeEchoesPromptId(record.chatId) === normalizeEchoesPromptId(chatId)
             && normalizeMessageSenderId(record.characterId) === normalizedCharacterId
         )
         .sort((left, right) => (Number(right.timestamp) || 0) - (Number(left.timestamp) || 0))
@@ -49260,7 +49270,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-30 | 状态:${count}`;
+        badge.textContent = `fix-31 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -49317,7 +49327,7 @@ function resolveEchoesStateClickTarget(event) {
         roundUserText = '',
         roundId = ''
     }) {
-        // fix-30: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
+        // fix-31: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
         return null;
     }
 
@@ -51536,7 +51546,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-30]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-31]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
