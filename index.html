@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260526-fix-25">
+<link rel="manifest" href="manifest.json?v=20260526-fix-26">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -12049,9 +12049,55 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-25 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-26 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260526-fix-25';
+window.KOKO_RUNTIME_VERSION = '20260526-fix-26';
+window.createAiRequestId = function createAiRequestIdGlobal(chatId) {
+    if (!window.state) {
+        window.state = (typeof state !== 'undefined' ? state : {});
+    }
+
+    const appState = window.state;
+
+    if (!appState.latestAiRequestId) {
+        appState.latestAiRequestId = {};
+    }
+
+    if (!appState.activeGenerationByChat) {
+        appState.activeGenerationByChat = {};
+    }
+
+    const id = String(chatId || appState.activeChatId || 'unknown');
+    const requestId = `${id}_${Date.now()}_${Math.random()}`;
+
+    appState.latestAiRequestId[id] = requestId;
+    appState.activeGenerationByChat[id] = requestId;
+    appState.activeGenerationId = requestId;
+
+    return requestId;
+};
+
+window.isLatestAiRequest = function isLatestAiRequestGlobal(chatId, requestId) {
+    const appState = window.state || (typeof state !== 'undefined' ? state : {});
+    const id = String(chatId || '');
+
+    return !!id
+        && !!requestId
+        && appState.latestAiRequestId?.[id] === requestId
+        && appState.activeGenerationByChat?.[id] === requestId;
+};
+window.ensureCreateAiRequestId = function ensureCreateAiRequestIdGlobal() {
+    if (typeof window.createAiRequestId !== 'function') {
+        throw new Error('window.createAiRequestId 未定义，请检查全局挂载');
+    }
+};
+
+window.ensureIsLatestAiRequest = function ensureIsLatestAiRequestGlobal() {
+    if (typeof window.isLatestAiRequest !== 'function') {
+        throw new Error('window.isLatestAiRequest 未定义，请检查全局挂载');
+    }
+};
+
 console.log('[KOKO RUNTIME VERSION]', window.KOKO_RUNTIME_VERSION);
 
 window.addEventListener('error', event => {
@@ -14411,6 +14457,9 @@ function isLatestAiRequest(chatId, requestId) {
         && state.latestAiRequestId?.[chatId] === requestId
         && state.activeGenerationByChat?.[chatId] === requestId;
 }
+window.createAiRequestId = createAiRequestId;
+window.isLatestAiRequest = isLatestAiRequest;
+
 
 function normalizeSpeakerName(name) {
     return String(name || '')
@@ -19081,7 +19130,8 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 不再在 createAndAddMessage 底层按消息猜测并提交状态。
 
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
-        createAiRequestId(contact.id);
+        window.ensureCreateAiRequestId();
+        window.createAiRequestId(contact.id);
     }
 
     // 6. (可选) 处理后台通知 (如果应用在后台)
@@ -19464,7 +19514,8 @@ async function triggerAiReply(contact) {
                 contact.apiCallCounter = 0;
             }
             contact.apiCallCounter++;
-            const requestId = createAiRequestId(contact.id);
+            window.ensureCreateAiRequestId();
+            const requestId = window.createAiRequestId(contact.id);
             
             try {
                 const currentUserStatus = state.myProfile.status;
@@ -19502,7 +19553,8 @@ async function triggerAiReply(contact) {
             
             try {
                 const rawResponse = await generateAiResponse(contact, contact.history, null, false, 'chat');
-if (!isLatestAiRequest(contact.id, requestId)) {
+window.ensureIsLatestAiRequest();
+if (!window.isLatestAiRequest(contact.id, requestId)) {
     console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
     return;
 }
@@ -19536,7 +19588,8 @@ async function triggerPrivateFreeChat(contact) {
         chatStatusEl.textContent = '对方正在输入...';
     }
 
-    const requestId = createAiRequestId(contact.id);
+    window.ensureCreateAiRequestId();
+    const requestId = window.createAiRequestId(contact.id);
 
     try {
         const myProfile = state.myProfile;
@@ -19620,7 +19673,8 @@ responses[].text 是唯一可见聊天内容；states 只用于状态面板，�
         ];
 
         const rawResponse = await generateAiResponse(null, [], null, false, 'chat', requestMessages);
-if (!isLatestAiRequest(contact.id, requestId)) {
+window.ensureIsLatestAiRequest();
+if (!window.isLatestAiRequest(contact.id, requestId)) {
     console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
     return;
 }
@@ -19768,7 +19822,8 @@ function hasSpecialGroupMessageContent(content = '') {
 }
 
 async function renderParsedGroupMessage({ speaker, content, heartVoice }, group, requestId, staleLogLabel) {
-    if (!isLatestAiRequest(group.id, requestId)) {
+    window.ensureIsLatestAiRequest();
+    if (!window.isLatestAiRequest(group.id, requestId)) {
         console.warn(staleLogLabel, { chatId: group.id, requestId });
         return false;
     }
@@ -19776,7 +19831,8 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
     const messageStartedAt = Date.now();
     const text = String(content || '').trim();
     await sleep(800 + Math.random() * 700);
-    if (!isLatestAiRequest(group.id, requestId)) {
+    window.ensureIsLatestAiRequest();
+    if (!window.isLatestAiRequest(group.id, requestId)) {
         console.warn(staleLogLabel, { chatId: group.id, requestId });
         return false;
     }
@@ -23240,7 +23296,8 @@ async function renderEchoesStyleResponses(responses, chat, fallbackSenderProfile
     if (!Array.isArray(responses) || !chat) return [];
     const rendered = [];
     const requestId = options.requestId || null;
-    const isStaleGeneration = () => requestId && chat?.id && !isLatestAiRequest(chat.id, requestId);
+    window.ensureIsLatestAiRequest();
+    const isStaleGeneration = () => requestId && chat?.id && !window.isLatestAiRequest(chat.id, requestId);
     const previousSuppressLegacy = state.suppressLegacyHeartVoiceCommit === true;
     const previousSuppressEchoes = state.suppressEchoesStateCommit === true;
     state.suppressLegacyHeartVoiceCommit = true;
@@ -23398,7 +23455,8 @@ async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfil
     const parsed = parser(rawResponse, chat, fallbackSenderProfile);
     if (!parsed) return false;
     const requestId = options.requestId || null;
-    const isStaleGeneration = () => requestId && chat?.id && !isLatestAiRequest(chat.id, requestId);
+    window.ensureIsLatestAiRequest();
+    const isStaleGeneration = () => requestId && chat?.id && !window.isLatestAiRequest(chat.id, requestId);
     if (isStaleGeneration()) {
         console.warn('[ECHOES_STYLE_DISCARDED] stale generation', { chatId: chat.id, requestId });
         return true;
@@ -24737,7 +24795,8 @@ async function cleanBadHeartVoices() {
 async function displayAiTextInBubbles(rawText, senderProfile, originContext, contextMode = 'chat', options = {}) {
     console.log('[AI RAW BEFORE ECHOES_PARSE]', rawText);
     const requestId = options.requestId || null;
-    const isStaleGeneration = () => requestId && originContext?.id && !isLatestAiRequest(originContext.id, requestId);
+    window.ensureIsLatestAiRequest();
+    const isStaleGeneration = () => requestId && originContext?.id && !window.isLatestAiRequest(originContext.id, requestId);
     if (isStaleGeneration()) {
         console.warn('[AI DISPLAY DISCARDED] stale generation', { chatId: originContext.id, requestId });
         return;
@@ -24819,7 +24878,8 @@ async function displayAiTextInBubbles(rawText, senderProfile, originContext, con
 // ▼▼▼ 使用这个【最终解决方案】替换掉你原来的 processAndDisplayAiResponse 函数 ▼▼▼
 async function processAndDisplayAiResponse(rawResponse, senderProfile, originContext = null, contextMode = 'chat', options = {}) { // 默认设为 'chat'
     if (!senderProfile) return;
-    if (options.requestId && originContext?.id && !isLatestAiRequest(originContext.id, options.requestId)) {
+    window.ensureIsLatestAiRequest();
+    if (options.requestId && originContext?.id && !window.isLatestAiRequest(originContext.id, options.requestId)) {
         console.warn('[AI PROCESS DISCARDED] stale generation', { chatId: originContext.id, requestId: options.requestId });
         return;
     }
@@ -46535,7 +46595,8 @@ async function runKokoAiRound({ chat, mode, userText = '', reason = '' }) {
     if (chatStatusEl && state.activeChatId === liveChat.id) {
         chatStatusEl.textContent = '正在回复...';
     }
-    const requestId = createAiRequestId(liveChat.id);
+    window.ensureCreateAiRequestId();
+    const requestId = window.createAiRequestId(liveChat.id);
     kokoDebugLog('[AI ROUND START]', { chatId: liveChat.id, mode, reason });
 
     try {
@@ -46566,7 +46627,8 @@ async function runKokoAiRound({ chat, mode, userText = '', reason = '' }) {
         }
         kokoDebugLog('[AI ROUND RAW]', String(rawText || '').slice(0, 500));
 
-        if (!isLatestAiRequest(liveChat.id, requestId)) {
+        window.ensureIsLatestAiRequest();
+        if (!window.isLatestAiRequest(liveChat.id, requestId)) {
             kokoDebugLog('[AI ROUND STALE]', { chatId: liveChat.id, mode, requestId });
             return null;
         }
@@ -47098,7 +47160,8 @@ async function triggerAiReply(contact) {
         contact.apiCallCounter = 0;
     }
     contact.apiCallCounter++;
-    const requestId = createAiRequestId(contact.id);
+    window.ensureCreateAiRequestId();
+    const requestId = window.createAiRequestId(contact.id);
 
     try {
         const currentUserStatus = state.myProfile.status;
@@ -47146,7 +47209,8 @@ async function triggerAiReply(contact) {
         if (!requestResult) return;
         const { rawResponse, parsed, statesMissing, plainText } = requestResult;
 
-        if (!isLatestAiRequest(contact.id, requestId)) {
+        window.ensureIsLatestAiRequest();
+        if (!window.isLatestAiRequest(contact.id, requestId)) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
@@ -47197,7 +47261,8 @@ async function triggerPrivateFreeChat(contact) {
         chatStatusEl.textContent = '对方正在输入...';
     }
 
-    const requestId = createAiRequestId(contact.id);
+    window.ensureCreateAiRequestId();
+    const requestId = window.createAiRequestId(contact.id);
 
     try {
         const requestMessages = await buildPrivateChatRequestMessages(contact, 'free');
@@ -47211,7 +47276,8 @@ async function triggerPrivateFreeChat(contact) {
         });
         if (!requestResult) return;
         const { rawResponse, parsed, statesMissing, plainText } = requestResult;
-        if (!isLatestAiRequest(contact.id, requestId)) {
+        window.ensureIsLatestAiRequest();
+        if (!window.isLatestAiRequest(contact.id, requestId)) {
             console.warn('[AI RESPONSE DISCARDED] not latest request', { chatId: contact.id, requestId });
             return;
         }
@@ -49214,7 +49280,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-25 | 状态:${count}`;
+        badge.textContent = `fix-26 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -50043,7 +50109,8 @@ function resolveEchoesStateClickTarget(event) {
                 attempt,
                 rawPreview: String(rawResponse || '').slice(0, 200)
             });
-            if (requestId && chat?.id && typeof isLatestAiRequest === 'function' && !isLatestAiRequest(chat.id, requestId)) {
+            window.ensureIsLatestAiRequest();
+            if (requestId && chat?.id && typeof window.isLatestAiRequest === 'function' && !window.isLatestAiRequest(chat.id, requestId)) {
                 console.warn('[ECHOES REQUEST DISCARDED] stale generation', { chatId: chat.id, requestId, source, attempt });
                 return null;
             }
@@ -50884,11 +50951,12 @@ function resolveEchoesStateClickTarget(event) {
     async function handleEchoesStyleAiResult(rawResponse, chat, fallbackSenderProfile = null, options = {}) {
         const parsed = parseEchoesStateResult(rawResponse, chat, fallbackSenderProfile);
         if (!parsed) return false;
+        window.ensureIsLatestAiRequest();
         if (
             options.requestId &&
             chat?.id &&
-            typeof isLatestAiRequest === 'function' &&
-            !isLatestAiRequest(chat.id, options.requestId)
+            typeof window.isLatestAiRequest === 'function' &&
+            !window.isLatestAiRequest(chat.id, options.requestId)
         ) {
             console.warn('[ECHOES_STYLE_DISCARDED]', {
                 chatId: chat.id,
@@ -51105,7 +51173,8 @@ function resolveEchoesStateClickTarget(event) {
                     const rendered = await renderParsedGroupMessage(parsedMessage, group, requestId, staleLogLabel);
                     if (!rendered) return null;
                 } catch (renderError) {
-                    if (!isLatestAiRequest(group.id, requestId)) {
+                    window.ensureIsLatestAiRequest();
+                    if (!window.isLatestAiRequest(group.id, requestId)) {
                         console.warn(staleLogLabel, { chatId: group.id, requestId });
                         return null;
                     }
@@ -51156,7 +51225,8 @@ function resolveEchoesStateClickTarget(event) {
         if (chatStatusEl && state.activeChatId === group.id) {
             chatStatusEl.textContent = '群成员正在热烈讨论中...';
         }
-        const requestId = createAiRequestId(group.id);
+        window.ensureCreateAiRequestId();
+        const requestId = window.createAiRequestId(group.id);
         try {
             const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
             kokoDebugLog('[GROUP REPLY STEP 2] before context');
@@ -51199,7 +51269,8 @@ function resolveEchoesStateClickTarget(event) {
             kokoDebugLog('[GROUP REPLY STEP 5] after requestEchoesMainResponseWithRetry', requestResult);
             if (!requestResult) return null;
             const { rawResponse, parsed, statesMissing, plainText } = requestResult;
-            if (!isLatestAiRequest(group.id, requestId)) {
+            window.ensureIsLatestAiRequest();
+            if (!window.isLatestAiRequest(group.id, requestId)) {
                 console.warn('[GROUP REPLY RESPONSE DISCARDED] not latest request', { chatId: group.id, requestId });
                 return null;
             }
@@ -51262,7 +51333,8 @@ function resolveEchoesStateClickTarget(event) {
             chatStatusEl.textContent = '群成员正在热烈讨论中...';
         }
 
-        const requestId = createAiRequestId(group.id);
+        window.ensureCreateAiRequestId();
+        const requestId = window.createAiRequestId(group.id);
 
         try {
             const buildGroupChatRequestContextFn = getGlobalBuildGroupChatRequestContext();
@@ -51318,7 +51390,8 @@ function resolveEchoesStateClickTarget(event) {
 
             const { rawResponse, parsed, statesMissing, plainText } = requestResult;
 
-            if (!isLatestAiRequest(group.id, requestId)) {
+            window.ensureIsLatestAiRequest();
+            if (!window.isLatestAiRequest(group.id, requestId)) {
                 console.warn('[GROUP FREE RESPONSE DISCARDED] not latest request', {
                     chatId: group.id,
                     requestId
@@ -51484,7 +51557,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-25]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-26]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
