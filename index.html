@@ -11,7 +11,7 @@
 
 <meta name="apple-mobile-web-app-title" content="koko">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="manifest" href="manifest.json?v=20260530-fix-32">
+<link rel="manifest" href="manifest.json?v=20260530-fix-33">
 <meta name="theme-color"
       content="#ffffff"
       media="(prefers-color-scheme: light)">
@@ -200,6 +200,8 @@
             height: 100%;
             display: none;
             flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
             transform: translate3d(0, 0, 0); 
             -webkit-transform: translate3d(0, 0, 0);
             will-change: transform, background-image;
@@ -226,6 +228,7 @@
             grid-template-columns: 44px minmax(0, 1fr) auto auto;
             column-gap: 8px;
             align-items: center;
+            flex-shrink: 0;
             overflow: visible;
             background: rgba(173, 224, 164, 0.74);
             backdrop-filter: blur(18px);
@@ -234,6 +237,7 @@
             box-shadow: 0 10px 30px rgba(100, 160, 102, 0.12);
             padding: 10px 14px 9px;
             color: #274a2c;
+            z-index: 10;
         }
         #chat-screen > .chat-header .back-btn {
             width: 40px;
@@ -323,7 +327,14 @@
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
         }
         #chat-screen .chat-messages {
-            padding: 12px 10px 14px;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 12px 10px calc(92px + env(safe-area-inset-bottom, 0px));
+            scroll-padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+            position: relative;
+            z-index: 1;
         }
         #chat-screen .chat-input-area {
             background: rgba(247, 255, 246, 0.82);
@@ -331,7 +342,10 @@
             -webkit-backdrop-filter: blur(18px);
             border-top: 1px solid rgba(191, 219, 188, 0.9);
             box-shadow: 0 -8px 24px rgba(139, 183, 136, 0.08);
-            padding: 10px 12px 14px;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 20;
+            padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px));
             gap: 8px;
             flex-wrap: nowrap;
         }
@@ -421,7 +435,7 @@
                 min-width: 72px;
             }
             #chat-screen .chat-input-area {
-                padding: 9px 10px calc(12px + env(safe-area-inset-bottom, 0px));
+                padding: 9px 10px calc(14px + env(safe-area-inset-bottom, 0px));
                 gap: 6px;
             }
             #chat-screen .emoji-btn,
@@ -470,6 +484,16 @@
     position: relative; 
     /* 就是加上下面这一行！ */
     animation: bubble-fade-in 0.35s ease-out; 
+}
+#chat-messages .message-wrapper {
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+#chat-messages .message-body,
+#chat-messages .message {
+    visibility: visible !important;
+    opacity: 1 !important;
 }
         .message-wrapper.received { align-self: flex-start; flex-direction: row; }
         .message-wrapper.sent { align-self: flex-end; flex-direction: row-reverse; }
@@ -12049,9 +12073,9 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
 </div>
 <div id="heart-voice-panel" style="display: none;"></div>
 <div id="echoes-state-panel" class="echoes-state-panel" style="display: none;"></div>
-<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-32 | 状态:0</div>
+<div id="koko-version-badge" style="position: fixed; right: 8px; bottom: 8px; z-index: 999999; color: #666; font-size: 11px; line-height: 1; background: rgba(255, 255, 255, 0.72); padding: 2px 4px; border-radius: 3px; pointer-events: none;">fix-33 | 状态:0</div>
 <script>
-window.KOKO_RUNTIME_VERSION = '20260530-fix-32';
+window.KOKO_RUNTIME_VERSION = '20260530-fix-33';
 window.safeCreateAndAddMessage = async function safeCreateAndAddMessageGlobal(...args) {
     const fn =
         window.createAndAddMessage ||
@@ -17809,6 +17833,36 @@ if (finalBackgroundUrl) {
             );
         }
 
+function scrollChatMessagesToBottom(reason = '') {
+    const messagesContainer = document.getElementById('chat-messages');
+    if (!messagesContainer) return;
+
+    requestAnimationFrame(() => {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 60);
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 180);
+
+        const lastMessage = messagesContainer.querySelector('.message-wrapper:last-of-type');
+        if (lastMessage && typeof lastMessage.scrollIntoView === 'function') {
+            lastMessage.scrollIntoView({
+                block: 'end',
+                inline: 'nearest',
+                behavior: 'auto'
+            });
+        }
+
+        console.log('[CHAT SCROLL BOTTOM]', reason, {
+            scrollTop: messagesContainer.scrollTop,
+            scrollHeight: messagesContainer.scrollHeight,
+            clientHeight: messagesContainer.clientHeight
+        });
+    });
+}
+
 // ▼▼▼ 用下面这个【完整修复版】替换旧的 renderChatMessages 函数 ▼▼▼
 
         function renderChatMessages(contact, loadAll = false) {
@@ -19138,7 +19192,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     contact[historyArray].push(fullMessage);
     const committedMessageIndex = contact[historyArray].length - 1;
 
-// fix-32: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-33: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
     // 不再在 createAndAddMessage 底层按消息猜测并提交状态。
 
     if (historyArray === 'history' && sender === 'user' && contact?.id) {
@@ -19260,10 +19314,15 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
                 if (messageEl) {
                     const placeholder = messagesContainer.querySelector('#chat-placeholder');
                     if (placeholder) placeholder.remove();
+
+                    messageEl.style.display = '';
+                    messageEl.style.visibility = 'visible';
+                    messageEl.style.opacity = '1';
+                    messageEl.style.position = 'relative';
+                    messageEl.style.zIndex = '2';
+
                     messagesContainer.appendChild(messageEl);
-                    setTimeout(() => {
-                       messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }, 100); 
+                    scrollChatMessagesToBottom('createAndAddMessage append');
                 }
             }
         } else {
@@ -19290,7 +19349,7 @@ async function createAndAddMessage(messageData, sender = 'user', targetContact =
     // 8. 保存联系人数据到 IndexedDB
     await kokoMemory.put('contacts', contact);
 
-// fix-32: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
+// fix-33: Echoes 状态只在“API 返回并解析 responses/states 后”保存。
 
     // 9. 刷新对应的列表视图 (主聊天列表 或 短信列表)
     if (fullMessage.sender !== 'system_instruction') {
@@ -19853,6 +19912,9 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
             content: text,
             forceAvatar: true
         }, speaker.id, group, true, 'chat');
+        if (state.activeChatId === group.id && state.currentChatMode === 'chat') {
+            scrollChatMessagesToBottom('renderParsedGroupMessage');
+        }
     } else {
         await processAndDisplayAiResponse(text, speaker, group, 'chat', {
             skipHeartVoiceFallback: true,
@@ -19860,6 +19922,9 @@ async function renderParsedGroupMessage({ speaker, content, heartVoice }, group,
             preserveSingleBubble: true,
             requestId
         });
+        if (state.activeChatId === group.id && state.currentChatMode === 'chat') {
+            scrollChatMessagesToBottom('renderParsedGroupMessage special');
+        }
     }
     return true;
 }
@@ -48212,6 +48277,8 @@ try {
     // 3. AI 邀请相关
     window.acceptAiSurvey = acceptAiSurvey;
 
+    window.renderChatMessages = renderChatMessages;
+    window.scrollChatMessagesToBottom = scrollChatMessagesToBottom;
     window.generateAiResponse = generateAiResponse;
     window.__kokoGenerateAiResponse = generateAiResponse;
 
@@ -49273,7 +49340,7 @@ function resolveEchoesStateClickTarget(event) {
         const count = (Array.isArray(state?.characterStates) ? state.characterStates : [])
             .filter(record => record && normalizeId(record.chatId) === normalizedChatId)
             .length;
-        badge.textContent = `fix-32 | 状态:${count}`;
+        badge.textContent = `fix-33 | 状态:${count}`;
     }
 
     function normalizeCharacterIdForChat(chat, rawId, fallbackProfile = null) {
@@ -49330,7 +49397,7 @@ function resolveEchoesStateClickTarget(event) {
         roundUserText = '',
         roundId = ''
     }) {
-        // fix-32: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
+        // fix-33: 不再依赖消息创建 hook 猜测回合边界；状态提交改由 Echoes 解析结果在原回复流程中统一完成。
         return null;
     }
 
@@ -51281,19 +51348,46 @@ function resolveEchoesStateClickTarget(event) {
                     requestId
                 });
             }
+            let renderedResult;
             if (plainText || !parsed) {
-                return await renderLegacyGroupResponses(
+                renderedResult = await renderLegacyGroupResponses(
                     rawResponse,
                     group,
                     allMemberProfiles,
                     requestId,
                     '[GROUP REPLY MESSAGE SKIPPED] stale generation'
                 );
+            } else {
+                renderedResult = await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
+                    requestId,
+                    source: 'group-json'
+                });
             }
-            return await renderEchoesJsonResponses(parsed, group, allMemberProfiles[0] || null, {
-                requestId,
-                source: 'group-json'
-            });
+
+            if (state.activeChatId === group.id && state.currentChatMode === 'chat') {
+                const messagesContainer = document.getElementById('chat-messages');
+                let visibleWrappers = messagesContainer ? messagesContainer.querySelectorAll('.message-wrapper').length : 0;
+
+                if (messagesContainer && visibleWrappers === 0 && Array.isArray(group.history) && group.history.length > 0) {
+                    messagesContainer.innerHTML = '';
+                    if (typeof window.renderChatMessages === 'function') {
+                        window.renderChatMessages(group);
+                    }
+                    visibleWrappers = messagesContainer.querySelectorAll('.message-wrapper').length;
+                }
+
+                console.log('[GROUP REPLY RENDER DONE]', {
+                    groupId: group.id,
+                    historyLength: Array.isArray(group.history) ? group.history.length : 0,
+                    visibleWrappers
+                });
+
+                if (typeof window.scrollChatMessagesToBottom === 'function') {
+                    window.scrollChatMessagesToBottom('triggerGroupChatAiReply done');
+                }
+            }
+
+            return renderedResult;
         } catch (error) {
             const errorMessage = error?.stack || error?.message || String(error);
             kokoDebugLog('[GROUP REPLY ERROR STACK]', {
@@ -51564,7 +51658,7 @@ function resolveEchoesStateClickTarget(event) {
     window.handleEchoesStyleAiResult = handleEchoesStyleAiResult;
     window.renderEchoesJsonResponses = renderEchoesJsonResponses;
     window.saveEchoesParsedStatesAfterRender = saveEchoesParsedStatesAfterRender;
-    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-32]');
+    console.log('[ECHOES FINAL JSON PATH INSTALLED fix-33]');
 
     (function installEchoesCreateMessageHook() {
         if (window.__echoesCreateMessageHookInstalled) return;
