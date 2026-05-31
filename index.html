@@ -11889,7 +11889,8 @@ const dbConfig = {
     themePresets: { keyPath: 'id' }
 };
 // ▼▼▼ 把这里的版本号数字加 1 (例如 13 -> 19) ▼▼▼
-const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 24, dbConfig);
+const KOKO_DB_VERSION = 28;
+const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', KOKO_DB_VERSION, dbConfig);
 window.kokoMemory = kokoMemory;
 let kokoDbReadyPromise = null;
 
