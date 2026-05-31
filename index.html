@@ -11890,6 +11890,36 @@ const dbConfig = {
 };
 // ▼▼▼ 把这里的版本号数字加 1 (例如 13 -> 19) ▼▼▼
 const kokoMemory = new AppStorage('AppleNarrativeDB_Native_V1', 24, dbConfig);
+window.kokoMemory = kokoMemory;
+let kokoDbReadyPromise = null;
+
+async function ensureKokoDatabaseReady() {
+    if (!window.kokoMemory && typeof kokoMemory === 'undefined') {
+        throw new Error('kokoMemory 不存在，数据库对象尚未创建。');
+    }
+
+    const memory = window.kokoMemory || kokoMemory;
+
+    if (memory.db) {
+        return memory.db;
+    }
+
+    if (!kokoDbReadyPromise) {
+        kokoDbReadyPromise = memory.init().catch(error => {
+            kokoDbReadyPromise = null;
+            console.error('数据库初始化失败:', error);
+            throw error;
+        });
+    }
+
+    await kokoDbReadyPromise;
+
+    if (!memory.db) {
+        throw new Error('数据库初始化失败：init 完成后 db 仍为空。');
+    }
+
+    return memory.db;
+}
 // ▲▲▲ 版本号修改结束 ▲▲▲
 
     // --------------------------------------------------------------------
@@ -13620,6 +13650,8 @@ function normalizeImportedBackupData(dataToImport) {
 }
 
 async function safeImportStore(storeName, value) {
+    await ensureKokoDatabaseReady();
+
     if (!dbConfig || !dbConfig[storeName]) return { ok: 0, failed: 0 };
 
     await kokoMemory.clear(storeName);
@@ -13675,61 +13707,72 @@ function safeBindEvent(id, eventName, handler) {
     }
 }
 
+function replaceElementToClearEvents(id) {
+    const oldEl = document.getElementById(id);
+    if (!oldEl || !oldEl.parentNode) return null;
+
+    const newEl = oldEl.cloneNode(true);
+    oldEl.parentNode.replaceChild(newEl, oldEl);
+    return newEl;
+}
+
 async function saveNewContactFromModal() {
-    const name = document.getElementById('contact-name-input')?.value.trim();
-    const persona = document.getElementById('contact-persona-input')?.value.trim();
-
-    if (!name || !persona) {
-        alert('请填写姓名和人设');
-        return;
-    }
-
-    const avatar = document.getElementById('contact-avatar-input')?.value.trim();
-    const worldBookSelect = document.getElementById('world-book-select');
-    const selectedBooks = worldBookSelect
-        ? Array.from(worldBookSelect.selectedOptions).map(opt => opt.value)
-        : [];
-
-    const newContact = normalizeContactForImport({
-        id: 'contact_' + Date.now(),
-        name,
-        persona,
-        avatar: avatar || 'https://s21.ax1x.com/2025/11/09/pZ9FrMd.png',
-        voiceId: '',
-        worldBooks: selectedBooks,
-        isPinned: false,
-        isGroup: false,
-        groupId: null,
-        history: [],
-        smsHistory: [],
-        diary: [],
-        userPersona: '',
-        thoughtPreset: '',
-        signature: '',
-        isNarrativeMode: false,
-        apiCallCounter: 0,
-        pet: null,
-        gold_coins: 50,
-        memories: [],
-        permanent_memories: [],
-        echoMemory: makeDefaultEchoMemory(),
-        latestHeartVoice: null,
-        memberHeartVoices: {},
-        isChatPetVisible: false,
-        sharedPlaylist: {
-            tracks: [],
-            currentIndex: 0,
-            playbackMode: 'list',
-            isPlaying: false
-        },
-        totalListenTime: 0,
-        firstChatDate: Date.now(),
-        schedule: [],
-        events: [],
-        blockedStatus: 'none'
-    });
-
     try {
+        await ensureKokoDatabaseReady();
+
+        const name = document.getElementById('contact-name-input')?.value.trim();
+        const persona = document.getElementById('contact-persona-input')?.value.trim();
+
+        if (!name || !persona) {
+            alert('请填写姓名和人设');
+            return;
+        }
+
+        const avatar = document.getElementById('contact-avatar-input')?.value.trim();
+        const worldBookSelect = document.getElementById('world-book-select');
+        const selectedBooks = worldBookSelect
+            ? Array.from(worldBookSelect.selectedOptions).map(opt => opt.value)
+            : [];
+
+        const newContact = normalizeContactForImport({
+            id: 'contact_' + Date.now(),
+            name,
+            persona,
+            avatar: avatar || 'https://s21.ax1x.com/2025/11/09/pZ9FrMd.png',
+            voiceId: '',
+            worldBooks: selectedBooks,
+            isPinned: false,
+            isGroup: false,
+            groupId: null,
+            history: [],
+            smsHistory: [],
+            diary: [],
+            userPersona: '',
+            thoughtPreset: '',
+            signature: '',
+            isNarrativeMode: false,
+            apiCallCounter: 0,
+            pet: null,
+            gold_coins: 50,
+            memories: [],
+            permanent_memories: [],
+            echoMemory: makeDefaultEchoMemory(),
+            latestHeartVoice: null,
+            memberHeartVoices: {},
+            isChatPetVisible: false,
+            sharedPlaylist: {
+                tracks: [],
+                currentIndex: 0,
+                playbackMode: 'list',
+                isPlaying: false
+            },
+            totalListenTime: 0,
+            firstChatDate: Date.now(),
+            schedule: [],
+            events: [],
+            blockedStatus: 'none'
+        });
+
         state.contacts.push(newContact);
         await kokoMemory.put('contacts', newContact);
 
@@ -13751,6 +13794,11 @@ async function saveNewContactFromModal() {
 }
 
 function bindCriticalEvents() {
+    replaceElementToClearEvents('save-contact-btn');
+    replaceElementToClearEvents('import-data-btn');
+    replaceElementToClearEvents('import-file-input');
+    replaceElementToClearEvents('import-data-input');
+
     safeBindEvent('add-contact-btn', 'click', () => {
         const modal = document.getElementById('add-contact-modal');
         if (modal) modal.style.display = 'flex';
@@ -13769,7 +13817,7 @@ function bindCriticalEvents() {
     safeBindEvent('save-contact-btn', 'click', saveNewContactFromModal);
 
     safeBindEvent('import-data-btn', 'click', () => {
-        const input = document.getElementById('import-data-input') || document.getElementById('import-file-input');
+        const input = document.getElementById('import-file-input') || document.getElementById('import-data-input');
         if (input) input.click();
     });
 
@@ -13784,6 +13832,15 @@ async function importData(event) {
 
     const confirmed = await showCustomConfirm('导入数据', '警告：导入数据将会覆盖当前所有数据！确定要继续吗？', true);
     if (!confirmed) {
+        event.target.value = '';
+        return;
+    }
+
+    try {
+        await ensureKokoDatabaseReady();
+    } catch (error) {
+        console.error('导入前数据库初始化失败:', error);
+        alert(`导入失败：数据库未能初始化：${error.message}`);
         event.target.value = '';
         return;
     }
@@ -36760,32 +36817,44 @@ function updatePreview(type, value, value2 = '') {
 // ==========================================================
 // ▲▲▲ 粘贴到这里结束 ▲▲▲
         async function initApp() {
-            await kokoMemory.init();
-            await loadSnoopDataCache();
-            await loadDataFromDB();
-            await loadAppearanceSettings();
-            await renderMyProfile(); 
-            await renderContacts(); 
-            await renderWorldBooks(); 
-            await updateWorldBookSelectors(); 
-            await renderUserPersonaPresets();
-            await renderThoughtPresets();
-            updateNotificationDots();
-            renderAttachmentMenu();
-            if (state.posts.length === 0 && isInitialPostLoad) {
-                await showFeedScreen();
+            try {
+                await ensureKokoDatabaseReady();
+                await loadSnoopDataCache();
+                await loadDataFromDB();
+                await loadAppearanceSettings();
+                await renderMyProfile(); 
+                await renderContacts(); 
+                await renderWorldBooks(); 
+                await updateWorldBookSelectors(); 
+                await renderUserPersonaPresets();
+                await renderThoughtPresets();
+                updateNotificationDots();
+                renderAttachmentMenu();
+                if (state.posts.length === 0 && isInitialPostLoad) {
+                    await showFeedScreen();
+                }
+                await showMainScreen();
+                try {
+                    attachEventListeners();
+                } catch (err) {
+                    console.warn('事件绑定过程出现异常，关键入口会继续绑定:', err);
+                }
+                bindCriticalEvents();
+                // 启动空间自动刷新（如果已开启）
+                if (userSettings.qzoneSettings && userSettings.qzoneSettings.autoRefreshEnabled) {
+                    startQzoneAutoRefresh();
+                }
+                // ▼▼▼ 在函数的最后，添加这两行代码 ▼▼▼
+                if (state.automationSettings.isEnabled) {
+                    startAutomationTimer();
+                }
+                showLockScreen();
+                // ▲▲▲ 新代码添加结束 ▲▲▲
+            } catch (error) {
+                console.error('应用初始化失败:', error);
+                alert(`应用初始化失败：${error.message}`);
+                return;
             }
-            await showMainScreen();
-            // 启动空间自动刷新（如果已开启）
-if (userSettings.qzoneSettings && userSettings.qzoneSettings.autoRefreshEnabled) {
-    startQzoneAutoRefresh();
-}
-            // ▼▼▼ 在函数的最后，添加这两行代码 ▼▼▼
-            if (state.automationSettings.isEnabled) {
-                startAutomationTimer();
-            }
-            showLockScreen();
-            // ▲▲▲ 新代码添加结束 ▲▲▲
         }
 
         // (替换原有的 renderPet 函数)
@@ -38161,7 +38230,7 @@ safeBindEvent('confirm-custom-export-btn', 'click', performCustomExport);
 
 // ▲▲▲ 添加结束 ▲▲▲
 
-bindCriticalEvents();
+// 关键入口由 initApp() 在数据库初始化完成后统一绑定。
 
     // --- 原有功能：头像更换 ---
     document.getElementById('change-avatar-btn').addEventListener('click', function() {
@@ -39185,7 +39254,7 @@ if (modeSwitchBtn) {
     // ==========================================================
 
     // --- 原有功能：各类弹窗的逻辑 ---
-    bindCriticalEvents();
+    // 关键入口由 initApp() 在数据库初始化完成后统一绑定。
 // (替换) 'save-contact-settings-btn' 监听器 (在 attachEventListeners 中)
 document.getElementById('save-contact-settings-btn').addEventListener('click', async () => {
     const contact = state.contacts.find(c => c.id === state.activeChatId);
@@ -43246,13 +43315,7 @@ attachGroupSettingsListeners();
 // 保存外观设置按钮
 document.getElementById('save-appearance-btn').addEventListener('click', saveAppearanceSettings);
 }
-bindCriticalEvents();
-try {
-    attachEventListeners();
-} catch (err) {
-    console.warn('事件绑定过程出现异常，已保留关键导入/联系人事件:', err);
-}
-bindCriticalEvents();
+await initApp();
 // --- 紧急修复：重新绑定搜索按钮 ---
     const searchBtnFix = document.getElementById('search-chat-btn');
     if (searchBtnFix) {
@@ -43315,7 +43378,6 @@ bindCriticalEvents();
     window.acceptAiSurvey = acceptAiSurvey;
 
     console.log("✅ 默契挑战功能已手动挂载到全局！");
-await initApp();
 }); 
 </script>
 <script>
