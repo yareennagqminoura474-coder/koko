@@ -12757,8 +12757,17 @@ function normalizeTransaction(tx) {
 
 async function normalizeAllTransactions() {
     try {
-        state.transactions = (state.transactions || []).map(normalizeTransaction);
-        await Promise.all(state.transactions.map(tx => kokoMemory.put('transactions', tx)));
+        const normalizedTransactions = [];
+        for (const tx of (state.transactions || [])) {
+            try {
+                const fixedTx = normalizeTransaction(tx);
+                normalizedTransactions.push(fixedTx);
+                await kokoMemory.put('transactions', fixedTx);
+            } catch (err) {
+                console.warn('迁移单条钱包账单失败，已跳过:', tx, err);
+            }
+        }
+        state.transactions = normalizedTransactions;
     } catch (e) {
         console.warn('迁移钱包账单失败:', e);
     }
@@ -12784,31 +12793,54 @@ async function migrateEchoesKokoData() {
             state.myProfile.balance = Number.isFinite(parsedBalance) ? parsedBalance : 0;
         }
 
-        (state.contacts || []).forEach(contact => {
-            ensureEchoMemory(contact);
-            if (contact.latestHeartVoice) contact.latestHeartVoice = normalizeHeartVoice(contact.latestHeartVoice);
-            contact.memberHeartVoices = contact.memberHeartVoices || {};
-            Object.keys(contact.memberHeartVoices).forEach(id => {
-                contact.memberHeartVoices[id] = normalizeHeartVoice(contact.memberHeartVoices[id]);
-            });
-            (contact.history || []).forEach(msg => {
-                if (msg.type === 'heart_voice') {
-                    const hv = normalizeHeartVoice(msg.heartVoice || msg.content);
-                    msg.heartVoice = hv;
-                    msg.content = hv;
-                    msg.hidden = true;
-                    if (contact.isGroup) {
-                        const sid = msg.senderId || msg.sender;
-                        if (sid) contact.memberHeartVoices[sid] = hv;
-                    } else {
-                        contact.latestHeartVoice = hv;
+        const fixedContacts = [];
+        for (const rawContact of (state.contacts || [])) {
+            try {
+                const contact = normalizeContactForImport(rawContact);
+                if (!contact) continue;
+                ensureEchoMemory(contact);
+                if (contact.latestHeartVoice) contact.latestHeartVoice = normalizeHeartVoice(contact.latestHeartVoice);
+                contact.memberHeartVoices = contact.memberHeartVoices || {};
+                Object.keys(contact.memberHeartVoices).forEach(id => {
+                    try {
+                        contact.memberHeartVoices[id] = normalizeHeartVoice(contact.memberHeartVoices[id]);
+                    } catch (err) {
+                        console.warn('迁移单条群成员心声失败，已跳过:', id, err);
                     }
-                }
-            });
-        });
+                });
+                (contact.history || []).forEach(msg => {
+                    try {
+                        if (msg.type === 'heart_voice') {
+                            const hv = normalizeHeartVoice(msg.heartVoice || msg.content);
+                            msg.heartVoice = hv;
+                            msg.content = hv;
+                            msg.hidden = true;
+                            if (contact.isGroup) {
+                                const sid = msg.senderId || msg.sender;
+                                if (sid) contact.memberHeartVoices[sid] = hv;
+                            } else {
+                                contact.latestHeartVoice = hv;
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('迁移单条心声消息失败，已跳过:', msg, err);
+                    }
+                });
+                fixedContacts.push(contact);
+            } catch (err) {
+                console.warn('迁移单个联系人失败，已跳过:', rawContact, err);
+            }
+        }
+        state.contacts = fixedContacts;
 
         await normalizeAllTransactions();
-        await Promise.all((state.contacts || []).map(contact => kokoMemory.put('contacts', contact)));
+        for (const contact of (state.contacts || [])) {
+            try {
+                await kokoMemory.put('contacts', contact);
+            } catch (err) {
+                console.warn('保存迁移后的联系人失败，已跳过:', contact, err);
+            }
+        }
         await kokoMemory.put('myProfile', state.myProfile);
         changed = true;
         if (changed) console.log('Echoes-Koko 数据迁移完成');
@@ -13396,6 +13428,355 @@ async function exportData() {
     }
 }
         
+function safeId(prefix = 'id') {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeDefaultEchoMemory() {
+    return {
+        entries: [],
+        summaries: [],
+        recallIndex: [],
+        lastSummarizedMessageId: null
+    };
+}
+
+function normalizeEchoMemoryForImport(mem) {
+    const fixed = mem && typeof mem === 'object' ? mem : {};
+    return {
+        entries: Array.isArray(fixed.entries) ? fixed.entries : [],
+        summaries: Array.isArray(fixed.summaries) ? fixed.summaries : [],
+        recallIndex: Array.isArray(fixed.recallIndex) ? fixed.recallIndex : [],
+        lastSummarizedMessageId: fixed.lastSummarizedMessageId || null
+    };
+}
+
+function normalizeContactForImport(contact) {
+    if (!contact || typeof contact !== 'object') return null;
+
+    const fixed = { ...contact };
+
+    fixed.id = fixed.id || fixed.contactId || safeId(fixed.isGroup ? 'group' : 'contact');
+    fixed.name = fixed.name || fixed.title || '未命名联系人';
+    fixed.avatar = fixed.avatar || 'https://s21.ax1x.com/2025/11/09/pZ9FrMd.png';
+
+    fixed.isGroup = !!fixed.isGroup;
+    fixed.groupId = fixed.groupId || null;
+
+    fixed.history = Array.isArray(fixed.history) ? fixed.history : [];
+    fixed.smsHistory = Array.isArray(fixed.smsHistory) ? fixed.smsHistory : [];
+    fixed.diary = Array.isArray(fixed.diary) ? fixed.diary : [];
+    fixed.memories = Array.isArray(fixed.memories) ? fixed.memories : [];
+    fixed.permanent_memories = Array.isArray(fixed.permanent_memories) ? fixed.permanent_memories : [];
+
+    fixed.echoMemory = normalizeEchoMemoryForImport(fixed.echoMemory);
+    fixed.echoMemoryMigrated = !!fixed.echoMemoryMigrated;
+
+    fixed.latestHeartVoice = fixed.latestHeartVoice || null;
+    fixed.memberHeartVoices = fixed.memberHeartVoices && typeof fixed.memberHeartVoices === 'object'
+        ? fixed.memberHeartVoices
+        : {};
+
+    fixed.worldBooks = Array.isArray(fixed.worldBooks) ? fixed.worldBooks : [];
+    fixed.snoopRelevantWorldBookIds = Array.isArray(fixed.snoopRelevantWorldBookIds) ? fixed.snoopRelevantWorldBookIds : [];
+
+    fixed.userPersona = fixed.userPersona || '';
+    fixed.thoughtPreset = fixed.thoughtPreset || '';
+    fixed.signature = fixed.signature || '';
+    fixed.isNarrativeMode = !!fixed.isNarrativeMode;
+    fixed.apiCallCounter = fixed.apiCallCounter || 0;
+
+    fixed.pet = fixed.pet || null;
+    fixed.gold_coins = Number.isFinite(Number(fixed.gold_coins)) ? Number(fixed.gold_coins) : 50;
+    fixed.isChatPetVisible = !!fixed.isChatPetVisible;
+
+    fixed.sharedPlaylist = fixed.sharedPlaylist && typeof fixed.sharedPlaylist === 'object'
+        ? fixed.sharedPlaylist
+        : { tracks: [], currentIndex: 0, playbackMode: 'list', isPlaying: false };
+
+    fixed.totalListenTime = Number(fixed.totalListenTime || 0);
+    fixed.firstChatDate = fixed.firstChatDate || Date.now();
+    fixed.schedule = Array.isArray(fixed.schedule) ? fixed.schedule : [];
+    fixed.events = Array.isArray(fixed.events) ? fixed.events : [];
+    fixed.blockedStatus = fixed.blockedStatus || 'none';
+
+    if (fixed.isGroup) {
+        fixed.members = Array.isArray(fixed.members) ? fixed.members : [];
+        fixed.npcMembers = Array.isArray(fixed.npcMembers) ? fixed.npcMembers : [];
+        fixed.memoryShared = fixed.memoryShared !== false;
+    }
+
+    return fixed;
+}
+
+function normalizeTransactionForImport(tx) {
+    const raw = tx && typeof tx === 'object' ? { ...tx } : {};
+
+    let amount = Number(raw.amount);
+    if (!Number.isFinite(amount)) amount = Number(raw.value);
+    if (!Number.isFinite(amount)) amount = 0;
+
+    let type = raw.type;
+    if (type !== 'income' && type !== 'expense') {
+        type = amount < 0 ? 'expense' : 'income';
+    }
+
+    amount = Math.abs(amount);
+
+    const desc = raw.desc || raw.description || raw.note || '未命名账单';
+
+    return {
+        ...raw,
+        id: raw.id || raw.transactionId || safeId('txn'),
+        type,
+        amount,
+        desc,
+        description: desc,
+        timestamp: raw.timestamp || raw.time || Date.now(),
+        source: raw.source || raw.relatedContactId || 'import'
+    };
+}
+
+function normalizeSingletonForImport(storeName, data) {
+    const fixed = data && typeof data === 'object' ? { ...data } : {};
+
+    fixed.id = 'main';
+
+    if (storeName === 'myProfile') {
+        fixed.balance = Number.isFinite(Number(fixed.balance)) ? Number(fixed.balance) : 0;
+        fixed.investments = fixed.investments || {};
+    }
+
+    return fixed;
+}
+
+function normalizeGenericStoreItemForImport(storeName, item) {
+    if (!item || typeof item !== 'object') return null;
+
+    const fixed = { ...item };
+    const config = dbConfig && dbConfig[storeName];
+    const keyPath = config && config.keyPath;
+
+    if (keyPath === 'contactId') {
+        fixed.contactId = fixed.contactId || fixed.id || safeId(storeName);
+    } else if (keyPath && keyPath !== 'id') {
+        fixed[keyPath] = fixed[keyPath] || fixed.id || safeId(storeName);
+    } else {
+        fixed.id = fixed.id || safeId(storeName);
+    }
+
+    return fixed;
+}
+
+function normalizeImportedBackupData(dataToImport) {
+    const result = dataToImport && typeof dataToImport === 'object' ? { ...dataToImport } : {};
+
+    const singletonStores = [
+        'myProfile',
+        'apiSettings',
+        'squareApiSettings',
+        'snoopApiSettings',
+        'forumSettings',
+        'userSettings'
+    ];
+
+    for (const storeName of singletonStores) {
+        if (Array.isArray(result[storeName])) {
+            result[storeName] = result[storeName][0] || {};
+        }
+
+        if (result[storeName]) {
+            result[storeName] = normalizeSingletonForImport(storeName, result[storeName]);
+        }
+    }
+
+    if (Array.isArray(result.contacts)) {
+        result.contacts = result.contacts
+            .map(normalizeContactForImport)
+            .filter(Boolean);
+    }
+
+    if (Array.isArray(result.transactions)) {
+        result.transactions = result.transactions
+            .map(normalizeTransactionForImport)
+            .filter(Boolean);
+    }
+
+    for (const storeName of Object.keys(result)) {
+        if (!dbConfig || !dbConfig[storeName]) continue;
+        if (storeName === 'contacts' || storeName === 'transactions') continue;
+        if (singletonStores.includes(storeName)) continue;
+
+        if (Array.isArray(result[storeName])) {
+            result[storeName] = result[storeName]
+                .map(item => normalizeGenericStoreItemForImport(storeName, item))
+                .filter(Boolean);
+        } else if (result[storeName] && typeof result[storeName] === 'object') {
+            result[storeName] = normalizeGenericStoreItemForImport(storeName, result[storeName]);
+        }
+    }
+
+    return result;
+}
+
+async function safeImportStore(storeName, value) {
+    if (!dbConfig || !dbConfig[storeName]) return { ok: 0, failed: 0 };
+
+    await kokoMemory.clear(storeName);
+
+    let ok = 0;
+    let failed = 0;
+
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            try {
+                if (!item || typeof item !== 'object') {
+                    failed++;
+                    continue;
+                }
+
+                await kokoMemory.put(storeName, item);
+                ok++;
+            } catch (err) {
+                failed++;
+                console.warn(`导入 ${storeName} 的一条数据失败，已跳过：`, item, err);
+            }
+        }
+    } else if (value && typeof value === 'object') {
+        try {
+            await kokoMemory.put(storeName, value);
+            ok++;
+        } catch (err) {
+            failed++;
+            console.warn(`导入 ${storeName} 失败：`, value, err);
+        }
+    }
+
+    return { ok, failed };
+}
+
+function safeBindEvent(id, eventName, handler) {
+    const el = document.getElementById(id);
+    if (!el) {
+        console.warn(`找不到元素 #${id}，跳过事件绑定`);
+        return;
+    }
+
+    try {
+        const key = `${eventName}Handler`;
+        if (!el._kokoSafeHandlers) el._kokoSafeHandlers = {};
+        if (el._kokoSafeHandlers[key]) {
+            el.removeEventListener(eventName, el._kokoSafeHandlers[key]);
+        }
+        el._kokoSafeHandlers[key] = handler;
+        el.addEventListener(eventName, handler);
+    } catch (err) {
+        console.warn(`绑定 #${id} 的 ${eventName} 事件失败：`, err);
+    }
+}
+
+async function saveNewContactFromModal() {
+    const name = document.getElementById('contact-name-input')?.value.trim();
+    const persona = document.getElementById('contact-persona-input')?.value.trim();
+
+    if (!name || !persona) {
+        alert('请填写姓名和人设');
+        return;
+    }
+
+    const avatar = document.getElementById('contact-avatar-input')?.value.trim();
+    const worldBookSelect = document.getElementById('world-book-select');
+    const selectedBooks = worldBookSelect
+        ? Array.from(worldBookSelect.selectedOptions).map(opt => opt.value)
+        : [];
+
+    const newContact = normalizeContactForImport({
+        id: 'contact_' + Date.now(),
+        name,
+        persona,
+        avatar: avatar || 'https://s21.ax1x.com/2025/11/09/pZ9FrMd.png',
+        voiceId: '',
+        worldBooks: selectedBooks,
+        isPinned: false,
+        isGroup: false,
+        groupId: null,
+        history: [],
+        smsHistory: [],
+        diary: [],
+        userPersona: '',
+        thoughtPreset: '',
+        signature: '',
+        isNarrativeMode: false,
+        apiCallCounter: 0,
+        pet: null,
+        gold_coins: 50,
+        memories: [],
+        permanent_memories: [],
+        echoMemory: makeDefaultEchoMemory(),
+        latestHeartVoice: null,
+        memberHeartVoices: {},
+        isChatPetVisible: false,
+        sharedPlaylist: {
+            tracks: [],
+            currentIndex: 0,
+            playbackMode: 'list',
+            isPlaying: false
+        },
+        totalListenTime: 0,
+        firstChatDate: Date.now(),
+        schedule: [],
+        events: [],
+        blockedStatus: 'none'
+    });
+
+    try {
+        state.contacts.push(newContact);
+        await kokoMemory.put('contacts', newContact);
+
+        const modal = document.getElementById('add-contact-modal');
+        if (modal) modal.style.display = 'none';
+
+        const nameInput = document.getElementById('contact-name-input');
+        const personaInput = document.getElementById('contact-persona-input');
+        const avatarInput = document.getElementById('contact-avatar-input');
+        if (nameInput) nameInput.value = '';
+        if (personaInput) personaInput.value = '';
+        if (avatarInput) avatarInput.value = '';
+
+        await renderContacts();
+    } catch (error) {
+        console.error('新建联系人失败:', error);
+        alert(`新建联系人失败：${error.message}`);
+    }
+}
+
+function bindCriticalEvents() {
+    safeBindEvent('add-contact-btn', 'click', () => {
+        const modal = document.getElementById('add-contact-modal');
+        if (modal) modal.style.display = 'flex';
+    });
+
+    safeBindEvent('cancel-add-contact-btn', 'click', () => {
+        const modal = document.getElementById('add-contact-modal');
+        if (modal) modal.style.display = 'none';
+    });
+
+    safeBindEvent('close-contact-modal', 'click', () => {
+        const modal = document.getElementById('add-contact-modal');
+        if (modal) modal.style.display = 'none';
+    });
+
+    safeBindEvent('save-contact-btn', 'click', saveNewContactFromModal);
+
+    safeBindEvent('import-data-btn', 'click', () => {
+        const input = document.getElementById('import-data-input') || document.getElementById('import-file-input');
+        if (input) input.click();
+    });
+
+    safeBindEvent('import-data-input', 'change', importData);
+    safeBindEvent('import-file-input', 'change', importData);
+}
+
 // --- 新增：导入数据功能 (V3 - 兼容 JSON 和 JSONL) ---
 async function importData(event) {
     const file = event.target.files[0];
@@ -13456,36 +13837,35 @@ async function importData(event) {
             }
         }
         
-        // --- 步骤 4: (这是你原有的逻辑，保持不变) ---
-        //   无论数据来自 .json 还是 .jsonl，到这里 dataToImport 的结构都应该是一致的了
         try {
+            dataToImport = normalizeImportedBackupData(dataToImport);
+
             const supportedStores = Object.keys(dbConfig);
             let importedCount = 0;
             let skippedCount = 0;
+            let failedItemCount = 0;
 
             for (const storeName in dataToImport) {
-                if (supportedStores.includes(storeName)) {
-                    if (dataToImport[storeName]) {
-                        await kokoMemory.clear(storeName); // 清空表
-                        
-                        if (Array.isArray(dataToImport[storeName])) {
-                            await kokoMemory.bulkPut(storeName, dataToImport[storeName]);
-                        } else {
-                            // 导入单条目数据 (e.g., myProfile)
-                            await kokoMemory.put(storeName, dataToImport[storeName]);
-                        }
-                        importedCount++;
-                    }
-                } else {
+                if (!supportedStores.includes(storeName)) {
                     console.warn(`跳过导入：当前版本不包含数据表 "${storeName}"。`);
                     skippedCount++;
+                    continue;
                 }
+
+                if (!dataToImport[storeName]) continue;
+
+                const result = await safeImportStore(storeName, dataToImport[storeName]);
+
+                if (result.ok > 0) importedCount++;
+                failedItemCount += result.failed;
             }
-            
+
             let alertMessage = `数据导入完成！\n\n- 成功导入 ${importedCount} 个数据表。\n- 跳过了 ${skippedCount} 个不兼容的数据表。`;
-            if (skippedCount > 0) {
-                alertMessage += '\n\n（注意：部分新版本数据因不兼容已被忽略）';
+
+            if (failedItemCount > 0) {
+                alertMessage += `\n- 有 ${failedItemCount} 条损坏数据已跳过。`;
             }
+
             alertMessage += '\n\n页面即将刷新以应用更改。';
 
             alert(alertMessage);
@@ -37766,25 +38146,22 @@ document.getElementById('test-notification-sound-btn').addEventListener('click',
     let currentlyPlayingMsgId = null;
     
  // --- 原有功能：数据导入导出 ---
-document.getElementById('export-data-btn').addEventListener('click', exportData);
+safeBindEvent('export-data-btn', 'click', exportData);
 
 // ▼▼▼ 在这里添加新的一行代码 ▼▼▼
 // 修改：点击“局部导出”不再直接导出，而是打开选择弹窗
-document.getElementById('export-light-data-btn').addEventListener('click', openExportSelectorModal);
+safeBindEvent('export-light-data-btn', 'click', openExportSelectorModal);
 
 // 新增：绑定弹窗内的按钮事件
-document.getElementById('close-export-selector-modal').addEventListener('click', () => {
+safeBindEvent('close-export-selector-modal', 'click', () => {
     document.getElementById('export-selector-modal').style.display = 'none';
 });
 
-document.getElementById('confirm-custom-export-btn').addEventListener('click', performCustomExport);
+safeBindEvent('confirm-custom-export-btn', 'click', performCustomExport);
 
 // ▲▲▲ 添加结束 ▲▲▲
 
-document.getElementById('import-data-btn').addEventListener('click', () => {
-    document.getElementById('import-file-input').click();
-});
-    document.getElementById('import-file-input').addEventListener('change', importData);
+bindCriticalEvents();
 
     // --- 原有功能：头像更换 ---
     document.getElementById('change-avatar-btn').addEventListener('click', function() {
@@ -38808,60 +39185,7 @@ if (modeSwitchBtn) {
     // ==========================================================
 
     // --- 原有功能：各类弹窗的逻辑 ---
-    document.getElementById('add-contact-btn').addEventListener('click', () => {
-        document.getElementById('add-contact-modal').style.display = 'flex';
-    });
-    document.getElementById('close-contact-modal').addEventListener('click', () => {
-        document.getElementById('add-contact-modal').style.display = 'none';
-    });
-    document.getElementById('save-contact-btn').addEventListener('click', async () => {
-        const name = document.getElementById('contact-name-input').value.trim();
-        const persona = document.getElementById('contact-persona-input').value.trim();
-        if (!name || !persona) return alert('请填写姓名和人设');
-        const avatar = document.getElementById('contact-avatar-input').value.trim();
-        const selectedBooks = Array.from(document.getElementById('world-book-select').selectedOptions).map(opt => opt.value);
-        // ...
-const newContact = {
-    id: 'contact_' + Date.now(),
-    name: name,
-    persona: persona,
-    avatar: avatar || `https://s21.ax1x.com/2025/11/09/pZ9FrMd.png`,
-    voiceId: '',
-    worldBooks: JSON.parse(JSON.stringify(selectedBooks)),
-    isPinned: false,
-    groupId: null,
-    history: [],
-    diary: [],
-    userPersona: '',
-    thoughtPreset: '',
-    signature: '',
-    isNarrativeMode: false,
-    apiCallCounter: 0,
-    pet: null,
-    gold_coins: 50,
-    memories: [],
-    isChatPetVisible: false,
-    sharedPlaylist: {
-        tracks: [],
-        currentIndex: 0,
-        playbackMode: 'list',
-        isPlaying: false
-    },
-    totalListenTime: 0,
-    firstChatDate: Date.now(),
-    
-    // ▼▼▼ 在这里添加下面这两行新代码 ▼▼▼
-    schedule: [], // 存放你的日程表
-    events: [],    // 存放重要的日子（纪念日、生理期等）
-    // ▲▲▲ 添加结束 ▲▲▲
-    blockedStatus: 'none'
-};
-// ...
-        state.contacts.push(newContact);
-        await kokoMemory.put('contacts', newContact);
-        await renderContacts();
-        document.getElementById('add-contact-modal').style.display = 'none';
-    });
+    bindCriticalEvents();
 // (替换) 'save-contact-settings-btn' 监听器 (在 attachEventListeners 中)
 document.getElementById('save-contact-settings-btn').addEventListener('click', async () => {
     const contact = state.contacts.find(c => c.id === state.activeChatId);
@@ -42922,7 +43246,13 @@ attachGroupSettingsListeners();
 // 保存外观设置按钮
 document.getElementById('save-appearance-btn').addEventListener('click', saveAppearanceSettings);
 }
-attachEventListeners();
+bindCriticalEvents();
+try {
+    attachEventListeners();
+} catch (err) {
+    console.warn('事件绑定过程出现异常，已保留关键导入/联系人事件:', err);
+}
+bindCriticalEvents();
 // --- 紧急修复：重新绑定搜索按钮 ---
     const searchBtnFix = document.getElementById('search-chat-btn');
     if (searchBtnFix) {
