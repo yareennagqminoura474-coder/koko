@@ -7693,7 +7693,6 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
         <div class="chat-status" id="chat-contact-status"></div>
     </div>
     <div>
-        <i class="fas fa-heart action-btn" id="heart-voice-btn" title="心声 / Inner Echo" style="margin-right: 15px; position: relative; z-index: 10000;"></i>
         <i class="fas fa-search action-btn" id="search-chat-btn" title="搜索聊天记录" style="margin-right: 15px; position: relative; z-index: 10000;" onclick="event.stopPropagation(); showChatSearch();"></i>
         <i class="fas fa-ellipsis-v action-btn" id="more-chat-options-btn" title="更多操作"></i>
     </div>
@@ -12465,40 +12464,27 @@ function valueToSignalNumber(value, fallback, strongWords = []) {
 }
 
 function estimateHeartVoiceSignals(seed) {
-    const text = `${seed.mood || ''} ${seed.action || ''} ${seed.innerThoughts || ''} ${seed.deletedDraft || ''} ${seed.relationshipSignal || ''} ${seed.bodyState || ''}`;
+    const text = `${seed.mood || ''} ${seed.action || ''} ${seed.innerThoughts || ''} ${seed.deletedDraft || ''}`;
     let favorability = 52;
-    let heartbeat = 74;
-    let jealousy = 8;
-    let happy = 42;
-    let angry = 8;
-    let tension = 24;
 
     if (/喜欢|爱|想你|心动|偏爱|靠近|亲近|在意|舍不得|温柔|期待/.test(text)) {
-        favorability += 24; happy += 24; heartbeat += 12; tension += 12;
+        favorability += 24;
     }
     if (/害羞|紧张|慌|脸红|不自在|试探|暧昧/.test(text)) {
-        heartbeat += 18; tension += 26; happy += 8;
+        favorability += 10;
     }
     if (/吃醋|嫉妒|占有|不爽|酸|介意/.test(text)) {
-        jealousy += 58; tension += 18; heartbeat += 10;
+        favorability += 4;
     }
     if (/生气|恼火|愤怒|冷笑|厌烦|烦躁|火大|压制|威慑/.test(text)) {
-        angry += 62; happy -= 24; favorability -= 12; heartbeat += 14; tension += 20;
+        favorability -= 12;
     }
     if (/难过|失落|委屈|害怕|不安|沉默|冷处理|拉远/.test(text)) {
-        happy -= 25; heartbeat += 8; tension += 12; favorability -= 6;
-    }
-    if (/平静|安静|日常|普通/.test(text)) {
-        heartbeat -= 4; tension -= 5;
+        favorability -= 6;
     }
 
     return {
-        favorability: clampNumber(favorability, 0, 100, 52),
-        heartbeat: clampNumber(heartbeat, 55, 160, 74),
-        jealousy: clampNumber(jealousy, 0, 100, 8),
-        happy: clampNumber(happy, 0, 100, 42),
-        angry: clampNumber(angry, 0, 100, 8),
-        tension: clampNumber(tension, 0, 100, 24)
+        favorability: clampNumber(favorability, 0, 100, 52)
     };
 }
 
@@ -12526,36 +12512,22 @@ function normalizeHeartVoice(raw) {
         mood: source.mood || source.emotion || '平静地在意',
         action: source.action || '安静地看着这场对话。',
         innerThoughts: innerPieces || 'TA 暂时还没有把真正的想法说出来。',
-        deletedDraft: source.deletedDraft || source.draft || '刚刚差点发出去，又删掉了。',
-        affection: source.affection || '',
+        deletedDraft: source.deletedDraft || source.draft || source.hiddenTruth || '刚刚差点发出去，又删掉了。',
         clothing: source.clothing || '保持着当前的日常状态。',
-        bodyState: source.bodyState || '',
-        relationshipSignal: source.relationshipSignal || '',
-        timestamp: source.timestamp || now
+        timestamp: Number.isFinite(Number(source.timestamp)) ? Number(source.timestamp) : now
     };
-    if (!seed.bodyState && source.heartRate) seed.bodyState = `心率：${source.heartRate}`;
     const estimated = estimateHeartVoiceSignals(seed);
-    const favorability = clampNumber(source.favorability, 0, 100, estimated.favorability);
-    const normalized = {
+    const favorability = clampNumber(source.favorability ?? source.affectionScore, 0, 100, estimated.favorability);
+    return {
         mood: seed.mood,
+        favorability,
+        favorabilityLabel: source.favorabilityLabel || source.affection || favorabilityLabelFromScore(favorability, seed.mood),
+        clothing: seed.clothing,
         action: seed.action,
         innerThoughts: seed.innerThoughts,
         deletedDraft: seed.deletedDraft,
-        affection: seed.affection || favorabilityLabelFromScore(favorability, seed.mood),
-        favorability,
-        favorabilityLabel: source.favorabilityLabel || seed.affection || favorabilityLabelFromScore(favorability, seed.mood),
-        heartbeat: clampNumber(source.heartbeat ?? source.heartRate, 55, 160, estimated.heartbeat),
-        jealousy: clampNumber(valueToSignalNumber(source.jealousy, estimated.jealousy, ['吃醋', '嫉妒']), 0, 100, estimated.jealousy),
-        happy: clampNumber(valueToSignalNumber(source.happy, estimated.happy, ['开心', '期待']), 0, 100, estimated.happy),
-        angry: clampNumber(valueToSignalNumber(source.angry, estimated.angry, ['恼火', '生气']), 0, 100, estimated.angry),
-        tension: clampNumber(valueToSignalNumber(source.tension, estimated.tension, ['张力', '紧张']), 0, 100, estimated.tension),
-        clothing: seed.clothing,
-        bodyState: seed.bodyState,
-        relationshipSignal: seed.relationshipSignal,
         timestamp: seed.timestamp
     };
-    normalized.emotion = normalized.mood;
-    return normalized;
 }
 
 function parseHeartVoiceFromText(text) {
@@ -12579,12 +12551,78 @@ function parseHeartVoiceFromText(text) {
     return { cleanText, heartVoice };
 }
 
-function getHeartVoiceHistory(chatObj, speakerId) {
-    if (!chatObj) return [];
-    if (chatObj.isGroup) {
-        return ((chatObj.memberHeartVoiceHistory || {})[speakerId] || []).map(normalizeHeartVoice);
+function getHeartVoiceOwnerContact(speakerId, chatObj = null) {
+    if (!speakerId || speakerId === 'user' || speakerId === 'myProfile') return null;
+    const privateContact = state.contacts.find(c => !c.isGroup && c.id === speakerId);
+    if (privateContact) return privateContact;
+    if (chatObj && !chatObj.isGroup && chatObj.id === speakerId) return chatObj;
+    return null;
+}
+
+// 心声按角色本体统一读取，兼容旧群聊/私聊分散保存的数据。
+function collectHeartVoicesForCharacter(chatObj, speakerId) {
+    const items = [];
+    const addOne = (raw) => {
+        if (!raw) return;
+        try {
+            items.push(normalizeHeartVoice(raw.heartVoice || raw.content || raw));
+        } catch (err) {
+            console.warn('读取单条心声失败，已跳过:', err);
+        }
+    };
+    const addFromHistoryMessages = (history) => {
+        if (!Array.isArray(history)) return;
+        history.forEach(msg => {
+            if (msg && msg.type === 'heart_voice' && (!speakerId || msg.senderId === speakerId || msg.sender === speakerId)) {
+                addOne(msg);
+            }
+        });
+    };
+
+    const owner = getHeartVoiceOwnerContact(speakerId, chatObj);
+    if (owner) {
+        addOne(owner.latestHeartVoice);
+        (owner.heartVoiceHistory || []).forEach(addOne);
+        addFromHistoryMessages(owner.history);
     }
-    return (chatObj.heartVoiceHistory || []).map(normalizeHeartVoice);
+
+    (state.contacts || []).forEach(contact => {
+        if (!contact || !contact.isGroup) return;
+        addOne(contact.memberHeartVoices && contact.memberHeartVoices[speakerId]);
+        ((contact.memberHeartVoiceHistory || {})[speakerId] || []).forEach(addOne);
+        addFromHistoryMessages(contact.history);
+    });
+
+    if (!owner && chatObj) {
+        addOne(chatObj.latestHeartVoice);
+        (chatObj.heartVoiceHistory || []).forEach(addOne);
+        addOne(chatObj.memberHeartVoices && chatObj.memberHeartVoices[speakerId]);
+        ((chatObj.memberHeartVoiceHistory || {})[speakerId] || []).forEach(addOne);
+        addFromHistoryMessages(chatObj.history);
+    }
+
+    const unique = [];
+    const seen = new Set();
+    items
+        .filter(Boolean)
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .forEach(hv => {
+            const key = [
+                hv.timestamp || '',
+                hv.mood || '',
+                hv.action || '',
+                hv.innerThoughts || '',
+                hv.deletedDraft || ''
+            ].join('|');
+            if (seen.has(key)) return;
+            seen.add(key);
+            unique.push(hv);
+        });
+    return unique.slice(0, 200);
+}
+
+function getHeartVoiceHistory(chatObj, speakerId) {
+    return collectHeartVoicesForCharacter(chatObj, speakerId);
 }
 
 function renderHvCard(title, value, extraClass = '', valueClass = '') {
@@ -12600,26 +12638,15 @@ function renderHeartVoicePanel(heartVoice, speakerName = 'TA', options = {}) {
     const history = Array.isArray(options.history) ? options.history : [];
     window.currentHeartVoicePanelState = { heartVoice, speakerName, options: { ...options, avatar, history } };
 
-    const optionalCards = hv ? [
-        ['身体状态', hv.bodyState],
-        ['关系信号', hv.relationshipSignal],
-        ['心跳频次', `${hv.heartbeat} BPM`],
-        ['吃醋指数', `${hv.jealousy}%`],
-        ['开心指数', `${hv.happy}%`],
-        ['生气指数', `${hv.angry}%`],
-        ['张力指数', `${hv.tension}%`]
-    ].filter(([, value]) => value !== '' && value !== null && typeof value !== 'undefined') : [];
-
     const body = hv ? `
         ${renderHvCard('〽 实时心情', hv.mood)}
-        ${renderHvCard('对你的好感度', `${hv.favorability} (${hv.favorabilityLabel || hv.affection || favorabilityLabelFromScore(hv.favorability, hv.mood)})`)}
+        ${renderHvCard('对你的好感度', `${hv.favorability} (${hv.favorabilityLabel || favorabilityLabelFromScore(hv.favorability, hv.mood)})`)}
         <div class="hv-grid-2">
             ${renderHvCard('穿着', hv.clothing)}
             ${renderHvCard('动作', hv.action)}
         </div>
         ${renderHvCard('内心想法', hv.innerThoughts, 'hv-large-card', 'hv-scroll-text')}
         ${renderHvCard('已删除草稿', hv.deletedDraft)}
-        ${optionalCards.map(([title, value]) => renderHvCard(title, value)).join('')}
     ` : `<div class="hv-empty">还没有状态数据哦~ 和 TA 聊天后，心声就会自动出现啦。</div>`;
 
     panel.innerHTML = `
@@ -12660,7 +12687,7 @@ function renderHeartVoiceHistoryPanel() {
                     <div class="hv-item"><span class="hv-label">心情</span><span class="hv-value">${escapeHtmlText(hv.mood)}</span></div>
                     <div class="hv-item"><span class="hv-label">动作</span><span class="hv-value">${escapeHtmlText(hv.action)}</span></div>
                     <div class="hv-item"><span class="hv-label">内心想法</span><span class="hv-value">${escapeHtmlText(hv.innerThoughts)}</span></div>
-                    <div class="hv-item"><span class="hv-label">好感度</span><span class="hv-value">${hv.favorability} (${escapeHtmlText(hv.favorabilityLabel || hv.affection || favorabilityLabelFromScore(hv.favorability, hv.mood))})</span></div>
+                    <div class="hv-item"><span class="hv-label">好感度</span><span class="hv-value">${hv.favorability} (${escapeHtmlText(hv.favorabilityLabel || favorabilityLabelFromScore(hv.favorability, hv.mood))})</span></div>
                 </div>
             `).join('')}
         </div>
@@ -12699,23 +12726,16 @@ function getProfileInChat(chatObj, speakerId) {
 }
 
 function getLatestHeartVoice(chatObj, speakerId) {
-    if (!chatObj) return null;
-    if (chatObj.isGroup) {
-        const fromMap = chatObj.memberHeartVoices && chatObj.memberHeartVoices[speakerId];
-        if (fromMap) return normalizeHeartVoice(fromMap);
-        const fromHistoryList = (chatObj.memberHeartVoiceHistory || {})[speakerId];
-        if (Array.isArray(fromHistoryList) && fromHistoryList[0]) return normalizeHeartVoice(fromHistoryList[0]);
-        const fromHistory = (chatObj.history || []).slice().reverse().find(m => m.type === 'heart_voice' && (m.senderId === speakerId || m.sender === speakerId));
-        return fromHistory ? normalizeHeartVoice(fromHistory.heartVoice || fromHistory.content) : null;
-    }
-    const privateHeartVoice = chatObj.latestHeartVoice || (Array.isArray(chatObj.heartVoiceHistory) && chatObj.heartVoiceHistory[0]) || ((chatObj.history || []).slice().reverse().find(m => m.type === 'heart_voice') || {}).heartVoice;
-    return privateHeartVoice ? normalizeHeartVoice(privateHeartVoice) : null;
+    const history = collectHeartVoicesForCharacter(chatObj, speakerId);
+    return history[0] || null;
 }
 
 async function saveLatestHeartVoice(chatContext, speakerId, speakerName, heartVoice) {
     try {
         if (!chatContext || !heartVoice) return;
         const hv = normalizeHeartVoice(heartVoice);
+        const ownerContact = getHeartVoiceOwnerContact(speakerId, chatContext);
+        const targetContact = ownerContact || (!chatContext.isGroup ? chatContext : null);
         const hiddenMessage = {
             id: makeEchoId('hv_msg'),
             type: 'heart_voice',
@@ -12730,19 +12750,21 @@ async function saveLatestHeartVoice(chatContext, speakerId, speakerName, heartVo
         };
         chatContext.history = chatContext.history || [];
         chatContext.history.push(hiddenMessage);
-        if (chatContext.isGroup) {
+
+        if (targetContact) {
+            targetContact.latestHeartVoice = hv;
+            targetContact.heartVoiceHistory = Array.isArray(targetContact.heartVoiceHistory) ? targetContact.heartVoiceHistory : [];
+            targetContact.heartVoiceHistory.unshift(hv);
+            targetContact.heartVoiceHistory = targetContact.heartVoiceHistory.slice(0, 200);
+        } else if (chatContext.isGroup) {
             chatContext.memberHeartVoices = chatContext.memberHeartVoices || {};
             chatContext.memberHeartVoiceHistory = chatContext.memberHeartVoiceHistory || {};
             chatContext.memberHeartVoices[speakerId] = hv;
             chatContext.memberHeartVoiceHistory[speakerId] = chatContext.memberHeartVoiceHistory[speakerId] || [];
             chatContext.memberHeartVoiceHistory[speakerId].unshift(hv);
             chatContext.memberHeartVoiceHistory[speakerId] = chatContext.memberHeartVoiceHistory[speakerId].slice(0, 200);
-        } else {
-            chatContext.latestHeartVoice = hv;
-            chatContext.heartVoiceHistory = chatContext.heartVoiceHistory || [];
-            chatContext.heartVoiceHistory.unshift(hv);
-            chatContext.heartVoiceHistory = chatContext.heartVoiceHistory.slice(0, 200);
         }
+
         await addEchoMemoryEntry(chatContext, {
             sourceType: 'heart_voice',
             speakerId,
@@ -12752,6 +12774,9 @@ async function saveLatestHeartVoice(chatContext, speakerId, speakerName, heartVo
             importance: 3,
             tags: ['心声', 'Inner Echo']
         }, { skipSave: true });
+        if (targetContact && targetContact !== chatContext) {
+            await kokoMemory.put('contacts', targetContact);
+        }
         await kokoMemory.put('contacts', chatContext);
     } catch (e) {
         console.warn('保存心声失败:', e);
@@ -12762,18 +12787,11 @@ function formatHeartVoiceForMemory(hvRaw) {
     const hv = normalizeHeartVoice(hvRaw);
     return [
         hv.mood && `心情：${hv.mood}`,
+        `好感度：${hv.favorability}(${hv.favorabilityLabel})`,
+        hv.clothing && `穿着：${hv.clothing}`,
         hv.action && `动作：${hv.action}`,
         hv.innerThoughts && `真实想法：${hv.innerThoughts}`,
-        hv.deletedDraft && `删除草稿：${hv.deletedDraft}`,
-        `好感度：${hv.favorability}(${hv.favorabilityLabel})`,
-        `心跳：${hv.heartbeat}BPM`,
-        `吃醋：${hv.jealousy}%`,
-        `开心：${hv.happy}%`,
-        `生气：${hv.angry}%`,
-        `张力：${hv.tension}%`,
-        hv.clothing && `穿着：${hv.clothing}`,
-        hv.bodyState && `身体状态：${hv.bodyState}`,
-        hv.relationshipSignal && `关系信号：${hv.relationshipSignal}`
+        hv.deletedDraft && `删除草稿：${hv.deletedDraft}`
     ].filter(Boolean).join('；');
 }
 
@@ -18852,7 +18870,7 @@ ${worldBookContextString}
 *你(AI)的动作或环境描写*
 {你(AI)的内心独白}
 "你(AI)说的话"
-[heart_voice]{"mood":"","action":"","innerThoughts":"","deletedDraft":"","affection":"","favorability":0,"favorabilityLabel":"","heartbeat":0,"jealousy":0,"happy":0,"angry":0,"tension":0,"clothing":"","bodyState":"","relationshipSignal":""}[/heart_voice]
+[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]
 [diary]...[/diary]
 `;
         } else {
@@ -18871,7 +18889,7 @@ ${worldBookContextString}
 (你(AI)想说的第一句话)
 (你(AI)想说的第二句话)
 (你(AI)可以使用的指令，例如 [sticker:开心])
-[heart_voice]{"mood":"","action":"","innerThoughts":"","deletedDraft":"","affection":"","favorability":0,"favorabilityLabel":"","heartbeat":0,"jealousy":0,"happy":0,"angry":0,"tension":0,"clothing":"","bodyState":"","relationshipSignal":""}[/heart_voice]
+[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]
 [diary]...[/diary]
 `;
         }
@@ -19167,8 +19185,8 @@ ${finalMemoryForPrompt}
 [特殊指令]
 你可以使用 [sticker:表情名], [voice:内容], [picture:描述] 等指令。
 每个角色的 CONTENT 末尾必须包含该角色自己的 Inner Echo，格式为单行 JSON：
-[heart_voice]{"mood":"","action":"","innerThoughts":"","deletedDraft":"","affection":"","favorability":0,"favorabilityLabel":"","heartbeat":0,"jealousy":0,"happy":0,"angry":0,"tension":0,"clothing":"","bodyState":"","relationshipSignal":""}[/heart_voice]
-心声是该角色真实内心，不是说出口的话；不同角色必须各自独立，不要互相覆盖。mood 要具体，action 是当下动作，innerThoughts 是第一人称心里话，deletedDraft 是差点发出又删掉的话，favorability/heartbeat/jealousy/happy/angry/tension 必须是数字并贴合关系和情绪，clothing/bodyState/relationshipSignal 必须具体。
+[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]
+心声是该角色真实内心，不是说出口的话；同一个角色的心声会按角色本体统一保存。mood 要具体，favorability 必须是 0-100 数字并贴合关系和情绪，favorabilityLabel 要贴合当下关系，clothing/action/innerThoughts/deletedDraft 必须具体。
 [可用表情包列表]
 {{emoticon_list}}
 `;
@@ -19529,7 +19547,7 @@ ${characterDossiersPrompt}
 [文学风格] 你的写作风格需要遵循高端女性向文学（类似晋江文学城的流行风格）。文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时,要体现出较高的文学素养。
 [内容限制] 你的发言必须积极向上,充满希望。严禁探讨任何形式的阴谋论,严禁表达或引导至绝望、悲观或虚无主义的情绪。
 [禁用词列表] 绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
-[Inner Echo] 每个 MESSAGE 的 CONTENT 末尾必须包含该发言角色自己的单行心声 JSON：[heart_voice]{"mood":"","action":"","innerThoughts":"","deletedDraft":"","affection":"","favorability":0,"favorabilityLabel":"","heartbeat":0,"jealousy":0,"happy":0,"angry":0,"tension":0,"clothing":"","bodyState":"","relationshipSignal":""}[/heart_voice]。心声是角色真实内心，不是说出口的话；不同角色必须各自独立。mood 要具体，action 是当下动作，innerThoughts 是第一人称心里话，deletedDraft 是差点发出又删掉的话，favorability/heartbeat/jealousy/happy/angry/tension 必须是数字并贴合关系和情绪，clothing/bodyState/relationshipSignal 必须具体。
+[Inner Echo] 每个 MESSAGE 的 CONTENT 末尾必须包含该发言角色自己的单行心声 JSON：[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]。心声是角色真实内心，不是说出口的话；同一个角色的心声会按角色本体统一保存。mood 要具体，favorability 必须是 0-100 数字并贴合关系和情绪，favorabilityLabel 要贴合当下关系，clothing/action/innerThoughts/deletedDraft 必须具体。
 [回复规则] 你的回复可以包含多条消息,每条消息占一行。你可以发送普通文本,也可以通过下面的指令格式发送特殊消息。
 [特殊指令与互动指南]
 - 表情包: \`[sticker:表情名]\`
@@ -19890,8 +19908,8 @@ const NORMAL_BASE_PROMPT = `
 
 [！！！绝对核心规则：关于心声！！！]
 在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行输出 Inner Echo 心声标签。格式必须是单行 JSON：
-\`[heart_voice]{"mood":"","action":"","innerThoughts":"","deletedDraft":"","affection":"","favorability":0,"favorabilityLabel":"","heartbeat":0,"jealousy":0,"happy":0,"angry":0,"tension":0,"clothing":"","bodyState":"","relationshipSignal":""}[/heart_voice]\`
-心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。mood 要具体，action 必须是当前具体动作，innerThoughts 用第一人称心里话，deletedDraft 是差点发出又删掉的话，favorability 是 0-100 数字且随关系变化，favorabilityLabel 可用陌生、普通、熟悉、在意、心动、偏爱、极度恼火、嘴硬在意等，heartbeat 为 55-160，jealousy/happy/angry/tension 为 0-100，clothing/bodyState/relationshipSignal 必须贴合当下。JSON 不允许 Markdown、不允许换行、不允许解释。用户不会直接看见这个标签，程序会自动隐藏。
+\`[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]\`
+心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。mood 要具体，favorability 是 0-100 数字且随关系变化，favorabilityLabel 可用陌生、普通、熟悉、在意、心动、偏爱、极度恼火、嘴硬在意等，clothing/action/innerThoughts/deletedDraft 必须贴合当下。JSON 不允许 Markdown、不允许换行、不允许解释。用户不会直接看见这个标签，程序会自动隐藏。
 
 [！！！绝对核心规则：关于日记！！！]
 在你的所有对话、表情、动作、特殊消息全部输出完毕之后，你必须在回复的【最后部分】，另起一行，使用 \`[diary]...[/diary]\` 标签写一篇日记。日记是你对当前对话的思考、感悟或内心独白。即使只是简单的想法，也必须写。这是强制要求。
@@ -19905,7 +19923,7 @@ const NORMAL_BASE_PROMPT = `
 [sticker:开心]
 [status:准备出门]
 [qzone]久违的阳光！准备去公园抓光影啦 ✨ [picture:阳光洒在窗台上的照片][/qzone]
-[heart_voice]{"mood":"期待里带着一点紧张","action":"把手机在掌心转了半圈，又抬眼等你的反应。","innerThoughts":"不知道你会不会同意我的邀请，我其实比表现出来更期待。","deletedDraft":"要不就当约会吧……算了，这句话现在还不能发。","affection":"在意","favorability":72,"favorabilityLabel":"嘴硬在意","heartbeat":96,"jealousy":8,"happy":74,"angry":2,"tension":48,"clothing":"浅色衬衫，袖口随意挽起。","bodyState":"心口微热，指尖有点发紧。","relationshipSignal":"试探着靠近"}[/heart_voice]
+[heart_voice]{"mood":"期待里带着一点紧张","favorability":72,"favorabilityLabel":"嘴硬在意","clothing":"浅色衬衫，袖口随意挽起。","action":"把手机在掌心转了半圈，又抬眼等你的反应。","innerThoughts":"不知道你会不会同意我的邀请，我其实比表现出来更期待。","deletedDraft":"要不就当约会吧……算了，这句话现在还不能发。"}[/heart_voice]
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
@@ -19983,8 +20001,8 @@ const NARRATIVE_BASE_PROMPT = `
 
 [！！！绝对核心规则：关于心声！！！]
 在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行输出 Inner Echo 心声标签。格式必须是单行 JSON：
-\`[heart_voice]{"mood":"","action":"","innerThoughts":"","deletedDraft":"","affection":"","favorability":0,"favorabilityLabel":"","heartbeat":0,"jealousy":0,"happy":0,"angry":0,"tension":0,"clothing":"","bodyState":"","relationshipSignal":""}[/heart_voice]\`
-心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。mood 要具体，action 必须是当前具体动作，innerThoughts 用第一人称心里话，deletedDraft 是差点发出又删掉的话，favorability 是 0-100 数字且随关系变化，favorabilityLabel 可用陌生、普通、熟悉、在意、心动、偏爱、极度恼火、嘴硬在意等，heartbeat 为 55-160，jealousy/happy/angry/tension 为 0-100，clothing/bodyState/relationshipSignal 必须贴合当下。JSON 不允许 Markdown、不允许换行、不允许解释。用户不会直接看见这个标签，程序会自动隐藏。
+\`[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]\`
+心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。mood 要具体，favorability 是 0-100 数字且随关系变化，favorabilityLabel 可用陌生、普通、熟悉、在意、心动、偏爱、极度恼火、嘴硬在意等，clothing/action/innerThoughts/deletedDraft 必须贴合当下。JSON 不允许 Markdown、不允许换行、不允许解释。用户不会直接看见这个标签，程序会自动隐藏。
 
 [！！！绝对核心规则：关于日记！！！]
 在你完整的叙事（包含动作、心理和对话）结束后，你必须在回复的【最后部分】，另起新的一行，使用 \`[diary]...[/diary]\` 标签写一篇日记。日记是【角色】对当前对话的思考、感悟或内心独白。即使只是简单的想法，也必须写。这是强制要求，并且日记内容不应包含在主叙事块中。
@@ -19992,7 +20010,7 @@ const NARRATIVE_BASE_PROMPT = `
 [示例回复格式]
 *他走到窗边，看着外面的雨滴。* “下雨了呢。” *他转过身，对你露出一丝微笑。* {不知道你喜不喜欢下雨天。} “你晚饭想吃什么？” *他轻轻地问，手指无意识地敲打着窗台。*
 [status:有点饿了]
-[heart_voice]{"mood":"期待里带着一点紧张","action":"指尖轻轻敲着窗台，目光还停在你身上。","innerThoughts":"我想让你留下来，又不想把这份期待表现得太明显。","deletedDraft":"其实我想和你多待一会儿……算了，太直白了。","affection":"在意","favorability":72,"favorabilityLabel":"嘴硬在意","heartbeat":96,"jealousy":8,"happy":74,"angry":2,"tension":48,"clothing":"浅色衬衫，袖口随意挽起。","bodyState":"心口微热，指尖有点发紧。","relationshipSignal":"试探着靠近"}[/heart_voice]
+[heart_voice]{"mood":"期待里带着一点紧张","favorability":72,"favorabilityLabel":"嘴硬在意","clothing":"浅色衬衫，袖口随意挽起。","action":"指尖轻轻敲着窗台，目光还停在你身上。","innerThoughts":"我想让你留下来，又不想把这份期待表现得太明显。","deletedDraft":"其实我想和你多待一会儿……算了，太直白了。"}[/heart_voice]
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 `;
 
@@ -20851,7 +20869,7 @@ ${qzoneContextText}
 ❌ 禁止写 \`[diary]\` 日记。
 ❌ 禁止使用 \`[sticker:]\` 表情包。
 ❌ 禁止出现“发送了一条消息”这种描述。
-✅ 最后必须追加单行 Inner Echo 心声 JSON：\`[heart_voice]{"mood":"","action":"","innerThoughts":"","deletedDraft":"","affection":"","favorability":0,"favorabilityLabel":"","heartbeat":0,"jealousy":0,"happy":0,"angry":0,"tension":0,"clothing":"","bodyState":"","relationshipSignal":""}[/heart_voice]\`。这是角色真实内心，程序会自动隐藏。mood/action/innerThoughts/deletedDraft/clothing/bodyState/relationshipSignal 必须具体，favorability/heartbeat/jealousy/happy/angry/tension 必须是数字。
+✅ 最后必须追加单行 Inner Echo 心声 JSON：\`[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]\`。这是角色真实内心，程序会自动隐藏。mood/favorabilityLabel/clothing/action/innerThoughts/deletedDraft 必须具体，favorability 必须是 0-100 数字。
 
 【输出范例】
 *（屏幕晃动了一下，你凑近镜头，眯着眼睛仔细看了看）* “喂？听得清吗？” {奇怪，他那边怎么这么黑，是在外面吗？} *（你理了理耳边的碎发，有些不好意思地笑了笑）* “那个... 突然给你打电话，没打扰你吧？”
@@ -38095,7 +38113,7 @@ function updateCustomFontSize(size) {
             .comment-content,
             .diary-entry-content,
             .qz-card-content, .qz-name-text, .qz-music-title, .qz-music-artist,
-            .hv-item, #hv-jealousy  /* <--- ✨ 在这里加上了这两个选择器 ✨ */
+            .hv-item
             {
                 font-size: ${size}px !important;
                 line-height: 1.5 !important; /* 保持行高比例 */
@@ -42978,7 +42996,6 @@ document.getElementById('map-list').addEventListener('click', async (e) => {
 
 const chatContactNameEl = document.getElementById('chat-contact-name');
 const heartVoicePanel = document.getElementById('heart-voice-panel');
-const heartVoiceBtn = document.getElementById('heart-voice-btn');
 
 function toggleHeartVoicePanelFor(speakerId = null) {
     const contact = state.contacts.find(c => c.id === state.activeChatId);
@@ -43009,11 +43026,6 @@ function toggleHeartVoicePanelFor(speakerId = null) {
     heartVoicePanel.style.display = 'flex';
 }
 window.toggleHeartVoicePanelFor = toggleHeartVoicePanelFor;
-
-heartVoiceBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleHeartVoicePanelFor();
-});
 
 chatContactNameEl.addEventListener('click', (e) => {
     e.stopPropagation();
