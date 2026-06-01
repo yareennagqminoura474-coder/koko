@@ -153,6 +153,49 @@
             min-height: 34px;
         }
 
+        .message-input-wrap {
+            position: relative;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            align-self: flex-end;
+        }
+
+        .message-input-wrap #message-input {
+            width: 100%;
+            padding-right: 46px;
+            min-height: 38px;
+            line-height: 20px;
+            resize: none;
+        }
+
+        #insert-parentheses-btn {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 32px;
+            height: 28px;
+            border: none;
+            border-radius: 999px;
+            background: rgba(129, 199, 132, 0.18);
+            color: var(--theme-primary-hover);
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            cursor: pointer;
+            z-index: 2;
+        }
+
+        #insert-parentheses-btn:active {
+            transform: translateY(-50%) scale(0.95);
+        }
+
         .input-action-btn {
             border: none;
             border-radius: 50%;
@@ -7900,7 +7943,10 @@ input:checked + .mini-slider:before { transform: translateX(16px); }
                 <div class="chat-input-area" id="chat-input-area">
 <div class="emoji-btn" id="emoji-btn"><i class="far fa-smile"></i></div>
                     <button class="attachment-btn" id="attachment-btn"><i class="fas fa-plus"></i></button>
-                    <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
+                    <div class="message-input-wrap">
+                        <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
+                        <button id="insert-parentheses-btn" type="button">()</button>
+                    </div>
                     <button id="send-btn" class="input-action-btn" title="发送消息"><i class="fas fa-arrow-up"></i></button>
                     <button id="request-reply-btn" class="input-action-btn" title="请求AI回复"><i class="fas fa-apple-whole"></i></button>
                 </div>
@@ -12639,24 +12685,20 @@ function clampNumber(value, min, max, fallback) {
     return Math.max(min, Math.min(max, Math.round(num)));
 }
 
+function extractFavorabilityNumber(value, fallback = null) {
+    if (Number.isFinite(Number(value))) return Number(value);
+    const text = String(value ?? '').trim();
+    if (!text) return fallback;
+    const match = text.match(/-?\d+(?:\.\d+)?/);
+    return match ? Number(match[0]) : fallback;
+}
+
+function clampFavorability(value) {
+    return clampNumber(extractFavorabilityNumber(value, 50), 0, 100, 50);
+}
+
 function normalizeHeartVoiceFavorability(value, fallback) {
-    const raw = value == null ? '' : String(value).trim();
-    if (!raw) return clampNumber(fallback, 0, 100, 52);
-    const numberMatch = raw.match(/-?\d+(?:\.\d+)?/);
-    const score = clampNumber(numberMatch ? numberMatch[0] : value, 0, 100, fallback);
-    const bracketLabel = raw.match(/[（(]\s*[^()（）]{1,24}\s*[)）]/);
-    if (bracketLabel) {
-        const label = bracketLabel[0]
-            .replace(/^\(/, '（')
-            .replace(/\)$/, '）')
-            .replace(/\s+/g, '');
-        return `${score}${label}`;
-    }
-    const suffix = numberMatch ? raw.replace(numberMatch[0], '').replace(/[()（）]/g, '').trim() : '';
-    if (suffix && /[\u4e00-\u9fa5]/.test(suffix)) {
-        return `${score}（${suffix.slice(0, 18)}）`;
-    }
-    return score;
+    return clampNumber(extractFavorabilityNumber(value, fallback), 0, 100, fallback ?? 50);
 }
 
 function stableHeartVoiceHash(value) {
@@ -12702,6 +12744,173 @@ function estimateHeartVoiceSignals(seed) {
     };
 }
 
+function readFavorabilityFromRawHeartVoice(raw) {
+    if (!raw) return null;
+    const source = raw.heartVoice || raw.content || raw;
+    if (!source || typeof source !== 'object') return null;
+    const value = source.favorability ?? source.affectionScore;
+    const parsed = extractFavorabilityNumber(value, null);
+    return Number.isFinite(parsed) ? clampFavorability(parsed) : null;
+}
+
+function getPreviousFavorabilityForCharacter(chatContext, speakerId) {
+    try {
+        const candidates = [];
+        const owner = (typeof getHeartVoiceOwnerContact === 'function')
+            ? getHeartVoiceOwnerContact(speakerId, chatContext)
+            : null;
+
+        if (owner && !owner.isGroup) {
+            candidates.push(owner.latestHeartVoice);
+            if (Array.isArray(owner.heartVoiceHistory)) candidates.push(owner.heartVoiceHistory[0]);
+        }
+
+        if (chatContext) {
+            if (chatContext.isGroup && speakerId) {
+                candidates.push(chatContext.memberHeartVoices && chatContext.memberHeartVoices[speakerId]);
+                const memberHistory = chatContext.memberHeartVoiceHistory && chatContext.memberHeartVoiceHistory[speakerId];
+                if (Array.isArray(memberHistory)) candidates.push(memberHistory[0]);
+            } else {
+                candidates.push(chatContext.latestHeartVoice);
+                if (Array.isArray(chatContext.heartVoiceHistory)) candidates.push(chatContext.heartVoiceHistory[0]);
+            }
+
+            if (Array.isArray(chatContext.history)) {
+                const hiddenHeartVoice = chatContext.history.slice().reverse().find(msg => {
+                    if (!msg || msg.type !== 'heart_voice') return false;
+                    const msgSpeakerId = msg.characterId || msg.senderId || msg.sender || msg.heartVoice?.speakerId || msg.content?.speakerId;
+                    return !speakerId || msgSpeakerId === speakerId;
+                });
+                candidates.push(hiddenHeartVoice);
+            }
+        }
+
+        for (const candidate of candidates) {
+            const value = readFavorabilityFromRawHeartVoice(candidate);
+            if (Number.isFinite(value)) return value;
+        }
+    } catch (err) {
+        console.warn('读取上一轮好感度失败，使用默认值:', err);
+    }
+    return 50;
+}
+
+function analyzeFavorabilitySignal(text = '') {
+    const source = String(text || '');
+    const countHits = (words) => words.reduce((count, word) => count + (source.includes(word) ? 1 : 0), 0);
+    const positiveWords = ['喜欢', '想你', '谢谢', '抱歉', '对不起', '担心', '陪你', '相信你', '理解你', '在意你', '保护你', '哄', '夸', '支持', '偏爱', '亲近', '撒娇', '认真解释', '关心', '照顾', '尊重', '安抚', '解释', '道歉'];
+    const negativeWords = ['讨厌', '滚', '烦', '别管', '骗', '背叛', '威胁', '冷落', '敷衍', '羞辱', '伤害', '失望', '嘲讽', '贬低', '拒绝', '踩雷', '冒犯', '欺骗', '不在乎'];
+    const tensionWords = ['吃醋', '嘴硬', '生气', '忍住', '试探', '别扭', '占有', '冷笑', '压着火', '委屈', '不甘心', '嫉妒', '恼火', '克制', '在意'];
+
+    return {
+        positive: countHits(positiveWords),
+        negative: countHits(negativeWords),
+        tension: countHits(tensionWords)
+    };
+}
+
+function calculateFavorabilityDelta({ previous, userText = '', aiReplyText = '', mood = '', innerThoughts = '', character = null } = {}) {
+    const prev = clampFavorability(previous);
+    const userSignal = analyzeFavorabilitySignal(userText);
+    const replySignal = analyzeFavorabilitySignal(aiReplyText);
+    const innerSignal = analyzeFavorabilitySignal(`${mood || ''} ${innerThoughts || ''} ${character?.persona || ''}`);
+    const apologyOrComfort = /抱歉|对不起|道歉|解释|安抚|哄|不是故意|我错|担心|陪你|理解你|相信你/.test(userText);
+    const seriousNegative = /威胁|背叛|欺骗|骗|羞辱|伤害|踩雷|滚|冷落|贬低|嘲讽/.test(userText);
+    const caringTension = /吃醋|嘴硬|别扭|生气|冷笑|压着火|委屈|不甘心/.test(`${mood || ''} ${innerThoughts || ''}`)
+        && /在意|喜欢|想|舍不得|偏爱|心动|靠近|不想放|牵动/.test(`${innerThoughts || ''} ${aiReplyText || ''}`);
+
+    const weightedPositive = userSignal.positive * 2 + replySignal.positive + innerSignal.positive;
+    const weightedNegative = userSignal.negative * 2 + Math.max(0, replySignal.negative - replySignal.tension) + Math.max(0, innerSignal.negative - innerSignal.tension);
+    const tension = userSignal.tension + replySignal.tension + innerSignal.tension;
+
+    let delta = 0;
+    if (seriousNegative || weightedNegative >= weightedPositive + 4) {
+        delta = -Math.min(12, 5 + weightedNegative - weightedPositive);
+    } else if (apologyOrComfort) {
+        delta = Math.min(8, 2 + userSignal.positive + innerSignal.positive);
+    } else if (weightedPositive >= weightedNegative + 4) {
+        delta = Math.min(8, 3 + weightedPositive - weightedNegative);
+    } else if (weightedPositive > weightedNegative) {
+        delta = Math.min(3, 1 + weightedPositive - weightedNegative);
+    } else if (weightedNegative > weightedPositive) {
+        delta = -Math.min(4, 1 + weightedNegative - weightedPositive);
+    } else if (caringTension) {
+        delta = Math.min(4, Math.max(1, innerSignal.positive));
+    } else if (tension > 0) {
+        delta = /在意|喜欢|舍不得|偏爱|心动/.test(`${innerThoughts || ''} ${aiReplyText || ''}`) ? 1 : 0;
+    }
+
+    if (delta > 0 && prev >= 85) delta = Math.min(delta, 3);
+    if (delta > 0 && prev >= 70) delta = Math.min(delta, 6);
+    if (delta > 0 && prev <= 25 && !apologyOrComfort && weightedPositive < 6) delta = Math.min(delta, 4);
+    if (delta < 0 && prev <= 15) delta = Math.max(delta, -3);
+    if (delta < 0 && prev <= 30) delta = Math.max(delta, -6);
+    if (!seriousNegative && Math.abs(delta) > 8) delta = Math.sign(delta) * 8;
+
+    return Math.round(delta);
+}
+
+function stabilizeFavorability({ previous, proposed, userText = '', aiReplyText = '', mood = '', innerThoughts = '', character = null } = {}) {
+    const prev = clampFavorability(previous);
+    const parsedProposed = extractFavorabilityNumber(proposed, null);
+    const localDelta = calculateFavorabilityDelta({ previous: prev, userText, aiReplyText, mood, innerThoughts, character });
+    const expected = clampFavorability(prev + localDelta);
+    if (!Number.isFinite(parsedProposed)) return expected;
+
+    const proposedValue = clampFavorability(parsedProposed);
+    const proposedDelta = proposedValue - prev;
+    const userSignal = analyzeFavorabilitySignal(userText);
+    const combinedSignal = analyzeFavorabilitySignal(`${userText || ''} ${aiReplyText || ''} ${mood || ''} ${innerThoughts || ''}`);
+    const seriousNegative = /威胁|背叛|欺骗|骗|羞辱|伤害|踩雷|滚|冷落|贬低|嘲讽/.test(userText);
+    const apologyOrComfort = /抱歉|对不起|道歉|解释|安抚|哄|不是故意|我错|担心|陪你|理解你|相信你/.test(userText);
+    const clearPositive = apologyOrComfort || userSignal.positive >= 2 || combinedSignal.positive >= combinedSignal.negative + 3;
+    const clearNegative = seriousNegative || userSignal.negative >= 2 || combinedSignal.negative >= combinedSignal.positive + 3;
+    const tensionOnly = combinedSignal.tension > 0 && !clearPositive && !clearNegative;
+
+    let allowedUp = 2;
+    let allowedDown = 2;
+    if (clearPositive) {
+        allowedUp = 8;
+        allowedDown = 2;
+    }
+    if (clearNegative) {
+        allowedUp = 2;
+        allowedDown = seriousNegative ? 12 : 8;
+    }
+    if (tensionOnly) {
+        allowedUp = 4;
+        allowedDown = 2;
+    }
+
+    let finalValue = proposedValue;
+    if (proposedDelta > allowedUp || proposedDelta < -allowedDown) {
+        finalValue = expected;
+    }
+    if (clearNegative && proposedDelta > 2) {
+        finalValue = expected;
+    }
+    if (clearPositive && proposedDelta < -2) {
+        finalValue = expected;
+    }
+
+    const history = Array.isArray(character?.heartVoiceHistory) ? character.heartVoiceHistory : [];
+    if (history.length >= 2) {
+        const latest = readFavorabilityFromRawHeartVoice(history[0]);
+        const older = readFavorabilityFromRawHeartVoice(history[1]);
+        const recentDelta = Number.isFinite(latest) && Number.isFinite(older) ? latest - older : 0;
+        const finalDelta = finalValue - prev;
+        const looksMechanical = Math.abs(recentDelta) >= 5
+            && Math.abs(finalDelta) >= 5
+            && Math.sign(recentDelta) === Math.sign(finalDelta)
+            && Math.abs(Math.abs(recentDelta) - Math.abs(finalDelta)) <= 1;
+        if (looksMechanical && !seriousNegative && Math.abs(localDelta) <= 3) {
+            finalValue = clampFavorability(prev + Math.sign(finalDelta) * Math.min(Math.abs(finalDelta), 3));
+        }
+    }
+
+    return clampFavorability(finalValue);
+}
+
 let currentHeartVoicePanelState = window.currentHeartVoicePanelState || {
     chatContext: null,
     speakerId: null,
@@ -12726,7 +12935,7 @@ function setCurrentHeartVoicePanelState(patch = {}) {
     return currentHeartVoicePanelState;
 }
 
-function normalizeHeartVoice(raw) {
+function normalizeHeartVoice(raw, context = {}) {
     const now = Date.now();
     const source = typeof raw === 'string'
         ? { innerThoughts: raw.trim() }
@@ -12739,7 +12948,25 @@ function normalizeHeartVoice(raw) {
         timestamp: Number.isFinite(Number(source.timestamp)) ? Number(source.timestamp) : now
     };
     const estimated = estimateHeartVoiceSignals(seed);
-    const favorability = normalizeHeartVoiceFavorability(source.favorability ?? source.affectionScore, estimated.favorability);
+    const hasContext = !!(context.chatContext || context.speakerId || context.userText || context.aiReplyText || context.character);
+    const previous = hasContext
+        ? getPreviousFavorabilityForCharacter(context.chatContext, context.speakerId || source.speakerId || source.senderId || source.sender)
+        : null;
+    const proposed = normalizeHeartVoiceFavorability(
+        source.favorability ?? source.affectionScore,
+        Number.isFinite(previous) ? previous : estimated.favorability
+    );
+    const favorability = hasContext
+        ? stabilizeFavorability({
+            previous,
+            proposed,
+            userText: context.userText || '',
+            aiReplyText: context.aiReplyText || '',
+            mood: seed.mood,
+            innerThoughts: seed.innerThoughts,
+            character: context.character || null
+        })
+        : proposed;
     const metadataText = [
         seed.timestamp,
         source.speakerId || source.senderId || source.sender || '',
@@ -12780,7 +13007,7 @@ function parseHeartVoiceFromText(text) {
         } catch (e) {
             console.warn('解析心声JSON失败，已按文本保存:', e, rawBlock);
         }
-        heartVoice = normalizeHeartVoice(parsed);
+        heartVoice = parsed;
     }
     cleanText = cleanText.replace(regex, '').trim();
     return { cleanText, heartVoice };
@@ -12790,14 +13017,37 @@ const HEART_VOICE_PROMPT_RULES = `
 [Inner Echo 心声生成要求]
 请输出角色当前状态，只输出以下五个字段：mood、favorability、clothing、action、innerThoughts。不要添加好感标签、张力、解释说明或任何额外字段。
 - mood：2~6字，具体、有状态感，避免“平静/开心/生气”这种空泛单词；例如“怒极反笑”“克制冷淡”“心口发闷”“隐隐烦躁”。
-- favorability：用字符串输出“数字（状态描述）”，例如“68（极度恼火）”“74（嘴硬心软）”“81（明显偏爱）”；不要另起好感标签字段。
+- favorability：必须输出 0-100 的数字，基于上一轮好感度和本轮互动内容动态变化，不要固定 50，不要机械 +1、+5 或 -5。
+【好感度规则】
+favorability 必须基于“上一轮好感度”和“本轮互动内容”动态变化。
+不要每轮都增加，也不要每轮都减少。
+普通聊天可以基本不变。
+被理解、被关心、被认真回应、关系推进时可以上升。
+被冒犯、被冷落、被欺骗、踩雷、失望时可以下降。
+角色生气、吃醋、嘴硬，不代表好感一定下降；可能只是情绪差但更在意。
+如果角色表面冷淡但内心在意，favorability 可以小幅上升或保持。
+如果用户道歉、解释、安抚，favorability 可以回升。
+如果没有明显变化，favorability 只允许在上一轮基础上 -1 到 +1。
+单轮普通变化建议不超过 8，重大事件才允许更大。
 - clothing：30~80字，1~3句，写清颜色、袖口、裤裙鞋袜、整体风格等可见细节，不要模板化。
 - action：50~120字，2~4句，结合本轮互动写当前动作、目光、表情、身体姿态或语气状态，要有现场镜头感。
 - innerThoughts：80~180字，3~6句，像真实脑内独白；结合角色人设、本轮聊天、当前关系和情绪，允许嘴硬、别扭、吐槽、克制、偏爱、试探等主观表达。
 - 内容必须贴合本轮聊天上下文，避免“正在等待新的互动”“我还在感受关系变化”“暂时没有特别想法”等空泛兜底句。
 - 群聊中只给实际输出 MESSAGE 的发言角色写心声，没有发言的角色不要生成心声。
-- JSON 必须单行、合法，不要 Markdown 代码块，不要解释。示例：[heart_voice]{"mood":"克制冷淡","favorability":"68（极度恼火）","clothing":"深色外套搭在肩上，袖口压着一点折痕，鞋尖朝外，像是随时会转身离开。","action":"他没有立刻接话，只把视线从屏幕上移开半秒，又重新落回你的上一句。指节在杯壁上轻轻敲了两下，语气听起来平稳，尾音却压得很低。","innerThoughts":"嘴上可以装得无所谓，可刚才那句话还是在心里压了一下。我不想显得太在意，更不想让你看出我其实已经被牵动。要是现在退一步，像是我先认输；可继续冷着，又怕把你推远。"}[/heart_voice]
+- JSON 必须单行、合法，不要 Markdown 代码块，不要解释。示例：[heart_voice]{"mood":"克制冷淡","favorability":68,"clothing":"深色外套搭在肩上，袖口压着一点折痕，鞋尖朝外，像是随时会转身离开。","action":"他没有立刻接话，只把视线从屏幕上移开半秒，又重新落回你的上一句。指节在杯壁上轻轻敲了两下，语气听起来平稳，尾音却压得很低。","innerThoughts":"嘴上可以装得无所谓，可刚才那句话还是在心里压了一下。我不想显得太在意，更不想让你看出我其实已经被牵动。要是现在退一步，像是我先认输；可继续冷着，又怕把你推远。"}[/heart_voice]
 `;
+
+function buildHeartVoicePromptRules(previousFavorability = null) {
+    const previousText = String(previousFavorability ?? '').trim();
+    const isPlainNumber = typeof previousFavorability === 'number' || /^-?\d+(?:\.\d+)?$/.test(previousText);
+    const previous = isPlainNumber ? extractFavorabilityNumber(previousFavorability, null) : null;
+    const previousLine = Number.isFinite(previous)
+        ? `\n上一轮对用户的好感度：${clampFavorability(previous)}\n本轮请基于这个数值变化，而不是重新从 50 开始。`
+        : previousText
+            ? `\n${previousText}\n本轮请分别基于对应角色的上一轮数值变化，而不是重新从 50 开始。`
+        : '\n上一轮对用户的好感度：请参考角色的最新心声；本轮不要重新从 50 开始。';
+    return `${HEART_VOICE_PROMPT_RULES}${previousLine}`;
+}
 
 function collectRespondedSpeakerIdsFromRound(newMessages = [], chatContext = null) {
     const ids = [];
@@ -12836,6 +13086,29 @@ function findLatestVisibleRoundMessageForSpeaker(roundMessages = [], speakerId) 
         const msgSpeakerId = msg.characterId || msg.senderId || msg.sender;
         return msgSpeakerId === speakerId;
     }) || null;
+}
+
+function getMessageTextForFavorability(msg) {
+    if (!msg) return '';
+    const content = msg.content;
+    if (typeof content === 'string') return stripHtmlToText(content);
+    if (!content || typeof content !== 'object') return '';
+    if (typeof content.text === 'string') return stripHtmlToText(content.text);
+    if (typeof content.description === 'string') return stripHtmlToText(content.description);
+    if (typeof content.blessing === 'string') return stripHtmlToText(content.blessing);
+    if (typeof content.title === 'string') return stripHtmlToText(content.title);
+    if (typeof content.message === 'string') return stripHtmlToText(content.message);
+    return '';
+}
+
+function getLatestUserMessageTextForFavorability(chatContext, beforeTimestamp = Infinity) {
+    const history = Array.isArray(chatContext?.history) ? chatContext.history : [];
+    const latest = history.slice().reverse().find(msg => {
+        if (!msg || msg.hidden || msg.type === 'heart_voice' || msg.type === 'system_notification') return false;
+        if (Number.isFinite(Number(msg.timestamp)) && Number(msg.timestamp) > beforeTimestamp) return false;
+        return msg.sender === 'user' || msg.sender === 'myProfile' || msg.senderId === 'me' || msg.isUser;
+    });
+    return getMessageTextForFavorability(latest);
 }
 
 function getHeartVoiceOwnerContact(speakerId, chatContext = null) {
@@ -13336,7 +13609,25 @@ async function saveLatestHeartVoice(chatContext, speakerId, speakerName, heartVo
             console.warn('心声没有找到角色 owner，已跳过主数据保存:', speakerId, chatContext);
             return;
         }
-        const hv = normalizeHeartVoice(heartVoice);
+        const userText = options.userText || getLatestUserMessageTextForFavorability(chatContext);
+        const aiReplyText = options.aiReplyText || '';
+        const previous = getPreviousFavorabilityForCharacter(chatContext, speakerId);
+        const hv = normalizeHeartVoice(heartVoice, {
+            chatContext,
+            speakerId,
+            userText,
+            aiReplyText,
+            character: owner
+        });
+        hv.favorability = stabilizeFavorability({
+            previous,
+            proposed: hv.favorability,
+            userText,
+            aiReplyText,
+            mood: hv.mood,
+            innerThoughts: hv.innerThoughts,
+            character: owner
+        });
         const heartVoiceId = hv.heartVoiceId || options?.heartVoiceId || makeEchoId('hv');
         const sourceChatId = chatContext.id;
         const sourceChatName = chatContext.name || '';
@@ -19455,6 +19746,33 @@ async function sendMessage() {
     cancelReply(); 
 }
 
+function insertParenthesesIntoMessageInput() {
+    const input = document.getElementById('message-input');
+    if (!input) return;
+    if (input.disabled) return;
+
+    input.focus();
+
+    const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+    const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : input.value.length;
+
+    const before = input.value.slice(0, start);
+    const selected = input.value.slice(start, end);
+    const after = input.value.slice(end);
+
+    if (selected) {
+        input.value = `${before}(${selected})${after}`;
+        const cursorPos = before.length + selected.length + 2;
+        input.setSelectionRange(cursorPos, cursorPos);
+    } else {
+        input.value = `${before}()${after}`;
+        const cursorPos = before.length + 1;
+        input.setSelectionRange(cursorPos, cursorPos);
+    }
+
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
         const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function handleLongPressDelete(contactId) {
     const contact = state.contacts.find(c => c.id === contactId);
@@ -19955,6 +20273,7 @@ ${worldBookContextString}
         // (Part B: 这是 contents，只包含任务)
         // (使用 V8 版修正后的叙事任务)
         let freeChatUserTaskPrompt = '';
+        const previousFavorability = getPreviousFavorabilityForCharacter(contact, contact.id);
 
         if (isNarrativeMode) {
             // --- (V8版 叙事任务) ---
@@ -19977,10 +20296,10 @@ ${worldBookContextString}
 *你(AI)的动作或环境描写*
 {你(AI)的内心独白}
 "你(AI)说的话"
-[heart_voice]{"mood":"","favorability":"","clothing":"","action":"","innerThoughts":""}[/heart_voice]
+[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]
 [diary]...[/diary]
 
-${HEART_VOICE_PROMPT_RULES}
+${buildHeartVoicePromptRules(previousFavorability)}
 `;
         } else {
             // --- (V8版 普通聊天任务) ---
@@ -19998,10 +20317,10 @@ ${HEART_VOICE_PROMPT_RULES}
 (你(AI)想说的第一句话)
 (你(AI)想说的第二句话)
 (你(AI)可以使用的指令，例如 [sticker:开心])
-[heart_voice]{"mood":"","favorability":"","clothing":"","action":"","innerThoughts":""}[/heart_voice]
+[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]
 [diary]...[/diary]
 
-${HEART_VOICE_PROMPT_RULES}
+${buildHeartVoicePromptRules(previousFavorability)}
 `;
         }
         
@@ -20259,6 +20578,9 @@ ${recentChatHistory}
   ` : ''}
 `;
             }).join('');
+        const groupPreviousFavorabilityPrompt = allMemberProfiles
+            .map(profile => `${profile.name}: ${getPreviousFavorabilityForCharacter(group, profile.id)}`)
+            .join('；');
 
         // --- 2. 【核心拆分：V6】 (这部分保持不变) ---
 
@@ -20296,8 +20618,8 @@ ${finalMemoryForPrompt}
 [特殊指令]
 你可以使用 [sticker:表情名], [voice:内容], [picture:描述] 等指令。
 每个角色的 CONTENT 末尾必须包含该角色自己的 Inner Echo，格式为单行 JSON：
-[heart_voice]{"mood":"","favorability":"","clothing":"","action":"","innerThoughts":""}[/heart_voice]
-${HEART_VOICE_PROMPT_RULES}
+[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]
+${buildHeartVoicePromptRules(`群成员上一轮好感度：${groupPreviousFavorabilityPrompt}`)}
 [可用表情包列表]
 {{emoticon_list}}
 `;
@@ -20363,20 +20685,24 @@ MESSAGE_END
                 if (parsedHeartVoice.heartVoice) {
                     roundHeartVoices.set(speakerProfile.id, {
                         speakerName: speakerProfile.name,
-                        heartVoice: parsedHeartVoice.heartVoice
+                        heartVoice: parsedHeartVoice.heartVoice,
+                        aiReplyText: content
                     });
                 }
             }
         }
 
         const roundMessages = Array.isArray(group.history) ? group.history.slice(roundStartIndex) : [];
+        const roundUserText = getLatestUserMessageTextForFavorability(group);
         const respondedSpeakerIds = collectRespondedSpeakerIdsFromRound(roundMessages, group);
         for (const speakerId of respondedSpeakerIds) {
             const item = roundHeartVoices.get(speakerId);
             if (!item?.heartVoice) continue;
             const sourceMessage = findLatestVisibleRoundMessageForSpeaker(roundMessages, speakerId);
             await saveLatestHeartVoice(group, speakerId, item.speakerName, item.heartVoice, {
-                sourceMessageId: sourceMessage ? sourceMessage.id : null
+                sourceMessageId: sourceMessage ? sourceMessage.id : null,
+                userText: roundUserText,
+                aiReplyText: getMessageTextForFavorability(sourceMessage) || item.aiReplyText || ''
             });
         }
 
@@ -20641,6 +20967,9 @@ ${recentChatHistory}
 `;
             }).join('');
         }
+        const groupPreviousFavorabilityPrompt = allMemberProfiles
+            .map(profile => `${profile.name}: ${getPreviousFavorabilityForCharacter(group, profile.id)}`)
+            .join('；');
 
         // 步骤5: (保持不变) 构建“剧本” (System Prompt)
         const groupChatPrompt = `
@@ -20680,8 +21009,8 @@ ${characterDossiersPrompt}
 [文学风格] 你的写作风格需要遵循高端女性向文学（类似晋江文学城的流行风格）。文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时,要体现出较高的文学素养。
 [内容限制] 你的发言必须积极向上,充满希望。严禁探讨任何形式的阴谋论,严禁表达或引导至绝望、悲观或虚无主义的情绪。
 [禁用词列表] 绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
-[Inner Echo] 每个 MESSAGE 的 CONTENT 末尾必须包含该发言角色自己的单行心声 JSON：[heart_voice]{"mood":"","favorability":"","clothing":"","action":"","innerThoughts":""}[/heart_voice]。心声是角色真实内心，不是说出口的话；同一个角色的心声会按角色本体统一保存。
-${HEART_VOICE_PROMPT_RULES}
+[Inner Echo] 每个 MESSAGE 的 CONTENT 末尾必须包含该发言角色自己的单行心声 JSON：[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]。心声是角色真实内心，不是说出口的话；同一个角色的心声会按角色本体统一保存。
+${buildHeartVoicePromptRules(`群成员上一轮好感度：${groupPreviousFavorabilityPrompt}`)}
 [回复规则] 你的回复可以包含多条消息,每条消息占一行。你可以发送普通文本,也可以通过下面的指令格式发送特殊消息。
 [特殊指令与互动指南]
 - 表情包: \`[sticker:表情名]\`
@@ -20819,20 +21148,24 @@ MESSAGE_END
                 if (parsedHeartVoice.heartVoice) {
                     roundHeartVoices.set(speakerProfile.id, {
                         speakerName: speakerProfile.name,
-                        heartVoice: parsedHeartVoice.heartVoice
+                        heartVoice: parsedHeartVoice.heartVoice,
+                        aiReplyText: content
                     });
                 }
             }
         }
 
         const roundMessages = Array.isArray(group.history) ? group.history.slice(roundStartIndex) : [];
+        const roundUserText = getLatestUserMessageTextForFavorability(group);
         const respondedSpeakerIds = collectRespondedSpeakerIdsFromRound(roundMessages, group);
         for (const speakerId of respondedSpeakerIds) {
             const item = roundHeartVoices.get(speakerId);
             if (!item?.heartVoice) continue;
             const sourceMessage = findLatestVisibleRoundMessageForSpeaker(roundMessages, speakerId);
             await saveLatestHeartVoice(group, speakerId, item.speakerName, item.heartVoice, {
-                sourceMessageId: sourceMessage ? sourceMessage.id : null
+                sourceMessageId: sourceMessage ? sourceMessage.id : null,
+                userText: roundUserText,
+                aiReplyText: getMessageTextForFavorability(sourceMessage) || item.aiReplyText || ''
             });
         }
     } catch (e) {
@@ -21064,9 +21397,9 @@ const NORMAL_BASE_PROMPT = `
 
 [！！！绝对核心规则：关于心声！！！]
 在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行输出 Inner Echo 心声标签。格式必须是单行 JSON：
-\`[heart_voice]{"mood":"","favorability":"","clothing":"","action":"","innerThoughts":""}[/heart_voice]\`
+\`[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]\`
 心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。用户不会直接看见这个标签，程序会自动隐藏。
-${HEART_VOICE_PROMPT_RULES}
+${buildHeartVoicePromptRules()}
 
 [！！！绝对核心规则：关于日记！！！]
 在你的所有对话、表情、动作、特殊消息全部输出完毕之后，你必须在回复的【最后部分】，另起一行，使用 \`[diary]...[/diary]\` 标签写一篇日记。日记是你对当前对话的思考、感悟或内心独白。即使只是简单的想法，也必须写。这是强制要求。
@@ -21080,7 +21413,7 @@ ${HEART_VOICE_PROMPT_RULES}
 [sticker:开心]
 [status:准备出门]
 [qzone]久违的阳光！准备去公园抓光影啦 ✨ [picture:阳光洒在窗台上的照片][/qzone]
-[heart_voice]{"mood":"隐隐期待","favorability":"72（试探靠近）","clothing":"浅色衬衫贴着肩线，袖口随意挽到小臂，裤脚干净利落，整个人像刚从午后的光里走出来。","action":"他把手机在掌心转了半圈，又抬眼等你的反应，指腹停在屏幕边缘没有继续滑动。语气听起来轻松，视线却一直追着你的表情。","innerThoughts":"我其实比表现出来更期待你的回答，只是不能把话说得太满。要是你拒绝，我还能装作只是随口一提；可如果你点头，我大概会高兴很久。"}[/heart_voice]
+[heart_voice]{"mood":"隐隐期待","favorability":72,"clothing":"浅色衬衫贴着肩线，袖口随意挽到小臂，裤脚干净利落，整个人像刚从午后的光里走出来。","action":"他把手机在掌心转了半圈，又抬眼等你的反应，指腹停在屏幕边缘没有继续滑动。语气听起来轻松，视线却一直追着你的表情。","innerThoughts":"我其实比表现出来更期待你的回答，只是不能把话说得太满。要是你拒绝，我还能装作只是随口一提；可如果你点头，我大概会高兴很久。"}[/heart_voice]
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
@@ -21158,9 +21491,9 @@ const NARRATIVE_BASE_PROMPT = `
 
 [！！！绝对核心规则：关于心声！！！]
 在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行输出 Inner Echo 心声标签。格式必须是单行 JSON：
-\`[heart_voice]{"mood":"","favorability":"","clothing":"","action":"","innerThoughts":""}[/heart_voice]\`
+\`[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]\`
 心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。用户不会直接看见这个标签，程序会自动隐藏。
-${HEART_VOICE_PROMPT_RULES}
+${buildHeartVoicePromptRules()}
 
 [！！！绝对核心规则：关于日记！！！]
 在你完整的叙事（包含动作、心理和对话）结束后，你必须在回复的【最后部分】，另起新的一行，使用 \`[diary]...[/diary]\` 标签写一篇日记。日记是【角色】对当前对话的思考、感悟或内心独白。即使只是简单的想法，也必须写。这是强制要求，并且日记内容不应包含在主叙事块中。
@@ -21168,7 +21501,7 @@ ${HEART_VOICE_PROMPT_RULES}
 [示例回复格式]
 *他走到窗边，看着外面的雨滴。* “下雨了呢。” *他转过身，对你露出一丝微笑。* {不知道你喜不喜欢下雨天。} “你晚饭想吃什么？” *他轻轻地问，手指无意识地敲打着窗台。*
 [status:有点饿了]
-[heart_voice]{"mood":"隐隐期待","favorability":"72（试探靠近）","clothing":"浅色衬衫贴着肩线，袖口随意挽到小臂，裤脚干净利落，整个人像刚从午后的光里走出来。","action":"指尖轻轻敲着窗台，目光还停在你身上，像是在等一句足够轻的回应。语气放得很慢，尾音却藏着一点不肯承认的期待。","innerThoughts":"我想让你留下来，又不想把这份期待表现得太明显。说得太急会显得我输得很彻底，可如果什么都不说，你也许真的会转身走掉。"}[/heart_voice]
+[heart_voice]{"mood":"隐隐期待","favorability":72,"clothing":"浅色衬衫贴着肩线，袖口随意挽到小臂，裤脚干净利落，整个人像刚从午后的光里走出来。","action":"指尖轻轻敲着窗台，目光还停在你身上，像是在等一句足够轻的回应。语气放得很慢，尾音却藏着一点不肯承认的期待。","innerThoughts":"我想让你留下来，又不想把这份期待表现得太明显。说得太急会显得我输得很彻底，可如果什么都不说，你也许真的会转身走掉。"}[/heart_voice]
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 `;
 
@@ -21613,7 +21946,8 @@ ${memoriesList}
 
                 let personaDirectives = "";
                 if (contact?.persona) { personaDirectives += `\n\n# 核心角色指令 (Your Core Role Directive)\n---\n这是你的核心身份，你必须严格、完全地代入以下角色进行对话：\n${contact.persona}\n---`; }
-                personaDirectives += `\n\n# 角色的最新心声 (Your Last Recorded Heart Voice)\n---\n这是你上次回复时的内心状态，请参考此状态以保持情感连贯性：\n${lastHeartVoiceString}\n---`;
+                const previousFavorability = contact ? getPreviousFavorabilityForCharacter(contact, contact.id) : 50;
+                personaDirectives += `\n\n# 角色的最新心声 (Your Last Recorded Heart Voice)\n---\n这是你上次回复时的内心状态，请参考此状态以保持情感连贯性：\n${lastHeartVoiceString}\n上一轮对用户的好感度：${previousFavorability}\n本轮请基于这个数值变化，而不是重新从 50 开始。\n---`;
                 if (contact?.userPersona) { personaDirectives += `\n\n# 对话者信息 (Your Counterpart's Information)\n---\n与你对话的用户的角色设定如下，请将TA视为真实存在的角色并进行互动：\n${contact.userPersona}\n---`; }
                 
                 const firstLineEndIndex = finalSystemPrompt.indexOf(']');
@@ -22027,8 +22361,8 @@ ${qzoneContextText}
 ❌ 禁止写 \`[diary]\` 日记。
 ❌ 禁止使用 \`[sticker:]\` 表情包。
 ❌ 禁止出现“发送了一条消息”这种描述。
-✅ 最后必须追加单行 Inner Echo 心声 JSON：\`[heart_voice]{"mood":"","favorability":"","clothing":"","action":"","innerThoughts":""}[/heart_voice]\`。这是角色真实内心，程序会自动隐藏。
-${HEART_VOICE_PROMPT_RULES}
+✅ 最后必须追加单行 Inner Echo 心声 JSON：\`[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]\`。这是角色真实内心，程序会自动隐藏。
+${buildHeartVoicePromptRules()}
 
 【输出范例】
 *（屏幕晃动了一下，你凑近镜头，眯着眼睛仔细看了看）* “喂？听得清吗？” {奇怪，他那边怎么这么黑，是在外面吗？} *（你理了理耳边的碎发，有些不好意思地笑了笑）* “那个... 突然给你打电话，没打扰你吧？”
@@ -23953,6 +24287,7 @@ async function processAndDisplayAiResponse(rawResponse, senderProfile, originCon
 const parsedHeartVoice = parseHeartVoiceFromText(conversation);
 let heartVoiceContent = parsedHeartVoice.heartVoice;
 conversation = parsedHeartVoice.cleanText;
+const heartVoiceAiReplyText = conversation;
 const heartVoiceResponseStart = Date.now();
 const persistPendingHeartVoice = async () => {
     if (!heartVoiceContent) return;
@@ -23966,7 +24301,9 @@ const persistPendingHeartVoice = async () => {
         (m.timestamp || 0) >= heartVoiceResponseStart - 3000
     );
     await saveLatestHeartVoice(effectiveChatContext, senderProfile.id, senderProfile.name, heartVoiceContent, {
-        sourceMessageId: sourceMessage ? sourceMessage.id : null
+        sourceMessageId: sourceMessage ? sourceMessage.id : null,
+        userText: getLatestUserMessageTextForFavorability(effectiveChatContext, heartVoiceResponseStart),
+        aiReplyText: getMessageTextForFavorability(sourceMessage) || heartVoiceAiReplyText
     });
     heartVoiceContent = null;
 };
@@ -40090,6 +40427,11 @@ document.getElementById('refresh-post-comments-btn').addEventListener('click', a
     }
 
     document.getElementById('send-btn').addEventListener('click', sendMessage);
+    document.getElementById('insert-parentheses-btn')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        insertParenthesesIntoMessageInput();
+    });
 // (V5 - 最终版：支持私聊+群聊的自由聊天)
 // 粘贴到 attachEventListeners() 函数内部
 document.getElementById('request-reply-btn').addEventListener('click', () => {
