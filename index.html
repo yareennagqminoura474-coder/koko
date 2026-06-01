@@ -2987,15 +2987,19 @@
     justify-content: center;
     padding: 18px;
     z-index: 5000;
+    pointer-events: auto;
 }
 .hv-backdrop {
     position: absolute;
     inset: 0;
+    z-index: 0;
     background: rgba(114, 126, 137, 0.38);
     backdrop-filter: blur(12px);
+    pointer-events: auto;
 }
 .hv-status-modal {
     position: relative;
+    z-index: 2;
     width: min(390px, 90vw);
     max-height: 82vh;
     display: flex;
@@ -3007,6 +3011,23 @@
     box-shadow: 0 28px 80px rgba(36, 52, 66, 0.28), inset 0 1px 0 rgba(255,255,255,0.92);
     color: #263746;
     backdrop-filter: blur(22px);
+    pointer-events: auto;
+}
+.hv-status-modal::before,
+.hv-status-modal::after {
+    pointer-events: none;
+}
+.hv-status-modal button,
+.hv-status-modal input,
+.hv-status-modal textarea,
+.hv-status-modal select,
+.hv-history-item,
+.hv-history-item * {
+    pointer-events: auto;
+}
+.hv-status-modal button {
+    position: relative;
+    z-index: 3;
 }
 .hv-status-header {
     display: flex;
@@ -3080,8 +3101,17 @@
     box-shadow: 0 8px 22px rgba(54, 77, 94, 0.12);
     cursor: pointer;
 }
+.hv-profile-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
 .hv-edit-btn,
 .hv-history-edit-btn,
+.hv-history-manage-btn,
+.hv-history-select-all,
+.hv-history-cancel-btn,
+.hv-batch-delete-btn,
 .hv-edit-save,
 .hv-edit-cancel {
     border: none;
@@ -3103,6 +3133,18 @@
     padding: 6px 12px;
     font-size: 12px;
     font-weight: 700;
+}
+.hv-history-manage-btn,
+.hv-history-select-all,
+.hv-history-cancel-btn,
+.hv-batch-delete-btn {
+    padding: 8px 13px;
+    font-size: 13px;
+    font-weight: 800;
+}
+.hv-batch-delete-btn {
+    background: rgba(255, 138, 128, 0.18);
+    color: #d85b55;
 }
 .hv-status-content {
     padding: 0 22px 22px;
@@ -3153,12 +3195,39 @@
     flex-direction: column;
     gap: 12px;
 }
+.hv-history-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
 .hv-history-item {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    gap: 10px;
     padding: 14px;
     border-radius: 18px;
     border: 1px solid rgba(255, 255, 255, 0.72);
     background: rgba(249, 251, 252, 0.7);
     box-shadow: 0 8px 20px rgba(42, 61, 78, 0.09);
+}
+.hv-history-body {
+    flex: 1;
+    min-width: 0;
+}
+.hv-history-check-wrap {
+    display: inline-flex;
+    align-items: flex-start;
+    padding-top: 2px;
+}
+.hv-history-checkbox {
+    width: 18px;
+    height: 18px;
+    accent-color: #6d95b8;
+    cursor: pointer;
 }
 .hv-history-time {
     margin-bottom: 8px;
@@ -3243,15 +3312,6 @@
     float: right;
     display: inline-flex;
     gap: 6px;
-}
-.hv-history-delete-btn {
-    border: none;
-    background: rgba(255, 138, 128, 0.12);
-    color: #d85b55;
-    border-radius: 999px;
-    padding: 5px 9px;
-    font-size: 12px;
-    cursor: pointer;
 }
 .hv-empty {
     padding: 36px 18px;
@@ -12568,7 +12628,7 @@ function valueToSignalNumber(value, fallback, strongWords = []) {
 }
 
 function estimateHeartVoiceSignals(seed) {
-    const text = `${seed.mood || ''} ${seed.action || ''} ${seed.innerThoughts || ''} ${seed.deletedDraft || ''}`;
+    const text = `${seed.mood || ''} ${seed.action || ''} ${seed.innerThoughts || ''}`;
     let favorability = 52;
 
     if (/喜欢|爱|想你|心动|偏爱|靠近|亲近|在意|舍不得|温柔|期待/.test(text)) {
@@ -12592,14 +12652,28 @@ function estimateHeartVoiceSignals(seed) {
     };
 }
 
-function favorabilityLabelFromScore(score, moodText = '') {
-    if (/恼火|生气|愤怒|厌烦|冷处理/.test(moodText)) return '极度恼火';
-    if (score >= 90) return '偏爱';
-    if (score >= 78) return '心动';
-    if (score >= 64) return '嘴硬在意';
-    if (score >= 48) return '熟悉';
-    if (score >= 30) return '普通';
-    return '陌生';
+let currentHeartVoicePanelState = window.currentHeartVoicePanelState || {
+    chatContext: null,
+    speakerId: null,
+    speakerName: '',
+    heartVoiceId: null,
+    mode: 'view',
+    heartVoice: null,
+    options: {}
+};
+window.currentHeartVoicePanelState = currentHeartVoicePanelState;
+
+function setCurrentHeartVoicePanelState(patch = {}) {
+    currentHeartVoicePanelState = {
+        ...currentHeartVoicePanelState,
+        ...patch,
+        options: {
+            ...(currentHeartVoicePanelState.options || {}),
+            ...(patch.options || {})
+        }
+    };
+    window.currentHeartVoicePanelState = currentHeartVoicePanelState;
+    return currentHeartVoicePanelState;
 }
 
 function normalizeHeartVoice(raw) {
@@ -12607,16 +12681,10 @@ function normalizeHeartVoice(raw) {
     const source = typeof raw === 'string'
         ? { innerThoughts: raw.trim() }
         : (raw && typeof raw === 'object' ? raw : {});
-    const innerPieces = [
-        source.innerThoughts || source.thoughts || '',
-        !source.innerThoughts && source.desire ? `欲望：${source.desire}` : '',
-        !source.innerThoughts && source.hiddenTruth ? `没说出口：${source.hiddenTruth}` : ''
-    ].filter(Boolean).join('；');
     const seed = {
         mood: source.mood || source.emotion || '平静地在意',
         action: source.action || '安静地看着这场对话。',
-        innerThoughts: innerPieces || 'TA 暂时还没有把真正的想法说出来。',
-        deletedDraft: source.deletedDraft || source.draft || source.hiddenTruth || '刚刚差点发出去，又删掉了。',
+        innerThoughts: source.innerThoughts || source.thoughts || 'TA 暂时还没有把真正的想法说出来。',
         clothing: source.clothing || '保持着当前的日常状态。',
         timestamp: Number.isFinite(Number(source.timestamp)) ? Number(source.timestamp) : now
     };
@@ -12628,8 +12696,7 @@ function normalizeHeartVoice(raw) {
         source.sourceChatId || '',
         seed.mood,
         seed.action,
-        seed.innerThoughts,
-        seed.deletedDraft
+        seed.innerThoughts
     ].join('|');
     return {
         heartVoiceId: source.heartVoiceId || source.id || `hv_legacy_${stableHeartVoiceHash(metadataText)}`,
@@ -12641,11 +12708,9 @@ function normalizeHeartVoice(raw) {
         speakerName: source.speakerName || source.senderName || '',
         mood: seed.mood,
         favorability,
-        favorabilityLabel: source.favorabilityLabel || source.affection || favorabilityLabelFromScore(favorability, seed.mood),
         clothing: seed.clothing,
         action: seed.action,
         innerThoughts: seed.innerThoughts,
-        deletedDraft: seed.deletedDraft,
         timestamp: seed.timestamp
     };
 }
@@ -12731,8 +12796,7 @@ function collectHeartVoicesForCharacter(chatObj, speakerId) {
                 hv.timestamp || '',
                 hv.mood || '',
                 hv.action || '',
-                hv.innerThoughts || '',
-                hv.deletedDraft || ''
+                hv.innerThoughts || ''
             ].join('|');
             if (seen.has(key)) return;
             seen.add(key);
@@ -12755,13 +12819,11 @@ function renderHeartVoiceEditForm(hvRaw) {
         <form class="hv-edit-form" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">
             <div class="hv-edit-field"><label>实时心情</label><textarea name="mood">${escapeHtmlText(hv.mood)}</textarea></div>
             <div class="hv-edit-field"><label>好感度</label><input name="favorability" type="number" min="0" max="100" step="1" value="${hv.favorability}"></div>
-            <div class="hv-edit-field"><label>好感标签</label><input name="favorabilityLabel" type="text" value="${escapeHtmlText(hv.favorabilityLabel)}"></div>
             <div class="hv-edit-field"><label>穿着</label><textarea name="clothing">${escapeHtmlText(hv.clothing)}</textarea></div>
             <div class="hv-edit-field"><label>动作</label><textarea name="action">${escapeHtmlText(hv.action)}</textarea></div>
             <div class="hv-edit-field"><label>内心想法</label><textarea name="innerThoughts">${escapeHtmlText(hv.innerThoughts)}</textarea></div>
-            <div class="hv-edit-field"><label>已删除草稿</label><textarea name="deletedDraft">${escapeHtmlText(hv.deletedDraft)}</textarea></div>
             <div class="hv-edit-actions">
-                <button class="hv-delete-btn" id="hv-delete-entry-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">删除心声</button>
+                <button class="hv-delete-btn" id="hv-delete-entry-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">删除当前心声</button>
                 <button class="hv-edit-cancel" type="button">取消</button>
                 <button class="hv-edit-save" type="submit">保存</button>
             </div>
@@ -12774,15 +12836,18 @@ function renderHeartVoiceEditPanel(heartVoiceId = null) {
     const stateData = window.currentHeartVoicePanelState;
     if (!panel || !stateData) return;
     const previousView = panel.dataset.view || 'current';
-    const { heartVoice, speakerName, options } = stateData;
+    const { heartVoice, speakerName, options = {}, chatContext, speakerId } = stateData;
     const avatar = options.avatar || 'https://s21.ax1x.com/2025/11/09/pZ9FrMd.png';
-    const history = (options.history || []).map(normalizeHeartVoice);
+    const history = chatContext && speakerId
+        ? getHeartVoiceHistory(chatContext, speakerId)
+        : (options.history || []).map(normalizeHeartVoice);
     const target = heartVoiceId
         ? history.find(hv => hv.heartVoiceId === heartVoiceId)
         : (heartVoice ? normalizeHeartVoice(heartVoice) : history[0]);
     if (!target) {
         panel.innerHTML = `<div class="hv-backdrop"></div><div class="hv-status-modal"><div class="hv-status-header"><div class="hv-status-title">编辑心声</div><button class="hv-status-close" type="button">×</button></div><div class="hv-status-content"><div class="hv-empty">还没有可以编辑的心声。</div></div></div>`;
         panel.dataset.view = 'edit';
+        setCurrentHeartVoicePanelState({ mode: 'edit', heartVoiceId: null, options: { ...options, history } });
         return;
     }
     panel.innerHTML = `
@@ -12806,7 +12871,14 @@ function renderHeartVoiceEditPanel(heartVoiceId = null) {
     `;
     panel.dataset.view = 'edit';
     panel.dataset.previousView = previousView;
+    panel.dataset.previousManageMode = panel.dataset.manageMode || 'false';
     panel.dataset.editHeartVoiceId = target.heartVoiceId;
+    setCurrentHeartVoicePanelState({
+        mode: 'edit',
+        heartVoice: target,
+        heartVoiceId: target.heartVoiceId,
+        options: { ...options, avatar, history }
+    });
 }
 
 function renderHeartVoicePanel(heartVoice, speakerName = 'TA', options = {}) {
@@ -12815,18 +12887,29 @@ function renderHeartVoicePanel(heartVoice, speakerName = 'TA', options = {}) {
     const hasData = !!heartVoice && (typeof heartVoice !== 'string' || heartVoice.trim());
     const hv = hasData ? normalizeHeartVoice(heartVoice) : null;
     const avatar = options.avatar || 'https://s21.ax1x.com/2025/11/09/pZ9FrMd.png';
-    const history = Array.isArray(options.history) ? options.history : [];
-    window.currentHeartVoicePanelState = { heartVoice, speakerName, options: { ...options, avatar, history } };
+    const chatContext = options.chatContext || currentHeartVoicePanelState.chatContext || state.contacts.find(c => c.id === state.activeChatId) || null;
+    const speakerId = options.speakerId || currentHeartVoicePanelState.speakerId || panel.dataset.speakerId || (chatContext && !chatContext.isGroup ? chatContext.id : null);
+    const history = chatContext && speakerId
+        ? getHeartVoiceHistory(chatContext, speakerId)
+        : (Array.isArray(options.history) ? options.history.map(normalizeHeartVoice) : []);
+    setCurrentHeartVoicePanelState({
+        chatContext,
+        speakerId,
+        speakerName,
+        heartVoiceId: hv?.heartVoiceId || null,
+        mode: 'view',
+        heartVoice: hv,
+        options: { ...options, avatar, history, chatContext, speakerId }
+    });
 
     const body = hv ? `
         ${renderHvCard('〽 实时心情', hv.mood)}
-        ${renderHvCard('对你的好感度', `${hv.favorability} (${hv.favorabilityLabel || favorabilityLabelFromScore(hv.favorability, hv.mood)})`)}
+        ${renderHvCard('对你的好感度', hv.favorability)}
         <div class="hv-grid-2">
             ${renderHvCard('穿着', hv.clothing)}
             ${renderHvCard('动作', hv.action)}
         </div>
         ${renderHvCard('内心想法', hv.innerThoughts, 'hv-large-card', 'hv-scroll-text')}
-        ${renderHvCard('已删除草稿', hv.deletedDraft)}
     ` : `<div class="hv-empty">还没有状态数据哦~ 和 TA 聊天后，心声就会自动出现啦。</div>`;
 
     panel.innerHTML = `
@@ -12842,8 +12925,10 @@ function renderHeartVoicePanel(heartVoice, speakerName = 'TA', options = {}) {
                     <div class="hv-name">${escapeHtmlText(stripHtmlToText(speakerName))}</div>
                     <div class="hv-sync-text">实时状态同步中</div>
                 </div>
-                ${hv ? '<button class="hv-edit-btn" type="button" title="编辑心声"><i class="fas fa-pen"></i></button>' : ''}
-                <button class="hv-history-btn" type="button" title="心声记录"><i class="fas fa-history"></i></button>
+                <div class="hv-profile-actions">
+                    ${hv ? '<button class="hv-edit-btn" type="button" title="编辑心声"><i class="fas fa-pen"></i></button>' : ''}
+                    <button class="hv-history-btn" type="button" title="心声记录"><i class="fas fa-history"></i></button>
+                </div>
             </div>
             <div class="hv-status-content">
                 ${body}
@@ -12851,28 +12936,43 @@ function renderHeartVoicePanel(heartVoice, speakerName = 'TA', options = {}) {
         </div>
     `;
     panel.dataset.view = 'current';
+    panel.dataset.manageMode = 'false';
 }
 
-function renderHeartVoiceHistoryPanel() {
+function renderHeartVoiceHistoryPanel(historyOptions = {}) {
     const panel = document.getElementById('heart-voice-panel');
     const stateData = window.currentHeartVoicePanelState;
     if (!panel || !stateData) return;
-    const { speakerName, options } = stateData;
+    const { speakerName, options = {}, chatContext, speakerId } = stateData;
     const avatar = options.avatar || 'https://s21.ax1x.com/2025/11/09/pZ9FrMd.png';
-    const history = (options.history || []).map(normalizeHeartVoice);
+    const history = chatContext && speakerId
+        ? getHeartVoiceHistory(chatContext, speakerId)
+        : (options.history || []).map(normalizeHeartVoice);
+    const manageMode = !!historyOptions.manageMode;
+    const toolbar = history.length && manageMode ? `
+        <div class="hv-history-toolbar">
+            <button class="hv-history-select-all" id="hv-select-all-btn" type="button">全选</button>
+            <button class="hv-history-cancel-btn" id="hv-history-cancel-manage-btn" type="button">取消</button>
+            <button class="hv-batch-delete-btn" id="hv-batch-delete-btn" type="button">删除已选</button>
+        </div>
+    ` : '';
     const body = history.length ? `
+        ${toolbar}
         <div class="hv-history-panel">
             ${history.map(hv => `
-                <div class="hv-history-item">
-                    <div class="hv-history-actions">
-                        <button class="hv-history-edit-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">编辑</button>
-                        <button class="hv-history-delete-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">删除</button>
+                <div class="hv-history-item" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">
+                    ${manageMode ? `<label class="hv-history-check-wrap"><input class="hv-history-checkbox" type="checkbox" value="${escapeHtmlText(hv.heartVoiceId)}"></label>` : ''}
+                    <div class="hv-history-body">
+                        <div class="hv-history-actions">
+                            <button class="hv-history-edit-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">编辑</button>
+                        </div>
+                        <div class="hv-history-time">${new Date(hv.timestamp || Date.now()).toLocaleString()}</div>
+                        <div class="hv-item"><span class="hv-label">心情</span><span class="hv-value">${escapeHtmlText(hv.mood)}</span></div>
+                        <div class="hv-item"><span class="hv-label">好感度</span><span class="hv-value">${hv.favorability}</span></div>
+                        <div class="hv-item"><span class="hv-label">穿着</span><span class="hv-value">${escapeHtmlText(hv.clothing)}</span></div>
+                        <div class="hv-item"><span class="hv-label">动作</span><span class="hv-value">${escapeHtmlText(hv.action)}</span></div>
+                        <div class="hv-item"><span class="hv-label">内心想法</span><span class="hv-value">${escapeHtmlText(hv.innerThoughts)}</span></div>
                     </div>
-                    <div class="hv-history-time">${new Date(hv.timestamp || Date.now()).toLocaleString()}</div>
-                    <div class="hv-item"><span class="hv-label">心情</span><span class="hv-value">${escapeHtmlText(hv.mood)}</span></div>
-                    <div class="hv-item"><span class="hv-label">动作</span><span class="hv-value">${escapeHtmlText(hv.action)}</span></div>
-                    <div class="hv-item"><span class="hv-label">内心想法</span><span class="hv-value">${escapeHtmlText(hv.innerThoughts)}</span></div>
-                    <div class="hv-item"><span class="hv-label">好感度</span><span class="hv-value">${hv.favorability} (${escapeHtmlText(hv.favorabilityLabel || favorabilityLabelFromScore(hv.favorability, hv.mood))})</span></div>
                 </div>
             `).join('')}
         </div>
@@ -12891,7 +12991,10 @@ function renderHeartVoiceHistoryPanel() {
                     <div class="hv-name">${escapeHtmlText(stripHtmlToText(speakerName))}</div>
                     <div class="hv-sync-text">按时间倒序保存</div>
                 </div>
-                <button class="hv-history-btn" type="button" title="返回当前状态"><i class="fas fa-arrow-left"></i></button>
+                <div class="hv-profile-actions">
+                    ${history.length && !manageMode ? '<button class="hv-history-manage-btn" id="hv-history-manage-btn" type="button">管理</button>' : ''}
+                    <button class="hv-history-btn" type="button" title="返回当前状态"><i class="fas fa-arrow-left"></i></button>
+                </div>
             </div>
             <div class="hv-status-content">
                 ${body}
@@ -12899,6 +13002,13 @@ function renderHeartVoiceHistoryPanel() {
         </div>
     `;
     panel.dataset.view = 'history';
+    panel.dataset.manageMode = manageMode ? 'true' : 'false';
+    setCurrentHeartVoicePanelState({
+        mode: 'history',
+        heartVoice: history[0] || null,
+        heartVoiceId: history[0]?.heartVoiceId || null,
+        options: { ...options, avatar, history }
+    });
 }
 
 function getProfileInChat(chatObj, speakerId) {
@@ -13097,81 +13207,141 @@ function syncContactObjectInState(contact) {
     if (index >= 0) state.contacts[index] = contact;
 }
 
-async function deleteHeartVoiceEntry(chatContext, speakerId, heartVoiceId) {
+async function deleteHeartVoiceEntries(chatContext, speakerId, heartVoiceIds = []) {
     try {
-        if (!chatContext || !speakerId || !heartVoiceId) return null;
-        const owner = getHeartVoiceOwnerContact(speakerId, chatContext) || chatContext;
-        if (!owner) return null;
+        const normalizedIds = Array.isArray(heartVoiceIds) ? heartVoiceIds : [heartVoiceIds];
+        const ids = Array.from(new Set(normalizedIds.map(id => String(id || '').trim()).filter(Boolean)));
+        if (!chatContext || !speakerId || !ids.length) return [];
 
-        let ownerHistory;
-        if (owner.isGroup) {
-            owner.memberHeartVoiceHistory = owner.memberHeartVoiceHistory || {};
-            owner.memberHeartVoices = owner.memberHeartVoices || {};
-            owner.memberHeartVoiceHistory[speakerId] = Array.isArray(owner.memberHeartVoiceHistory[speakerId])
-                ? owner.memberHeartVoiceHistory[speakerId]
-                : [];
-            ownerHistory = owner.memberHeartVoiceHistory[speakerId];
-        } else {
-            owner.heartVoiceHistory = Array.isArray(owner.heartVoiceHistory) ? owner.heartVoiceHistory : [];
-            ownerHistory = owner.heartVoiceHistory;
-        }
+        const idSet = new Set(ids);
+        const candidates = [];
+        const addCandidate = (contact) => {
+            if (!contact || candidates.includes(contact)) return;
+            candidates.push(contact);
+        };
+        addCandidate(chatContext);
+        addCandidate(getHeartVoiceOwnerContact(speakerId, chatContext));
+        (state.contacts || []).forEach(addCandidate);
 
-        const target = ownerHistory.find(item => normalizeHeartVoice(item).heartVoiceId === heartVoiceId);
-        if (!target) {
-            console.warn('未找到要删除的心声:', heartVoiceId);
-            return null;
-        }
-        const targetHv = normalizeHeartVoice(target);
-
-        const filteredHistory = ownerHistory
-            .filter(item => normalizeHeartVoice(item).heartVoiceId !== heartVoiceId)
-            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-        if (owner.isGroup) {
-            owner.memberHeartVoiceHistory[speakerId] = filteredHistory;
-            const currentMemberLatest = owner.memberHeartVoices[speakerId] ? normalizeHeartVoice(owner.memberHeartVoices[speakerId]) : null;
-            if (!currentMemberLatest || currentMemberLatest.heartVoiceId === heartVoiceId) {
-                owner.memberHeartVoices[speakerId] = filteredHistory[0] || null;
+        const deletedMap = new Map();
+        const getStoredHeartVoice = (raw, fallbackSpeakerId = '') => {
+            const hv = normalizeHeartVoice(raw?.heartVoice || raw?.content || raw);
+            if (!hv.speakerId && fallbackSpeakerId) hv.speakerId = fallbackSpeakerId;
+            return hv;
+        };
+        const belongsToSpeaker = (hv, fallbackSpeakerId = '') => {
+            const hvSpeakerId = hv.speakerId || hv.senderId || hv.sender || fallbackSpeakerId || '';
+            return !hvSpeakerId || hvSpeakerId === speakerId || fallbackSpeakerId === speakerId;
+        };
+        const rememberIfTarget = (raw, fallbackSpeakerId = '') => {
+            if (!raw) return;
+            try {
+                const hv = getStoredHeartVoice(raw, fallbackSpeakerId);
+                if (hv.heartVoiceId && idSet.has(hv.heartVoiceId) && belongsToSpeaker(hv, fallbackSpeakerId)) {
+                    deletedMap.set(hv.heartVoiceId, hv);
+                }
+            } catch (err) {
+                console.warn('读取待删除心声失败，已跳过:', err);
             }
-        } else {
-            owner.heartVoiceHistory = filteredHistory;
-            const currentLatest = owner.latestHeartVoice ? normalizeHeartVoice(owner.latestHeartVoice) : null;
-            if (!currentLatest || currentLatest.heartVoiceId === heartVoiceId) {
-                owner.latestHeartVoice = filteredHistory[0] || null;
-            }
-        }
-
-        const sourceChat = state.contacts.find(c => c.id === targetHv.sourceChatId)
-            || (chatContext.id === targetHv.sourceChatId ? chatContext : null);
-
-        const removeMemoryEntry = (chatObj) => {
-            if (!chatObj?.echoMemory?.entries) return;
-            chatObj.echoMemory.entries = chatObj.echoMemory.entries.filter(entry => {
-                if (entry.sourceType !== 'heart_voice') return true;
-                return !(entry.heartVoiceId === heartVoiceId || entry.metadata?.heartVoiceId === heartVoiceId);
-            });
         };
 
-        removeMemoryEntry(owner);
-
-        if (sourceChat && Array.isArray(sourceChat.history)) {
-            sourceChat.history = sourceChat.history.filter(m => {
-                if (!m || m.type !== 'heart_voice') return true;
-                const msgHvId = m.heartVoiceId || m.heartVoice?.heartVoiceId || m.content?.heartVoiceId;
-                return msgHvId !== heartVoiceId;
+        candidates.forEach(contact => {
+            rememberIfTarget(contact.latestHeartVoice, contact.id);
+            (contact.heartVoiceHistory || []).forEach(item => rememberIfTarget(item, contact.id));
+            Object.entries(contact.memberHeartVoices || {}).forEach(([memberId, item]) => rememberIfTarget(item, memberId));
+            Object.entries(contact.memberHeartVoiceHistory || {}).forEach(([memberId, list]) => {
+                (Array.isArray(list) ? list : []).forEach(item => rememberIfTarget(item, memberId));
             });
-            removeMemoryEntry(sourceChat);
+            (contact.history || []).forEach(msg => {
+                if (msg?.type !== 'heart_voice') return;
+                rememberIfTarget(msg, msg.characterId || msg.senderId || msg.sender);
+            });
+        });
+
+        if (!deletedMap.size) {
+            console.warn('未找到要删除的心声:', ids);
+            return [];
         }
 
-        if (chatContext && chatContext !== owner && chatContext !== sourceChat) {
-            removeMemoryEntry(chatContext);
-        }
+        const deletedIdSet = new Set(deletedMap.keys());
+        const isDeletedHeartVoice = (raw, fallbackSpeakerId = '') => {
+            if (!raw) return false;
+            const hv = getStoredHeartVoice(raw, fallbackSpeakerId);
+            return !!(hv.heartVoiceId && deletedIdSet.has(hv.heartVoiceId) && belongsToSpeaker(hv, fallbackSpeakerId));
+        };
+        const sortByTimeDesc = (list) => list.sort((a, b) => (normalizeHeartVoice(b).timestamp || 0) - (normalizeHeartVoice(a).timestamp || 0));
+        const dirtyContacts = new Set();
 
-        const contactsToSave = new Set([owner]);
-        if (sourceChat && sourceChat !== owner) contactsToSave.add(sourceChat);
-        if (chatContext && chatContext !== owner && chatContext !== sourceChat) contactsToSave.add(chatContext);
+        const cleanContact = (contact) => {
+            if (!contact) return;
+            let changed = false;
 
-        for (const contact of contactsToSave) {
+            if (Array.isArray(contact.heartVoiceHistory)) {
+                const before = contact.heartVoiceHistory.length;
+                contact.heartVoiceHistory = sortByTimeDesc(contact.heartVoiceHistory.filter(item => !isDeletedHeartVoice(item, contact.id)));
+                changed = changed || contact.heartVoiceHistory.length !== before;
+            }
+            if (contact.latestHeartVoice && isDeletedHeartVoice(contact.latestHeartVoice, contact.id)) {
+                contact.latestHeartVoice = (contact.heartVoiceHistory || [])[0] || null;
+                changed = true;
+            }
+
+            if (contact.memberHeartVoices || contact.memberHeartVoiceHistory) {
+                contact.memberHeartVoices = contact.memberHeartVoices || {};
+                contact.memberHeartVoiceHistory = contact.memberHeartVoiceHistory || {};
+                const memberIds = new Set([
+                    ...Object.keys(contact.memberHeartVoices),
+                    ...Object.keys(contact.memberHeartVoiceHistory),
+                    speakerId
+                ]);
+                memberIds.forEach(memberId => {
+                    const list = Array.isArray(contact.memberHeartVoiceHistory[memberId]) ? contact.memberHeartVoiceHistory[memberId] : [];
+                    const before = list.length;
+                    const filtered = sortByTimeDesc(list.filter(item => !isDeletedHeartVoice(item, memberId)));
+                    if (before !== filtered.length) {
+                        contact.memberHeartVoiceHistory[memberId] = filtered;
+                        changed = true;
+                    }
+                    if (contact.memberHeartVoices[memberId] && isDeletedHeartVoice(contact.memberHeartVoices[memberId], memberId)) {
+                        contact.memberHeartVoices[memberId] = filtered[0] || null;
+                        changed = true;
+                    }
+                });
+            }
+
+            if (Array.isArray(contact.history)) {
+                const before = contact.history.length;
+                contact.history = contact.history.filter(msg => {
+                    if (!msg || msg.type !== 'heart_voice') return true;
+                    return !isDeletedHeartVoice(msg, msg.characterId || msg.senderId || msg.sender);
+                });
+                changed = changed || contact.history.length !== before;
+            }
+
+            if (contact.echoMemory?.entries) {
+                const before = contact.echoMemory.entries.length;
+                contact.echoMemory.entries = contact.echoMemory.entries.filter(entry => {
+                    if (entry.sourceType !== 'heart_voice') return true;
+                    const entryId = entry.heartVoiceId || entry.metadata?.heartVoiceId;
+                    const entrySpeakerId = entry.speakerId || entry.metadata?.speakerId || '';
+                    return !(entryId && deletedIdSet.has(entryId) && (!entrySpeakerId || entrySpeakerId === speakerId));
+                });
+                changed = changed || contact.echoMemory.entries.length !== before;
+            }
+
+            if (changed) dirtyContacts.add(contact);
+        };
+
+        candidates.forEach(cleanContact);
+        dirtyContacts.add(chatContext);
+        dirtyContacts.add(getHeartVoiceOwnerContact(speakerId, chatContext) || chatContext);
+        Array.from(deletedMap.values()).forEach(hv => {
+            const sourceChat = state.contacts.find(c => c.id === hv.sourceChatId);
+            if (sourceChat) dirtyContacts.add(sourceChat);
+        });
+
+        for (const contact of dirtyContacts) {
+            if (!contact) continue;
             syncContactObjectInState(contact);
             await kokoMemory.put('contacts', contact);
         }
@@ -13181,15 +13351,25 @@ async function deleteHeartVoiceEntry(chatContext, speakerId, heartVoiceId) {
             const currentChat = state.contacts.find(c => c.id === state.activeChatId) || chatContext;
             const refreshedHistory = getHeartVoiceHistory(currentChat, speakerId);
             const refreshedLatest = getLatestHeartVoice(currentChat, speakerId);
-            panelState.heartVoice = refreshedLatest;
-            panelState.options.history = refreshedHistory;
+            setCurrentHeartVoicePanelState({
+                chatContext: currentChat,
+                speakerId,
+                heartVoice: refreshedLatest,
+                heartVoiceId: refreshedLatest?.heartVoiceId || null,
+                options: { ...(panelState.options || {}), history: refreshedHistory, chatContext: currentChat, speakerId }
+            });
         }
 
-        return targetHv;
+        return Array.from(deletedMap.values());
     } catch (err) {
         console.warn('删除心声失败:', err);
-        return null;
+        return [];
     }
+}
+
+async function deleteHeartVoiceEntry(chatContext, speakerId, heartVoiceId) {
+    const deleted = await deleteHeartVoiceEntries(chatContext, speakerId, [heartVoiceId]);
+    return deleted[0] || null;
 }
 
 async function deleteHeartVoicesLinkedToMessages(chatObj, deletedMessageIds = [], options = {}) {
@@ -13313,11 +13493,10 @@ function formatHeartVoiceForMemory(hvRaw) {
     const hv = normalizeHeartVoice(hvRaw);
     return [
         hv.mood && `心情：${hv.mood}`,
-        `好感度：${hv.favorability}(${hv.favorabilityLabel})`,
+        `好感度：${hv.favorability}`,
         hv.clothing && `穿着：${hv.clothing}`,
         hv.action && `动作：${hv.action}`,
-        hv.innerThoughts && `真实想法：${hv.innerThoughts}`,
-        hv.deletedDraft && `删除草稿：${hv.deletedDraft}`
+        hv.innerThoughts && `真实想法：${hv.innerThoughts}`
     ].filter(Boolean).join('；');
 }
 
@@ -19399,7 +19578,7 @@ ${worldBookContextString}
 *你(AI)的动作或环境描写*
 {你(AI)的内心独白}
 "你(AI)说的话"
-[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]
+[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]
 [diary]...[/diary]
 `;
         } else {
@@ -19418,7 +19597,7 @@ ${worldBookContextString}
 (你(AI)想说的第一句话)
 (你(AI)想说的第二句话)
 (你(AI)可以使用的指令，例如 [sticker:开心])
-[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]
+[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]
 [diary]...[/diary]
 `;
         }
@@ -19714,8 +19893,8 @@ ${finalMemoryForPrompt}
 [特殊指令]
 你可以使用 [sticker:表情名], [voice:内容], [picture:描述] 等指令。
 每个角色的 CONTENT 末尾必须包含该角色自己的 Inner Echo，格式为单行 JSON：
-[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]
-心声是该角色真实内心，不是说出口的话；同一个角色的心声会按角色本体统一保存。mood 要具体，favorability 必须是 0-100 数字并贴合关系和情绪，favorabilityLabel 要贴合当下关系，clothing/action/innerThoughts/deletedDraft 必须具体。
+[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]
+心声是该角色真实内心，不是说出口的话；同一个角色的心声会按角色本体统一保存。mood：当前心情，具体一点；favorability：0-100 数字，动态变化；clothing：当前穿着/外观状态；action：当前动作，具体；innerThoughts：第一人称心里话。
 [可用表情包列表]
 {{emoticon_list}}
 `;
@@ -20076,7 +20255,7 @@ ${characterDossiersPrompt}
 [文学风格] 你的写作风格需要遵循高端女性向文学（类似晋江文学城的流行风格）。文笔必须细腻、注重情感的拉扯和暧昧氛围的营造。在描写和对话时,要体现出较高的文学素养。
 [内容限制] 你的发言必须积极向上,充满希望。严禁探讨任何形式的阴谋论,严禁表达或引导至绝望、悲观或虚无主义的情绪。
 [禁用词列表] 绝对禁止使用以下或类似的、充满“霸道总裁”刻板印象的油腻词语：小妖精、嘴上说不要、说着不要、惹火、磨人、玩火、黑甜的梦。
-[Inner Echo] 每个 MESSAGE 的 CONTENT 末尾必须包含该发言角色自己的单行心声 JSON：[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]。心声是角色真实内心，不是说出口的话；同一个角色的心声会按角色本体统一保存。mood 要具体，favorability 必须是 0-100 数字并贴合关系和情绪，favorabilityLabel 要贴合当下关系，clothing/action/innerThoughts/deletedDraft 必须具体。
+[Inner Echo] 每个 MESSAGE 的 CONTENT 末尾必须包含该发言角色自己的单行心声 JSON：[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]。心声是角色真实内心，不是说出口的话；同一个角色的心声会按角色本体统一保存。mood：当前心情，具体一点；favorability：0-100 数字，动态变化；clothing：当前穿着/外观状态；action：当前动作，具体；innerThoughts：第一人称心里话。
 [回复规则] 你的回复可以包含多条消息,每条消息占一行。你可以发送普通文本,也可以通过下面的指令格式发送特殊消息。
 [特殊指令与互动指南]
 - 表情包: \`[sticker:表情名]\`
@@ -20437,8 +20616,8 @@ const NORMAL_BASE_PROMPT = `
 
 [！！！绝对核心规则：关于心声！！！]
 在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行输出 Inner Echo 心声标签。格式必须是单行 JSON：
-\`[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]\`
-心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。mood 要具体，favorability 是 0-100 数字且随关系变化，favorabilityLabel 可用陌生、普通、熟悉、在意、心动、偏爱、极度恼火、嘴硬在意等，clothing/action/innerThoughts/deletedDraft 必须贴合当下。JSON 不允许 Markdown、不允许换行、不允许解释。用户不会直接看见这个标签，程序会自动隐藏。
+\`[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]\`
+心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。mood：当前心情，具体一点；favorability：0-100 数字，动态变化；clothing：当前穿着/外观状态；action：当前动作，具体；innerThoughts：第一人称心里话。JSON 不允许 Markdown、不允许换行、不允许解释。用户不会直接看见这个标签，程序会自动隐藏。
 
 [！！！绝对核心规则：关于日记！！！]
 在你的所有对话、表情、动作、特殊消息全部输出完毕之后，你必须在回复的【最后部分】，另起一行，使用 \`[diary]...[/diary]\` 标签写一篇日记。日记是你对当前对话的思考、感悟或内心独白。即使只是简单的想法，也必须写。这是强制要求。
@@ -20452,7 +20631,7 @@ const NORMAL_BASE_PROMPT = `
 [sticker:开心]
 [status:准备出门]
 [qzone]久违的阳光！准备去公园抓光影啦 ✨ [picture:阳光洒在窗台上的照片][/qzone]
-[heart_voice]{"mood":"期待里带着一点紧张","favorability":72,"favorabilityLabel":"嘴硬在意","clothing":"浅色衬衫，袖口随意挽起。","action":"把手机在掌心转了半圈，又抬眼等你的反应。","innerThoughts":"不知道你会不会同意我的邀请，我其实比表现出来更期待。","deletedDraft":"要不就当约会吧……算了，这句话现在还不能发。"}[/heart_voice]
+[heart_voice]{"mood":"期待里带着一点紧张","favorability":72,"clothing":"浅色衬衫，袖口随意挽起。","action":"把手机在掌心转了半圈，又抬眼等你的反应。","innerThoughts":"不知道你会不会同意我的邀请，我其实比表现出来更期待。"}[/heart_voice]
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
@@ -20530,8 +20709,8 @@ const NARRATIVE_BASE_PROMPT = `
 
 [！！！绝对核心规则：关于心声！！！]
 在你的所有回复的【最后部分】，【在写日记之前】，你必须另起一行输出 Inner Echo 心声标签。格式必须是单行 JSON：
-\`[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]\`
-心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。mood 要具体，favorability 是 0-100 数字且随关系变化，favorabilityLabel 可用陌生、普通、熟悉、在意、心动、偏爱、极度恼火、嘴硬在意等，clothing/action/innerThoughts/deletedDraft 必须贴合当下。JSON 不允许 Markdown、不允许换行、不允许解释。用户不会直接看见这个标签，程序会自动隐藏。
+\`[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]\`
+心声是角色真实内心，不是说出口的话；可以和表面回复不一致；必须符合角色人设、关系、当前情绪和上下文。mood：当前心情，具体一点；favorability：0-100 数字，动态变化；clothing：当前穿着/外观状态；action：当前动作，具体；innerThoughts：第一人称心里话。JSON 不允许 Markdown、不允许换行、不允许解释。用户不会直接看见这个标签，程序会自动隐藏。
 
 [！！！绝对核心规则：关于日记！！！]
 在你完整的叙事（包含动作、心理和对话）结束后，你必须在回复的【最后部分】，另起新的一行，使用 \`[diary]...[/diary]\` 标签写一篇日记。日记是【角色】对当前对话的思考、感悟或内心独白。即使只是简单的想法，也必须写。这是强制要求，并且日记内容不应包含在主叙事块中。
@@ -20539,7 +20718,7 @@ const NARRATIVE_BASE_PROMPT = `
 [示例回复格式]
 *他走到窗边，看着外面的雨滴。* “下雨了呢。” *他转过身，对你露出一丝微笑。* {不知道你喜不喜欢下雨天。} “你晚饭想吃什么？” *他轻轻地问，手指无意识地敲打着窗台。*
 [status:有点饿了]
-[heart_voice]{"mood":"期待里带着一点紧张","favorability":72,"favorabilityLabel":"嘴硬在意","clothing":"浅色衬衫，袖口随意挽起。","action":"指尖轻轻敲着窗台，目光还停在你身上。","innerThoughts":"我想让你留下来，又不想把这份期待表现得太明显。","deletedDraft":"其实我想和你多待一会儿……算了，太直白了。"}[/heart_voice]
+[heart_voice]{"mood":"期待里带着一点紧张","favorability":72,"clothing":"浅色衬衫，袖口随意挽起。","action":"指尖轻轻敲着窗台，目光还停在你身上。","innerThoughts":"我想让你留下来，又不想把这份期待表现得太明显。"}[/heart_voice]
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 `;
 
@@ -21398,7 +21577,7 @@ ${qzoneContextText}
 ❌ 禁止写 \`[diary]\` 日记。
 ❌ 禁止使用 \`[sticker:]\` 表情包。
 ❌ 禁止出现“发送了一条消息”这种描述。
-✅ 最后必须追加单行 Inner Echo 心声 JSON：\`[heart_voice]{"mood":"","favorability":0,"favorabilityLabel":"","clothing":"","action":"","innerThoughts":"","deletedDraft":""}[/heart_voice]\`。这是角色真实内心，程序会自动隐藏。mood/favorabilityLabel/clothing/action/innerThoughts/deletedDraft 必须具体，favorability 必须是 0-100 数字。
+✅ 最后必须追加单行 Inner Echo 心声 JSON：\`[heart_voice]{"mood":"","favorability":0,"clothing":"","action":"","innerThoughts":""}[/heart_voice]\`。这是角色真实内心，程序会自动隐藏。mood：当前心情，具体一点；favorability：0-100 数字，动态变化；clothing：当前穿着/外观状态；action：当前动作，具体；innerThoughts：第一人称心里话。
 
 【输出范例】
 *（屏幕晃动了一下，你凑近镜头，眯着眼睛仔细看了看）* “喂？听得清吗？” {奇怪，他那边怎么这么黑，是在外面吗？} *（你理了理耳边的碎发，有些不好意思地笑了笑）* “那个... 突然给你打电话，没打扰你吧？”
@@ -43581,7 +43760,7 @@ function toggleHeartVoicePanelFor(speakerId = null) {
         heartVoice = getLatestHeartVoice(contact, contact.id);
         history = getHeartVoiceHistory(contact, contact.id);
     }
-    renderHeartVoicePanel(heartVoice, speakerName, { avatar, history, speakerId: targetId || contact.id });
+    renderHeartVoicePanel(heartVoice, speakerName, { avatar, history, speakerId: targetId || contact.id, chatContext: contact });
     heartVoicePanel.dataset.speakerId = targetId || contact.id;
     heartVoicePanel.style.display = 'flex';
 }
@@ -43595,73 +43774,110 @@ chatContactNameEl.addEventListener('click', (e) => {
 heartVoicePanel.addEventListener('click', async (e) => {
     const panel = document.getElementById('heart-voice-panel');
     if (e.target.closest('.hv-status-close') || e.target.classList.contains('hv-backdrop')) {
+        e.preventDefault();
+        e.stopPropagation();
         panel.style.display = 'none';
         return;
     }
+
+    const stateData = window.currentHeartVoicePanelState || currentHeartVoicePanelState;
+    const getPanelChat = () => stateData?.chatContext || state.contacts.find(c => c.id === state.activeChatId);
+    const getPanelSpeakerId = () => stateData?.speakerId || stateData?.options?.speakerId || heartVoicePanel.dataset.speakerId;
+
+    const deleteCurrentBtn = e.target.closest('#hv-delete-entry-btn');
+    if (deleteCurrentBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const heartVoiceId = deleteCurrentBtn.dataset.heartVoiceId || stateData?.heartVoiceId || panel.dataset.editHeartVoiceId;
+        if (!heartVoiceId) {
+            alert('找不到这条心声，无法删除。');
+            return;
+        }
+
+        const chatContext = getPanelChat();
+        const speakerId = getPanelSpeakerId();
+        try {
+            await deleteHeartVoiceEntry(chatContext, speakerId, heartVoiceId);
+            const refreshedHistory = getHeartVoiceHistory(chatContext, speakerId);
+            const refreshedLatest = getLatestHeartVoice(chatContext, speakerId);
+            renderHeartVoicePanel(refreshedLatest, stateData.speakerName, { ...(stateData.options || {}), history: refreshedHistory, chatContext, speakerId });
+        } catch (err) {
+            console.error('删除心声失败:', err);
+            alert(`删除心声失败：${err.message}`);
+        }
+        return;
+    }
+
+    const batchDeleteBtn = e.target.closest('#hv-batch-delete-btn');
+    if (batchDeleteBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const checked = Array.from(heartVoicePanel.querySelectorAll('.hv-history-checkbox:checked'));
+        const ids = checked.map(input => input.value).filter(Boolean);
+        if (!ids.length) {
+            alert('请先选择要删除的心声。');
+            return;
+        }
+
+        const chatContext = getPanelChat();
+        const speakerId = getPanelSpeakerId();
+        try {
+            await deleteHeartVoiceEntries(chatContext, speakerId, ids);
+            renderHeartVoiceHistoryPanel({ manageMode: true });
+        } catch (err) {
+            console.error('批量删除心声失败:', err);
+            alert(`批量删除心声失败：${err.message}`);
+        }
+        return;
+    }
+
+    const selectAllBtn = e.target.closest('#hv-select-all-btn');
+    if (selectAllBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const boxes = Array.from(heartVoicePanel.querySelectorAll('.hv-history-checkbox'));
+        const shouldCheck = boxes.some(input => !input.checked);
+        boxes.forEach(input => { input.checked = shouldCheck; });
+        return;
+    }
+
+    if (e.target.closest('#hv-history-manage-btn')) {
+        e.preventDefault();
+        e.stopPropagation();
+        renderHeartVoiceHistoryPanel({ manageMode: true });
+        return;
+    }
+
+    if (e.target.closest('#hv-history-cancel-manage-btn')) {
+        e.preventDefault();
+        e.stopPropagation();
+        renderHeartVoiceHistoryPanel({ manageMode: false });
+        return;
+    }
+
     const editCurrentBtn = e.target.closest('.hv-edit-btn');
     if (editCurrentBtn) {
+        e.preventDefault();
         e.stopPropagation();
         renderHeartVoiceEditPanel();
         return;
     }
     const editHistoryBtn = e.target.closest('.hv-history-edit-btn');
     if (editHistoryBtn) {
+        e.preventDefault();
         e.stopPropagation();
         renderHeartVoiceEditPanel(editHistoryBtn.dataset.heartVoiceId);
         return;
     }
-    const historyDeleteBtn = e.target.closest('.hv-history-delete-btn');
-    if (historyDeleteBtn) {
-        e.stopPropagation();
-        const confirmed = await showCustomConfirm(
-            '删除心声',
-            '确定要删除这条心声吗？删除后不会删除对应聊天消息，但这条心声会从状态和历史记录里移除。',
-            true
-        );
-        if (!confirmed) return;
-        const stateData = window.currentHeartVoicePanelState;
-        if (!stateData) return;
-        const currentChat = state.contacts.find(c => c.id === state.activeChatId);
-        const speakerId = stateData.options?.speakerId || heartVoicePanel.dataset.speakerId;
-        await deleteHeartVoiceEntry(currentChat, speakerId, historyDeleteBtn.dataset.heartVoiceId);
-        const refreshedHistory = getHeartVoiceHistory(currentChat, speakerId);
-        stateData.options.history = refreshedHistory;
-        stateData.heartVoice = getLatestHeartVoice(currentChat, speakerId);
-        renderHeartVoiceHistoryPanel();
-        return;
-    }
-    const deleteEntryBtn = e.target.closest('.hv-delete-btn');
-    if (deleteEntryBtn) {
-        e.stopPropagation();
-        const confirmed = await showCustomConfirm(
-            '删除心声',
-            '确定要删除这条心声吗？删除后不会删除对应聊天消息，但这条心声会从状态和历史记录里移除。',
-            true
-        );
-        if (!confirmed) return;
-        const stateData = window.currentHeartVoicePanelState;
-        if (!stateData) return;
-        const currentChat = state.contacts.find(c => c.id === state.activeChatId);
-        const speakerId = stateData.options?.speakerId || heartVoicePanel.dataset.speakerId;
-        const previousView = panel.dataset.previousView || 'current';
-        await deleteHeartVoiceEntry(currentChat, speakerId, deleteEntryBtn.dataset.heartVoiceId || panel.dataset.editHeartVoiceId);
-        const refreshedHistory = getHeartVoiceHistory(currentChat, speakerId);
-        const refreshedLatest = getLatestHeartVoice(currentChat, speakerId);
-        stateData.options.history = refreshedHistory;
-        stateData.heartVoice = refreshedLatest;
-        if (previousView === 'history') {
-            renderHeartVoiceHistoryPanel();
-        } else {
-            renderHeartVoicePanel(refreshedLatest, stateData.speakerName, stateData.options);
-        }
-        return;
-    }
     if (e.target.closest('.hv-edit-cancel')) {
+        e.preventDefault();
         e.stopPropagation();
         const stateData = window.currentHeartVoicePanelState;
         if (stateData) {
             if (panel.dataset.previousView === 'history') {
-                renderHeartVoiceHistoryPanel();
+                renderHeartVoiceHistoryPanel({ manageMode: panel.dataset.previousManageMode === 'true' });
             } else {
                 renderHeartVoicePanel(stateData.heartVoice, stateData.speakerName, stateData.options);
             }
@@ -43669,12 +43885,13 @@ heartVoicePanel.addEventListener('click', async (e) => {
         return;
     }
     if (e.target.closest('.hv-history-btn')) {
+        e.preventDefault();
         e.stopPropagation();
         if (panel.dataset.view === 'history') {
             const stateData = window.currentHeartVoicePanelState;
             if (stateData) renderHeartVoicePanel(stateData.heartVoice, stateData.speakerName, stateData.options);
         } else {
-            renderHeartVoiceHistoryPanel();
+            renderHeartVoiceHistoryPanel({ manageMode: false });
         }
         return;
     }
@@ -43696,15 +43913,13 @@ heartVoicePanel.addEventListener('submit', async (e) => {
     const patch = {
         mood: form.elements.mood?.value.trim() || '',
         favorability: fav,
-        favorabilityLabel: form.elements.favorabilityLabel?.value.trim() || '',
         clothing: form.elements.clothing?.value.trim() || '',
         action: form.elements.action?.value.trim() || '',
-        innerThoughts: form.elements.innerThoughts?.value.trim() || '',
-        deletedDraft: form.elements.deletedDraft?.value.trim() || ''
+        innerThoughts: form.elements.innerThoughts?.value.trim() || ''
     };
     await updateHeartVoiceEntry(
-        state.contacts.find(c => c.id === state.activeChatId),
-        stateData.options?.speakerId || heartVoicePanel.dataset.speakerId,
+        stateData.chatContext || state.contacts.find(c => c.id === state.activeChatId),
+        stateData.speakerId || stateData.options?.speakerId || heartVoicePanel.dataset.speakerId,
         form.dataset.heartVoiceId,
         patch
     );
