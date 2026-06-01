@@ -12701,6 +12701,28 @@ function normalizeHeartVoiceFavorability(value, fallback) {
     return clampNumber(extractFavorabilityNumber(value, fallback), 0, 100, fallback ?? 50);
 }
 
+function limitHeartVoiceText(text, maxLen) {
+    text = String(text || '').trim();
+    if (!text) return '';
+
+    if (text.length <= maxLen) return text;
+
+    const cut = text.slice(0, maxLen);
+    const lastPunctuation = Math.max(
+        cut.lastIndexOf('。'),
+        cut.lastIndexOf('！'),
+        cut.lastIndexOf('？'),
+        cut.lastIndexOf('，'),
+        cut.lastIndexOf(',')
+    );
+
+    if (lastPunctuation > Math.floor(maxLen * 0.55)) {
+        return cut.slice(0, lastPunctuation + 1);
+    }
+
+    return cut.replace(/[，,。！？；;：:、\s]*$/, '') + '……';
+}
+
 function stableHeartVoiceHash(value) {
     const text = String(value || '');
     let hash = 0;
@@ -12941,10 +12963,10 @@ function normalizeHeartVoice(raw, context = {}) {
         ? { innerThoughts: raw.trim() }
         : (raw && typeof raw === 'object' ? raw : {});
     const seed = {
-        mood: source.mood || source.emotion || '表面平静',
-        action: source.action || '指尖在屏幕边缘停了一下，目光还留在刚才那段对话上。没有急着开口，只像是在把情绪重新压回去。',
-        innerThoughts: source.innerThoughts || source.thoughts || '这段话还在心里绕着，没有完全落下去。我不想随便给出反应，也不想让自己的在意显得太明显。先把语气稳住，至少别让对方一眼看穿。',
-        clothing: source.clothing || '衣着保持着当前的日常状态，线条干净，细节没有刻意张扬。袖口和衣摆都收得规整，像是刚刚整理过。',
+        mood: source.mood || source.emotion || '平静',
+        action: source.action || '指尖轻轻停了一下，目光还留在刚才那句话上。',
+        innerThoughts: source.innerThoughts || source.thoughts || '嘴上可以装得无所谓，可刚才那句话还是在心里停了一下。',
+        clothing: source.clothing || '衣着保持着当前的日常状态。',
         timestamp: Number.isFinite(Number(source.timestamp)) ? Number(source.timestamp) : now
     };
     const estimated = estimateHeartVoiceSignals(seed);
@@ -12967,13 +12989,17 @@ function normalizeHeartVoice(raw, context = {}) {
             character: context.character || null
         })
         : proposed;
+    const mood = limitHeartVoiceText(seed.mood, 8) || '平静';
+    const clothing = limitHeartVoiceText(seed.clothing, 55) || '衣着保持着当前的日常状态。';
+    const action = limitHeartVoiceText(seed.action, 75) || '指尖轻轻停了一下，目光还留在刚才那句话上。';
+    const innerThoughts = limitHeartVoiceText(seed.innerThoughts, 105) || '嘴上可以装得无所谓，可刚才那句话还是在心里停了一下。';
     const metadataText = [
         seed.timestamp,
         source.speakerId || source.senderId || source.sender || '',
         source.sourceChatId || '',
-        seed.mood,
-        seed.action,
-        seed.innerThoughts
+        mood,
+        action,
+        innerThoughts
     ].join('|');
     return {
         heartVoiceId: source.heartVoiceId || source.id || `hv_legacy_${stableHeartVoiceHash(metadataText)}`,
@@ -12983,11 +13009,11 @@ function normalizeHeartVoice(raw, context = {}) {
         sourceMessageId: source.sourceMessageId || null,
         speakerId: source.speakerId || source.senderId || source.sender || null,
         speakerName: source.speakerName || source.senderName || '',
-        mood: seed.mood,
+        mood,
         favorability,
-        clothing: seed.clothing,
-        action: seed.action,
-        innerThoughts: seed.innerThoughts,
+        clothing,
+        action,
+        innerThoughts,
         timestamp: seed.timestamp
     };
 }
@@ -13015,8 +13041,11 @@ function parseHeartVoiceFromText(text) {
 
 const HEART_VOICE_PROMPT_RULES = `
 [Inner Echo 心声生成要求]
-请输出角色当前状态，只输出以下五个字段：mood、favorability、clothing、action、innerThoughts。不要添加好感标签、张力、解释说明或任何额外字段。
-- mood：2~6字，具体、有状态感，避免“平静/开心/生气”这种空泛单词；例如“怒极反笑”“克制冷淡”“心口发闷”“隐隐烦躁”。
+请生成角色当前状态，只输出以下五个字段：
+mood、favorability、clothing、action、innerThoughts。
+
+【心声长度要求】
+- mood：2~6字，具体一点，例如“怒极反笑”“心绪浮动”“嘴硬平静”。
 - favorability：必须输出 0-100 的数字，基于上一轮好感度和本轮互动内容动态变化，不要固定 50，不要机械 +1、+5 或 -5。
 【好感度规则】
 favorability 必须基于“上一轮好感度”和“本轮互动内容”动态变化。
@@ -13029,12 +13058,21 @@ favorability 必须基于“上一轮好感度”和“本轮互动内容”动�
 如果用户道歉、解释、安抚，favorability 可以回升。
 如果没有明显变化，favorability 只允许在上一轮基础上 -1 到 +1。
 单轮普通变化建议不超过 8，重大事件才允许更大。
-- clothing：30~80字，1~3句，写清颜色、袖口、裤裙鞋袜、整体风格等可见细节，不要模板化。
-- action：50~120字，2~4句，结合本轮互动写当前动作、目光、表情、身体姿态或语气状态，要有现场镜头感。
-- innerThoughts：80~180字，3~6句，像真实脑内独白；结合角色人设、本轮聊天、当前关系和情绪，允许嘴硬、别扭、吐槽、克制、偏爱、试探等主观表达。
-- 内容必须贴合本轮聊天上下文，避免“正在等待新的互动”“我还在感受关系变化”“暂时没有特别想法”等空泛兜底句。
+- clothing：20~45字，写出当前穿着/外观状态，有一点画面感，但不要太长。
+- action：25~60字，结合刚刚这一轮互动，写角色此刻的动作、表情或语气状态。
+- innerThoughts：45~90字，像角色真实脑内独白，要结合本轮对话，不要太短，也不要写成长篇。
+【风格要求】
+1. 不要只写“正在等待新的互动”“我还在感受关系变化”这种空话。
+2. 不要长篇大论。
+3. 不要每个字段都写成一大段。
+4. 内容要具体，但控制在中等长度。
+5. innerThoughts 可以有情绪和嘴硬，但不要超过 90 字左右。
+6. clothing 和 action 不要超过两句话。
+7. 不要输出多余字段。
+8. 不要 Markdown。
+9. 不要解释说明。
 - 群聊中只给实际输出 MESSAGE 的发言角色写心声，没有发言的角色不要生成心声。
-- JSON 必须单行、合法，不要 Markdown 代码块，不要解释。示例：[heart_voice]{"mood":"克制冷淡","favorability":68,"clothing":"深色外套搭在肩上，袖口压着一点折痕，鞋尖朝外，像是随时会转身离开。","action":"他没有立刻接话，只把视线从屏幕上移开半秒，又重新落回你的上一句。指节在杯壁上轻轻敲了两下，语气听起来平稳，尾音却压得很低。","innerThoughts":"嘴上可以装得无所谓，可刚才那句话还是在心里压了一下。我不想显得太在意，更不想让你看出我其实已经被牵动。要是现在退一步，像是我先认输；可继续冷着，又怕把你推远。"}[/heart_voice]
+- JSON 必须单行、合法。示例：[heart_voice]{"mood":"克制冷淡","favorability":68,"clothing":"深色外套搭在肩上，袖口压着一点折痕，鞋尖朝外。","action":"他没有立刻接话，目光从屏幕上移开半秒，语气压得很低。","innerThoughts":"嘴上可以装得无所谓，可刚才那句话还是在心里压了一下。我不想显得太在意，却也没办法真的不在意。"}[/heart_voice]
 `;
 
 function buildHeartVoicePromptRules(previousFavorability = null) {
@@ -21413,7 +21451,7 @@ ${buildHeartVoicePromptRules()}
 [sticker:开心]
 [status:准备出门]
 [qzone]久违的阳光！准备去公园抓光影啦 ✨ [picture:阳光洒在窗台上的照片][/qzone]
-[heart_voice]{"mood":"隐隐期待","favorability":72,"clothing":"浅色衬衫贴着肩线，袖口随意挽到小臂，裤脚干净利落，整个人像刚从午后的光里走出来。","action":"他把手机在掌心转了半圈，又抬眼等你的反应，指腹停在屏幕边缘没有继续滑动。语气听起来轻松，视线却一直追着你的表情。","innerThoughts":"我其实比表现出来更期待你的回答，只是不能把话说得太满。要是你拒绝，我还能装作只是随口一提；可如果你点头，我大概会高兴很久。"}[/heart_voice]
+[heart_voice]{"mood":"隐隐期待","favorability":72,"clothing":"浅色衬衫贴着肩线，袖口随意挽到小臂，显得干净利落。","action":"他把手机在掌心转了半圈，又抬眼等你的反应，语气听起来很轻。","innerThoughts":"我其实比表现出来更期待你的回答，只是不能把话说得太满。要是你点头，我大概会高兴很久。"}[/heart_voice]
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 
 # 统一时序记忆流 (Unified Chronological Memory Stream)
@@ -21501,7 +21539,7 @@ ${buildHeartVoicePromptRules()}
 [示例回复格式]
 *他走到窗边，看着外面的雨滴。* “下雨了呢。” *他转过身，对你露出一丝微笑。* {不知道你喜不喜欢下雨天。} “你晚饭想吃什么？” *他轻轻地问，手指无意识地敲打着窗台。*
 [status:有点饿了]
-[heart_voice]{"mood":"隐隐期待","favorability":72,"clothing":"浅色衬衫贴着肩线，袖口随意挽到小臂，裤脚干净利落，整个人像刚从午后的光里走出来。","action":"指尖轻轻敲着窗台，目光还停在你身上，像是在等一句足够轻的回应。语气放得很慢，尾音却藏着一点不肯承认的期待。","innerThoughts":"我想让你留下来，又不想把这份期待表现得太明显。说得太急会显得我输得很彻底，可如果什么都不说，你也许真的会转身走掉。"}[/heart_voice]
+[heart_voice]{"mood":"隐隐期待","favorability":72,"clothing":"浅色衬衫贴着肩线，袖口挽到小臂，整个人显得清爽。","action":"指尖轻轻敲着窗台，目光还停在你身上，语气放得很慢。","innerThoughts":"我想让你留下来，又不想把期待表现得太明显。说得太急会显得我输，可什么都不说又怕你走。"}[/heart_voice]
 [diary]今天和user聊天很开心，感觉我们的关系又近了一步。希望明天也能这样。[/diary]
 `;
 
