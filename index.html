@@ -245,10 +245,18 @@
     animation: bubble-fade-in 0.35s ease-out; 
 }
         .message-wrapper.received { align-self: flex-start; flex-direction: row; }
-        .message-wrapper.sent { align-self: flex-end; flex-direction: row-reverse; }
-        .message-avatar { width: 40px; height: 40px; border-radius: 6px; flex-shrink: 0; visibility: hidden; }
-        .is-first-in-sequence .message-avatar { visibility: visible; margin-top: 10px; }
-        .message-avatar img { width: 100%; height: 100%; border-radius: 6px; object-fit: cover; }
+.message-wrapper.sent { align-self: flex-end; flex-direction: row-reverse; }
+.message-avatar { width: 40px; height: 40px; border-radius: 6px; flex-shrink: 0; visibility: hidden; }
+.is-first-in-sequence .message-avatar { visibility: visible; margin-top: 10px; }
+.message-wrapper.private-force-avatar .message-avatar {
+    visibility: visible !important;
+    display: block !important;
+    margin-top: 10px;
+}
+.message-wrapper.private-force-avatar .message-author-name {
+    display: none !important;
+}
+.message-avatar img { width: 100%; height: 100%; border-radius: 6px; object-fit: cover; }
         .message-body { display: flex; flex-direction: column; margin: 0 10px; }
         .message-wrapper.sent .message-body { align-items: flex-end; }
         .message-wrapper.received .message-body { align-items: flex-start; }
@@ -2622,6 +2630,14 @@
 .message-wrapper.ai-html-message .message-author-name,
 .message-wrapper.ai-html-message .message-timestamp {
     display: none !important; /* 彻底隐藏头像、名字和时间戳 */
+}
+.message-wrapper.private-force-avatar.ai-html-message .message-avatar {
+    visibility: visible !important;
+    display: block !important;
+    margin-top: 10px;
+}
+.message-wrapper.private-force-avatar.ai-html-message .message-author-name {
+    display: none !important;
 }
 /* --- 新增：热搜话题描述框样式 --- */
 #trending-topic-description-container {
@@ -12736,63 +12752,48 @@ function parseHeartVoiceFromText(text) {
     return { cleanText, heartVoice };
 }
 
-function getHeartVoiceOwnerContact(speakerId, chatObj = null) {
+function getHeartVoiceOwnerContact(speakerId, chatContext = null) {
+    if ((!speakerId || speakerId === 'contact') && chatContext && !chatContext.isGroup) {
+        speakerId = chatContext.id;
+    }
     if (!speakerId || speakerId === 'user' || speakerId === 'myProfile') return null;
-    const privateContact = state.contacts.find(c => !c.isGroup && c.id === speakerId);
-    if (privateContact) return privateContact;
-    if (chatObj && !chatObj.isGroup && chatObj.id === speakerId) return chatObj;
-    return null;
+
+    if (speakerId && Array.isArray(state.contacts)) {
+        const byId = state.contacts.find(c => c && c.id === speakerId && !c.isGroup);
+        if (byId) return byId;
+    }
+
+    if (chatContext && !chatContext.isGroup) {
+        return chatContext;
+    }
+
+    if (speakerId && Array.isArray(state.contacts)) {
+        const byMemberId = state.contacts.find(c => {
+            if (!c || c.isGroup) return false;
+            return c.id === speakerId || c.name === speakerId;
+        });
+        if (byMemberId) return byMemberId;
+    }
+
+    console.warn('找不到心声所属角色，fallback 到 chatContext:', speakerId, chatContext);
+    return chatContext || null;
 }
 
-// 心声按角色本体统一读取，兼容旧群聊/私聊分散保存的数据。
-function collectHeartVoicesForCharacter(chatObj, speakerId) {
-    const items = [];
-    const addOne = (raw) => {
-        if (!raw) return;
-        try {
-            items.push(normalizeHeartVoice(raw.heartVoice || raw.content || raw));
-        } catch (err) {
-            console.warn('读取单条心声失败，已跳过:', err);
-        }
-    };
-    const addFromHistoryMessages = (history) => {
-        if (!Array.isArray(history)) return;
-        history.forEach(msg => {
-            if (msg && msg.type === 'heart_voice' && (!speakerId || msg.senderId === speakerId || msg.sender === speakerId)) {
-                addOne(msg);
-            }
-        });
-    };
+function syncContactInState(contact) {
+    syncContactObjectInState(contact);
+}
 
-    const owner = getHeartVoiceOwnerContact(speakerId, chatObj);
-    if (owner) {
-        addOne(owner.latestHeartVoice);
-        (owner.heartVoiceHistory || []).forEach(addOne);
-        addFromHistoryMessages(owner.history);
-    }
-
-    (state.contacts || []).forEach(contact => {
-        if (!contact || !contact.isGroup) return;
-        addOne(contact.memberHeartVoices && contact.memberHeartVoices[speakerId]);
-        ((contact.memberHeartVoiceHistory || {})[speakerId] || []).forEach(addOne);
-        addFromHistoryMessages(contact.history);
-    });
-
-    if (!owner && chatObj) {
-        addOne(chatObj.latestHeartVoice);
-        (chatObj.heartVoiceHistory || []).forEach(addOne);
-        addOne(chatObj.memberHeartVoices && chatObj.memberHeartVoices[speakerId]);
-        ((chatObj.memberHeartVoiceHistory || {})[speakerId] || []).forEach(addOne);
-        addFromHistoryMessages(chatObj.history);
-    }
-
+function dedupeHeartVoiceHistory(history = []) {
     const unique = [];
     const seen = new Set();
-    items
-        .filter(Boolean)
-        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-        .forEach(hv => {
+    (Array.isArray(history) ? history : []).forEach(item => {
+        if (!item) return;
+        try {
+            const hv = normalizeHeartVoice(item.heartVoice || item.content || item);
             const key = hv.heartVoiceId || [
+                hv.sourceChatId || '',
+                hv.sourceMessageId || '',
+                hv.speakerId || '',
                 hv.timestamp || '',
                 hv.mood || '',
                 hv.action || '',
@@ -12801,12 +12802,135 @@ function collectHeartVoicesForCharacter(chatObj, speakerId) {
             if (seen.has(key)) return;
             seen.add(key);
             unique.push(hv);
+        } catch (err) {
+            console.warn('心声历史去重失败，已跳过:', err);
+        }
+    });
+    return unique;
+}
+
+function repairHeartVoiceOwnerFromCollected(owner, collected = []) {
+    if (!owner || owner.isGroup || !Array.isArray(collected) || !collected.length) return;
+    const beforeKeys = dedupeHeartVoiceHistory(owner.heartVoiceHistory || []).map(hv => hv.heartVoiceId).join('|');
+    const merged = dedupeHeartVoiceHistory([...(owner.heartVoiceHistory || []), ...collected])
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .slice(0, 200);
+    const beforeLatestId = owner.latestHeartVoice ? normalizeHeartVoice(owner.latestHeartVoice).heartVoiceId : '';
+    const afterKeys = merged.map(hv => hv.heartVoiceId).join('|');
+    owner.heartVoiceHistory = merged;
+    owner.latestHeartVoice = merged[0] || null;
+    const afterLatestId = owner.latestHeartVoice ? normalizeHeartVoice(owner.latestHeartVoice).heartVoiceId : '';
+    if (beforeLatestId !== afterLatestId || beforeKeys !== afterKeys) {
+        syncContactInState(owner);
+        if (typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
+            Promise.resolve(kokoMemory.put('contacts', owner)).catch(err => console.warn('补写角色心声失败:', err));
+        }
+    }
+}
+
+// 心声按角色本体统一读取，兼容旧群聊/私聊分散保存的数据。
+function collectHeartVoicesForCharacter(chatObjOrSpeakerId, speakerIdOrChatObj = null) {
+    let chatObj = chatObjOrSpeakerId;
+    let speakerId = speakerIdOrChatObj;
+    if (typeof chatObjOrSpeakerId === 'string') {
+        speakerId = chatObjOrSpeakerId;
+        chatObj = speakerIdOrChatObj;
+    }
+    const items = [];
+    const owner = getHeartVoiceOwnerContact(speakerId, chatObj);
+    const targetId = speakerId || (owner && !owner.isGroup ? owner.id : null) || (chatObj && !chatObj.isGroup ? chatObj.id : null);
+    const targetNames = new Set([targetId, owner?.id, owner?.name].filter(Boolean));
+    const isTargetSpeaker = (value) => value && targetNames.has(value);
+    const addOne = (raw, fallback = {}) => {
+        if (!raw) return;
+        try {
+            const hv = { ...normalizeHeartVoice(raw.heartVoice || raw.content || raw) };
+            Object.entries(fallback).forEach(([key, value]) => {
+                if ((hv[key] === null || hv[key] === undefined || hv[key] === '') && value !== undefined && value !== null && value !== '') {
+                    hv[key] = value;
+                }
+            });
+            if (!targetId || isTargetSpeaker(hv.speakerId || hv.senderId || hv.sender || fallback.speakerId)) {
+                items.push(hv);
+            }
+        } catch (err) {
+            console.warn('读取单条心声失败，已跳过:', err);
+        }
+    };
+    const addFromHistoryMessages = (history) => {
+        if (!Array.isArray(history)) return;
+        history.forEach(msg => {
+            if (!msg || msg.type !== 'heart_voice') return;
+            const msgSpeakerId = msg.characterId || msg.senderId || msg.sender || msg.heartVoice?.speakerId || msg.content?.speakerId;
+            if (!targetId || isTargetSpeaker(msgSpeakerId)) {
+                addOne(msg, {
+                    speakerId: msgSpeakerId || targetId,
+                    speakerName: msg.senderName || owner?.name || '',
+                    sourceChatId: msg.sourceChatId || msg.heartVoice?.sourceChatId || msg.content?.sourceChatId || '',
+                    sourceChatName: msg.sourceChatName || msg.heartVoice?.sourceChatName || msg.content?.sourceChatName || '',
+                    sourceChatType: msg.sourceChatType || msg.heartVoice?.sourceChatType || msg.content?.sourceChatType || ''
+                });
+            }
         });
-    return unique.slice(0, 200);
+    };
+
+    if (owner && !owner.isGroup) {
+        addOne(owner.latestHeartVoice, { speakerId: owner.id, speakerName: owner.name || '' });
+        (owner.heartVoiceHistory || []).forEach(item => addOne(item, { speakerId: owner.id, speakerName: owner.name || '' }));
+        addFromHistoryMessages(owner.history);
+    } else if (owner) {
+        addFromHistoryMessages(owner.history);
+    }
+
+    (state.contacts || []).forEach(contact => {
+        if (!contact) return;
+        if (contact.isGroup && targetId) {
+            addOne(contact.memberHeartVoices && contact.memberHeartVoices[targetId], {
+                sourceChatId: contact.id,
+                sourceChatName: contact.name || '',
+                sourceChatType: 'group',
+                speakerId: targetId,
+                speakerName: owner?.name || ''
+            });
+            ((contact.memberHeartVoiceHistory || {})[targetId] || []).forEach(item => addOne(item, {
+                sourceChatId: contact.id,
+                sourceChatName: contact.name || '',
+                sourceChatType: 'group',
+                speakerId: targetId,
+                speakerName: owner?.name || ''
+            }));
+        }
+        addFromHistoryMessages(contact.history);
+    });
+
+    if (!owner && chatObj) {
+        addOne(chatObj.latestHeartVoice, { speakerId: targetId || chatObj.id, speakerName: chatObj.name || '' });
+        (chatObj.heartVoiceHistory || []).forEach(item => addOne(item, { speakerId: targetId || chatObj.id, speakerName: chatObj.name || '' }));
+        addOne(chatObj.memberHeartVoices && chatObj.memberHeartVoices[targetId], { speakerId: targetId, speakerName: '' });
+        ((chatObj.memberHeartVoiceHistory || {})[targetId] || []).forEach(item => addOne(item, { speakerId: targetId, speakerName: '' }));
+        addFromHistoryMessages(chatObj.history);
+    }
+
+    return dedupeHeartVoiceHistory(items)
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .slice(0, 200);
 }
 
 function getHeartVoiceHistory(chatObj, speakerId) {
-    return collectHeartVoicesForCharacter(chatObj, speakerId);
+    const owner = getHeartVoiceOwnerContact(speakerId, chatObj);
+    if (!owner) return [];
+    const fromOwner = owner && !owner.isGroup
+        ? [
+            ...(owner.latestHeartVoice ? [owner.latestHeartVoice] : []),
+            ...(Array.isArray(owner.heartVoiceHistory) ? owner.heartVoiceHistory : [])
+        ]
+        : [];
+    const collected = collectHeartVoicesForCharacter(chatObj, speakerId) || [];
+    const merged = dedupeHeartVoiceHistory([...fromOwner, ...collected])
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .slice(0, 200);
+    repairHeartVoiceOwnerFromCollected(owner, merged);
+    return merged;
 }
 
 function renderHvCard(title, value, extraClass = '', valueClass = '') {
@@ -13021,15 +13145,34 @@ function getProfileInChat(chatObj, speakerId) {
 }
 
 function getLatestHeartVoice(chatObj, speakerId) {
-    const history = collectHeartVoicesForCharacter(chatObj, speakerId);
-    return history[0] || null;
+    const owner = getHeartVoiceOwnerContact(speakerId, chatObj);
+    if (!owner) return null;
+
+    if (!owner.isGroup && owner.latestHeartVoice) return normalizeHeartVoice(owner.latestHeartVoice);
+
+    if (!owner.isGroup && Array.isArray(owner.heartVoiceHistory) && owner.heartVoiceHistory.length) {
+        const sorted = [...owner.heartVoiceHistory].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        const latest = normalizeHeartVoice(sorted[0]);
+        owner.latestHeartVoice = latest;
+        syncContactInState(owner);
+        if (typeof kokoMemory !== 'undefined' && kokoMemory?.put) {
+            Promise.resolve(kokoMemory.put('contacts', owner)).catch(err => console.warn('补写最新心声失败:', err));
+        }
+        return latest;
+    }
+
+    const collected = collectHeartVoicesForCharacter(chatObj, speakerId);
+    repairHeartVoiceOwnerFromCollected(owner, collected);
+    return collected[0] || null;
 }
 
 async function saveLatestHeartVoice(chatContext, speakerId, speakerName, heartVoice, options = {}) {
     try {
         if (!chatContext || !heartVoice) return;
+        const owner = getHeartVoiceOwnerContact(speakerId, chatContext);
+        if (!owner) return;
         const hv = normalizeHeartVoice(heartVoice);
-        const heartVoiceId = hv.heartVoiceId || makeEchoId('hv');
+        const heartVoiceId = hv.heartVoiceId || options?.heartVoiceId || makeEchoId('hv');
         const sourceChatId = chatContext.id;
         const sourceChatName = chatContext.name || '';
         const sourceChatType = chatContext.isGroup ? 'group' : 'private';
@@ -13045,8 +13188,6 @@ async function saveLatestHeartVoice(chatContext, speakerId, speakerName, heartVo
             speakerName,
             timestamp: hv.timestamp || Date.now()
         };
-        const ownerContact = getHeartVoiceOwnerContact(speakerId, chatContext);
-        const targetContact = ownerContact || (!chatContext.isGroup ? chatContext : null);
         const hiddenMessage = {
             id: makeEchoId('hv_msg'),
             type: 'heart_voice',
@@ -13065,21 +13206,27 @@ async function saveLatestHeartVoice(chatContext, speakerId, speakerName, heartVo
             timestamp: historyItem.timestamp,
             time: new Date(historyItem.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
-        chatContext.history = chatContext.history || [];
+        chatContext.history = Array.isArray(chatContext.history) ? chatContext.history : [];
         chatContext.history.push(hiddenMessage);
 
-        if (targetContact) {
-            targetContact.latestHeartVoice = historyItem;
-            targetContact.heartVoiceHistory = Array.isArray(targetContact.heartVoiceHistory) ? targetContact.heartVoiceHistory : [];
-            targetContact.heartVoiceHistory.unshift(historyItem);
-            targetContact.heartVoiceHistory = targetContact.heartVoiceHistory.slice(0, 200);
-        } else if (chatContext.isGroup) {
-            chatContext.memberHeartVoices = chatContext.memberHeartVoices || {};
-            chatContext.memberHeartVoiceHistory = chatContext.memberHeartVoiceHistory || {};
-            chatContext.memberHeartVoices[speakerId] = historyItem;
-            chatContext.memberHeartVoiceHistory[speakerId] = chatContext.memberHeartVoiceHistory[speakerId] || [];
-            chatContext.memberHeartVoiceHistory[speakerId].unshift(historyItem);
-            chatContext.memberHeartVoiceHistory[speakerId] = chatContext.memberHeartVoiceHistory[speakerId].slice(0, 200);
+        if (owner.isGroup) {
+            owner.memberHeartVoices = owner.memberHeartVoices || {};
+            owner.memberHeartVoiceHistory = owner.memberHeartVoiceHistory || {};
+            owner.memberHeartVoices[speakerId] = historyItem;
+            owner.memberHeartVoiceHistory[speakerId] = Array.isArray(owner.memberHeartVoiceHistory[speakerId])
+                ? owner.memberHeartVoiceHistory[speakerId]
+                : [];
+            owner.memberHeartVoiceHistory[speakerId].unshift(historyItem);
+            owner.memberHeartVoiceHistory[speakerId] = dedupeHeartVoiceHistory(owner.memberHeartVoiceHistory[speakerId])
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                .slice(0, 200);
+        } else {
+            owner.latestHeartVoice = historyItem;
+            owner.heartVoiceHistory = Array.isArray(owner.heartVoiceHistory) ? owner.heartVoiceHistory : [];
+            owner.heartVoiceHistory.unshift(historyItem);
+            owner.heartVoiceHistory = dedupeHeartVoiceHistory(owner.heartVoiceHistory)
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                .slice(0, 200);
         }
 
         await addEchoMemoryEntry(chatContext, {
@@ -13094,10 +13241,14 @@ async function saveLatestHeartVoice(chatContext, speakerId, speakerName, heartVo
             importance: 3,
             tags: ['心声', 'Inner Echo']
         }, { skipSave: true });
-        if (targetContact && targetContact !== chatContext) {
-            await kokoMemory.put('contacts', targetContact);
+
+        syncContactInState(owner);
+        await kokoMemory.put('contacts', owner);
+
+        if (chatContext.id !== owner.id) {
+            syncContactInState(chatContext);
+            await kokoMemory.put('contacts', chatContext);
         }
-        await kokoMemory.put('contacts', chatContext);
     } catch (e) {
         console.warn('保存心声失败:', e);
     }
@@ -13205,6 +13356,73 @@ function syncContactObjectInState(contact) {
     if (!contact || !contact.id || !Array.isArray(state.contacts)) return;
     const index = state.contacts.findIndex(c => c.id === contact.id);
     if (index >= 0) state.contacts[index] = contact;
+}
+
+async function migrateGroupHeartVoicesToOwnerContacts() {
+    try {
+        const groups = (state.contacts || []).filter(c => c && c.isGroup);
+        for (const group of groups) {
+            const memberHeartVoices = group.memberHeartVoices || {};
+            const memberHeartVoiceHistory = group.memberHeartVoiceHistory || {};
+            const memberIds = new Set([
+                ...Object.keys(memberHeartVoices),
+                ...Object.keys(memberHeartVoiceHistory)
+            ]);
+
+            for (const memberId of memberIds) {
+                const owner = getHeartVoiceOwnerContact(memberId, group);
+                if (!owner || owner.isGroup) continue;
+
+                const historyItems = [];
+                if (memberHeartVoices[memberId]) {
+                    const latest = normalizeHeartVoice(memberHeartVoices[memberId]);
+                    historyItems.push({
+                        ...latest,
+                        sourceChatId: latest.sourceChatId || group.id,
+                        sourceChatName: latest.sourceChatName || group.name || '',
+                        sourceChatType: latest.sourceChatType || 'group',
+                        speakerId: latest.speakerId || memberId,
+                        speakerName: latest.speakerName || owner.name || '',
+                        timestamp: latest.timestamp || Date.now()
+                    });
+                }
+
+                const oldHistory = Array.isArray(memberHeartVoiceHistory[memberId])
+                    ? memberHeartVoiceHistory[memberId].map(normalizeHeartVoice)
+                    : [];
+                oldHistory.forEach(item => {
+                    historyItems.push({
+                        ...item,
+                        sourceChatId: item.sourceChatId || group.id,
+                        sourceChatName: item.sourceChatName || group.name || '',
+                        sourceChatType: item.sourceChatType || 'group',
+                        speakerId: item.speakerId || memberId,
+                        speakerName: item.speakerName || owner.name || ''
+                    });
+                });
+
+                if (!historyItems.length) continue;
+
+                const beforeKeys = dedupeHeartVoiceHistory(owner.heartVoiceHistory || []).map(hv => hv.heartVoiceId).join('|');
+                const beforeLatestId = owner.latestHeartVoice ? normalizeHeartVoice(owner.latestHeartVoice).heartVoiceId : '';
+                owner.heartVoiceHistory = dedupeHeartVoiceHistory([
+                    ...(owner.heartVoiceHistory || []),
+                    ...historyItems
+                ])
+                    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                    .slice(0, 200);
+                owner.latestHeartVoice = owner.heartVoiceHistory[0] || null;
+                const afterKeys = owner.heartVoiceHistory.map(hv => hv.heartVoiceId).join('|');
+                const afterLatestId = owner.latestHeartVoice ? normalizeHeartVoice(owner.latestHeartVoice).heartVoiceId : '';
+                if (beforeKeys === afterKeys && beforeLatestId === afterLatestId) continue;
+
+                syncContactInState(owner);
+                await kokoMemory.put('contacts', owner);
+            }
+        }
+    } catch (err) {
+        console.warn('迁移群聊心声到角色失败:', err);
+    }
 }
 
 async function deleteHeartVoiceEntries(chatContext, speakerId, heartVoiceIds = []) {
@@ -14207,6 +14425,7 @@ async function loadDataFromDB() {
             // ▲▲▲ 粘贴结束 ▲▲▲
         });
         await migrateEchoesKokoData();
+        await migrateGroupHeartVoicesToOwnerContacts();
         state.posts.forEach(p => { if (!p.archiveId) p.archiveId = 'default'; });
 
     } catch (error) {
@@ -17795,7 +18014,14 @@ if (message.isRecalled === true) {
             }
 
             const wrapper = document.createElement('div');
-            wrapper.className = `message-wrapper ${message.sender === 'user' ? 'sent' : 'received'}`;
+            const isSentByUser = message.sender === 'user' || message.sender === 'myProfile';
+            const isPrivateChat = contact.isGroup !== true;
+            const DEFAULT_USER_AVATAR = 'https://via.placeholder.com/40/DDD/666?text=ME';
+            const DEFAULT_CONTACT_AVATAR = 'https://s21.ax1x.com/2025/11/09/pZ9FrMd.png';
+            wrapper.className = `message-wrapper ${isSentByUser ? 'sent' : 'received'}`;
+            if (isPrivateChat) {
+                wrapper.classList.add('private-force-avatar');
+            }
             // ✨ 这是修改后的正确代码 ✨
 if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender === contact.id)) {
     wrapper.classList.add('contact-avatar-hidden');
@@ -17804,7 +18030,7 @@ if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender ==
              // ▼▼▼ 把下面这段新代码粘贴到这里 ▼▼▼
             // ▼▼▼ 核心修复：只在【非】叙事模式下，才隐藏 HTML 消息的头像 ▼▼▼
             // 如果是叙事模式 (contact.isNarrativeMode)，即使有 HTML，也当作普通气泡处理，保留头像
-            if (message.type === 'html' && message.sender !== 'user' && !contact.isNarrativeMode) {
+            if (message.type === 'html' && !isSentByUser && !contact.isNarrativeMode) {
                 wrapper.classList.add('ai-html-message');
                 // 我们也借用这个已有的类来移除消息体的左边距
                 wrapper.classList.add('contact-avatar-hidden'); 
@@ -17817,13 +18043,13 @@ if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender ==
                 wrapper.style.marginTop = '10px';
             }
 
-            const senderInfo = message.sender === 'user' ? state.myProfile : contact;
+            const senderInfo = isSentByUser ? state.myProfile : contact;
             
             // ▼▼▼ 在它下面，添加这段新的逻辑 ▼▼▼
     let finalSenderInfo = senderInfo;
     const isGroupChat = contact.isGroup === true;
     // ▼▼▼ ✨ 你的核心修改点在这里 ✨ ▼▼▼
-            if (message.sender === 'user') {
+            if (isSentByUser) {
                 // 检查当前聊天（私聊或群聊）是否设置了自定义昵称
                 if (contact.customUserName) {
                     // 如果设置了，就创建一个临时的 profile 对象，把名字改掉
@@ -17836,7 +18062,7 @@ if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender ==
             } 
             // ▲▲▲ ✨ 修改结束 ✨ ▲▲▲
 
-    else if (isGroupChat && message.sender !== 'user') {
+    else if (isGroupChat && !isSentByUser) {
         // --- ✨ 修正开始 ✨ ---
         // 1. 先在主联系人列表里找
         let foundProfile = state.contacts.find(c => c.id === message.sender);
@@ -17854,14 +18080,19 @@ if (contact.isAvatarHidden && (message.sender === 'contact' || message.sender ==
         }
         // --- ✨ 修正结束 ✨ ---
     }
-    const showAuthorName = isFirstInSequence;
+    const showAuthorName = !isPrivateChat && isFirstInSequence;
     // ▲▲▲ 添加结束 ▲▲▲
     // --- 核心修改：决定最终要显示的头像URL ---
-            let finalAvatarUrl = finalSenderInfo.avatar;
-            if (message.sender === 'user' && contact.customUserAvatar) {
+            let finalAvatarUrl = finalSenderInfo.avatar || (isSentByUser ? DEFAULT_USER_AVATAR : DEFAULT_CONTACT_AVATAR);
+            if (isPrivateChat) {
+                finalAvatarUrl = isSentByUser
+                    ? (state.myProfile?.avatar || DEFAULT_USER_AVATAR)
+                    : (contact.avatar || DEFAULT_CONTACT_AVATAR);
+            } else if (isSentByUser && contact.customUserAvatar) {
                 // 如果是用户发的消息，并且当前联系人设置了自定义用户头像，就用它！
                 finalAvatarUrl = contact.customUserAvatar;
             }
+            if (!finalAvatarUrl) finalAvatarUrl = isSentByUser ? DEFAULT_USER_AVATAR : DEFAULT_CONTACT_AVATAR;
             // --- 修改结束 ---
             // --- 新增：构建引用消息框的HTML ---
             // --- 新增：构建引用消息框的HTML ---
@@ -43736,33 +43967,43 @@ document.getElementById('map-list').addEventListener('click', async (e) => {
 const chatContactNameEl = document.getElementById('chat-contact-name');
 const heartVoicePanel = document.getElementById('heart-voice-panel');
 
-function toggleHeartVoicePanelFor(speakerId = null) {
-    const contact = state.contacts.find(c => c.id === state.activeChatId);
+function showHeartVoicePanel(chatContext, speakerId = null) {
+    const contact = chatContext || state.contacts.find(c => c.id === state.activeChatId);
     if (!contact) return;
     const screenEl = document.getElementById('screen');
     if (screenEl && heartVoicePanel.parentElement !== screenEl) screenEl.appendChild(heartVoicePanel);
-    if (heartVoicePanel.style.display === 'flex' && heartVoicePanel.dataset.speakerId === (speakerId || contact.id)) {
+    const targetId = speakerId || (contact.isGroup ? null : contact.id);
+    const owner = getHeartVoiceOwnerContact(targetId, contact);
+    const profile = owner && !owner.isGroup
+        ? owner
+        : (targetId ? getProfileInChat(contact, targetId) : contact);
+    const finalSpeakerId = (owner && !owner.isGroup ? owner.id : targetId) || contact.id;
+    const speakerName = profile ? profile.name : '群成员';
+    const avatar = profile ? profile.avatar : contact.avatar;
+    const heartVoice = getLatestHeartVoice(contact, finalSpeakerId);
+    const history = getHeartVoiceHistory(contact, finalSpeakerId);
+    renderHeartVoicePanel(heartVoice, speakerName, { avatar, history, speakerId: finalSpeakerId, chatContext: contact });
+    heartVoicePanel.dataset.speakerId = finalSpeakerId;
+    heartVoicePanel.dataset.chatContextId = contact.id;
+    heartVoicePanel.style.display = 'flex';
+}
+window.showHeartVoicePanel = showHeartVoicePanel;
+
+function toggleHeartVoicePanelFor(speakerId = null) {
+    const contact = state.contacts.find(c => c.id === state.activeChatId);
+    if (!contact) return;
+    const targetId = speakerId || (contact.isGroup ? null : contact.id);
+    const owner = getHeartVoiceOwnerContact(targetId, contact);
+    const finalSpeakerId = (owner && !owner.isGroup ? owner.id : targetId) || contact.id;
+    if (
+        heartVoicePanel.style.display === 'flex' &&
+        heartVoicePanel.dataset.speakerId === finalSpeakerId &&
+        heartVoicePanel.dataset.chatContextId === contact.id
+    ) {
         heartVoicePanel.style.display = 'none';
         return;
     }
-    const targetId = speakerId || (contact.isGroup ? null : contact.id);
-    let speakerName = contact.name;
-    let avatar = contact.avatar;
-    let history = [];
-    let heartVoice = null;
-    if (contact.isGroup && targetId) {
-        const profile = getProfileInChat(contact, targetId);
-        speakerName = profile ? profile.name : '群成员';
-        avatar = profile ? profile.avatar : contact.avatar;
-        heartVoice = getLatestHeartVoice(contact, targetId);
-        history = getHeartVoiceHistory(contact, targetId);
-    } else {
-        heartVoice = getLatestHeartVoice(contact, contact.id);
-        history = getHeartVoiceHistory(contact, contact.id);
-    }
-    renderHeartVoicePanel(heartVoice, speakerName, { avatar, history, speakerId: targetId || contact.id, chatContext: contact });
-    heartVoicePanel.dataset.speakerId = targetId || contact.id;
-    heartVoicePanel.style.display = 'flex';
+    showHeartVoicePanel(contact, finalSpeakerId);
 }
 window.toggleHeartVoicePanelFor = toggleHeartVoicePanelFor;
 
@@ -43929,12 +44170,16 @@ document.getElementById('chat-messages').addEventListener('click', (e) => {
     const hit = e.target.closest('.message-avatar, .message-author-name');
     if (!hit) return;
     const contact = state.contacts.find(c => c.id === state.activeChatId);
-    if (!contact || !contact.isGroup) return;
+    if (!contact) return;
     const wrapper = hit.closest('.message-wrapper');
     const msg = wrapper && contact.history.find(m => m.id === wrapper.dataset.messageId);
     if (!msg || msg.sender === 'user' || msg.sender === 'myProfile' || msg.sender === 'system') return;
     e.stopPropagation();
-    toggleHeartVoicePanelFor(msg.sender);
+    if (contact.isGroup) {
+        showHeartVoicePanel(contact, msg.sender);
+    } else {
+        showHeartVoicePanel(contact, contact.id);
+    }
 });
 
 // 点击页面其他地方，关闭心声面板
