@@ -3100,7 +3100,6 @@
     font-size: 20px;
 }
 .hv-history-edit-btn {
-    float: right;
     padding: 6px 12px;
     font-size: 12px;
     font-weight: 700;
@@ -3226,6 +3225,33 @@
 .hv-edit-save {
     background: #6d95b8;
     color: #fff;
+}
+.hv-delete-btn {
+    border: none;
+    background: #ff8a80;
+    color: #fff;
+    border-radius: 14px;
+    padding: 9px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.hv-delete-btn:active {
+    transform: scale(0.97);
+}
+.hv-history-actions {
+    float: right;
+    display: inline-flex;
+    gap: 6px;
+}
+.hv-history-delete-btn {
+    border: none;
+    background: rgba(255, 138, 128, 0.12);
+    color: #d85b55;
+    border-radius: 999px;
+    padding: 5px 9px;
+    font-size: 12px;
+    cursor: pointer;
 }
 .hv-empty {
     padding: 36px 18px;
@@ -12735,6 +12761,7 @@ function renderHeartVoiceEditForm(hvRaw) {
             <div class="hv-edit-field"><label>内心想法</label><textarea name="innerThoughts">${escapeHtmlText(hv.innerThoughts)}</textarea></div>
             <div class="hv-edit-field"><label>已删除草稿</label><textarea name="deletedDraft">${escapeHtmlText(hv.deletedDraft)}</textarea></div>
             <div class="hv-edit-actions">
+                <button class="hv-delete-btn" id="hv-delete-entry-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">删除心声</button>
                 <button class="hv-edit-cancel" type="button">取消</button>
                 <button class="hv-edit-save" type="submit">保存</button>
             </div>
@@ -12837,7 +12864,10 @@ function renderHeartVoiceHistoryPanel() {
         <div class="hv-history-panel">
             ${history.map(hv => `
                 <div class="hv-history-item">
-                    <button class="hv-history-edit-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">编辑</button>
+                    <div class="hv-history-actions">
+                        <button class="hv-history-edit-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">编辑</button>
+                        <button class="hv-history-delete-btn" type="button" data-heart-voice-id="${escapeHtmlText(hv.heartVoiceId)}">删除</button>
+                    </div>
                     <div class="hv-history-time">${new Date(hv.timestamp || Date.now()).toLocaleString()}</div>
                     <div class="hv-item"><span class="hv-label">心情</span><span class="hv-value">${escapeHtmlText(hv.mood)}</span></div>
                     <div class="hv-item"><span class="hv-label">动作</span><span class="hv-value">${escapeHtmlText(hv.action)}</span></div>
@@ -13061,24 +13091,160 @@ async function updateHeartVoiceEntry(chatContext, speakerId, heartVoiceId, patch
     }
 }
 
-async function deleteHeartVoicesLinkedToMessages(chatObj, deletedMessageIds = []) {
+function syncContactObjectInState(contact) {
+    if (!contact || !contact.id || !Array.isArray(state.contacts)) return;
+    const index = state.contacts.findIndex(c => c.id === contact.id);
+    if (index >= 0) state.contacts[index] = contact;
+}
+
+async function deleteHeartVoiceEntry(chatContext, speakerId, heartVoiceId) {
     try {
-        if (!chatObj || !Array.isArray(chatObj.history) || !Array.isArray(deletedMessageIds) || deletedMessageIds.length === 0) return;
+        if (!chatContext || !speakerId || !heartVoiceId) return null;
+        const owner = getHeartVoiceOwnerContact(speakerId, chatContext) || chatContext;
+        if (!owner) return null;
+
+        let ownerHistory;
+        if (owner.isGroup) {
+            owner.memberHeartVoiceHistory = owner.memberHeartVoiceHistory || {};
+            owner.memberHeartVoices = owner.memberHeartVoices || {};
+            owner.memberHeartVoiceHistory[speakerId] = Array.isArray(owner.memberHeartVoiceHistory[speakerId])
+                ? owner.memberHeartVoiceHistory[speakerId]
+                : [];
+            ownerHistory = owner.memberHeartVoiceHistory[speakerId];
+        } else {
+            owner.heartVoiceHistory = Array.isArray(owner.heartVoiceHistory) ? owner.heartVoiceHistory : [];
+            ownerHistory = owner.heartVoiceHistory;
+        }
+
+        const target = ownerHistory.find(item => normalizeHeartVoice(item).heartVoiceId === heartVoiceId);
+        if (!target) {
+            console.warn('未找到要删除的心声:', heartVoiceId);
+            return null;
+        }
+        const targetHv = normalizeHeartVoice(target);
+
+        const filteredHistory = ownerHistory
+            .filter(item => normalizeHeartVoice(item).heartVoiceId !== heartVoiceId)
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+        if (owner.isGroup) {
+            owner.memberHeartVoiceHistory[speakerId] = filteredHistory;
+            const currentMemberLatest = owner.memberHeartVoices[speakerId] ? normalizeHeartVoice(owner.memberHeartVoices[speakerId]) : null;
+            if (!currentMemberLatest || currentMemberLatest.heartVoiceId === heartVoiceId) {
+                owner.memberHeartVoices[speakerId] = filteredHistory[0] || null;
+            }
+        } else {
+            owner.heartVoiceHistory = filteredHistory;
+            const currentLatest = owner.latestHeartVoice ? normalizeHeartVoice(owner.latestHeartVoice) : null;
+            if (!currentLatest || currentLatest.heartVoiceId === heartVoiceId) {
+                owner.latestHeartVoice = filteredHistory[0] || null;
+            }
+        }
+
+        const sourceChat = state.contacts.find(c => c.id === targetHv.sourceChatId)
+            || (chatContext.id === targetHv.sourceChatId ? chatContext : null);
+
+        const removeMemoryEntry = (chatObj) => {
+            if (!chatObj?.echoMemory?.entries) return;
+            chatObj.echoMemory.entries = chatObj.echoMemory.entries.filter(entry => {
+                if (entry.sourceType !== 'heart_voice') return true;
+                return !(entry.heartVoiceId === heartVoiceId || entry.metadata?.heartVoiceId === heartVoiceId);
+            });
+        };
+
+        removeMemoryEntry(owner);
+
+        if (sourceChat && Array.isArray(sourceChat.history)) {
+            sourceChat.history = sourceChat.history.filter(m => {
+                if (!m || m.type !== 'heart_voice') return true;
+                const msgHvId = m.heartVoiceId || m.heartVoice?.heartVoiceId || m.content?.heartVoiceId;
+                return msgHvId !== heartVoiceId;
+            });
+            removeMemoryEntry(sourceChat);
+        }
+
+        if (chatContext && chatContext !== owner && chatContext !== sourceChat) {
+            removeMemoryEntry(chatContext);
+        }
+
+        const contactsToSave = new Set([owner]);
+        if (sourceChat && sourceChat !== owner) contactsToSave.add(sourceChat);
+        if (chatContext && chatContext !== owner && chatContext !== sourceChat) contactsToSave.add(chatContext);
+
+        for (const contact of contactsToSave) {
+            syncContactObjectInState(contact);
+            await kokoMemory.put('contacts', contact);
+        }
+
+        const panelState = window.currentHeartVoicePanelState;
+        if (panelState) {
+            const currentChat = state.contacts.find(c => c.id === state.activeChatId) || chatContext;
+            const refreshedHistory = getHeartVoiceHistory(currentChat, speakerId);
+            const refreshedLatest = getLatestHeartVoice(currentChat, speakerId);
+            panelState.heartVoice = refreshedLatest;
+            panelState.options.history = refreshedHistory;
+        }
+
+        return targetHv;
+    } catch (err) {
+        console.warn('删除心声失败:', err);
+        return null;
+    }
+}
+
+async function deleteHeartVoicesLinkedToMessages(chatObj, deletedMessageIds = [], options = {}) {
+    try {
+        if (!chatObj || !Array.isArray(chatObj.history) || !Array.isArray(deletedMessageIds)) return;
+        const deleteAllFromChat = !!options.deleteAllFromChat;
         const deletedIdSet = new Set(deletedMessageIds.filter(Boolean));
-        if (deletedIdSet.size === 0) return;
+        if (!deleteAllFromChat && deletedIdSet.size === 0) return;
 
         const linkedHidden = chatObj.history.filter(m => {
             if (!m || m.type !== 'heart_voice') return false;
+            const sourceChatId = m.sourceChatId || m.heartVoice?.sourceChatId || m.content?.sourceChatId;
             const sourceMessageId = m.sourceMessageId || m.heartVoice?.sourceMessageId || m.content?.sourceMessageId;
+            if (deleteAllFromChat) return sourceChatId === chatObj.id;
             return sourceMessageId && deletedIdSet.has(sourceMessageId);
         });
         const affectedHeartVoiceIds = new Set(linkedHidden.map(m => m.heartVoiceId || m.heartVoice?.heartVoiceId || m.content?.heartVoiceId).filter(Boolean));
         const affectedSpeakerIds = new Set(linkedHidden.map(m => m.characterId || m.senderId || m.sender || m.heartVoice?.speakerId || m.content?.speakerId).filter(Boolean));
+        if (deleteAllFromChat) {
+            if (!chatObj.isGroup && chatObj.id) affectedSpeakerIds.add(chatObj.id);
+            if (chatObj.isGroup) {
+                (chatObj.members || []).forEach(id => id && id !== 'myProfile' && affectedSpeakerIds.add(id));
+                Object.keys(chatObj.memberHeartVoiceHistory || {}).forEach(id => id && affectedSpeakerIds.add(id));
+                Object.keys(chatObj.memberHeartVoices || {}).forEach(id => id && affectedSpeakerIds.add(id));
+            }
+            (state.contacts || []).forEach(contact => {
+                if (!contact) return;
+                if (!contact.isGroup) {
+                    const latest = contact.latestHeartVoice ? normalizeHeartVoice(contact.latestHeartVoice) : null;
+                    if (latest && latest.sourceChatId === chatObj.id) affectedSpeakerIds.add(latest.speakerId || contact.id);
+                    (contact.heartVoiceHistory || []).forEach(item => {
+                        const hv = normalizeHeartVoice(item);
+                        if (hv.sourceChatId === chatObj.id) affectedSpeakerIds.add(hv.speakerId || contact.id);
+                    });
+                } else {
+                    Object.entries(contact.memberHeartVoices || {}).forEach(([speakerId, item]) => {
+                        const hv = item ? normalizeHeartVoice(item) : null;
+                        if (hv && hv.sourceChatId === chatObj.id) affectedSpeakerIds.add(hv.speakerId || speakerId);
+                    });
+                    Object.entries(contact.memberHeartVoiceHistory || {}).forEach(([speakerId, list]) => {
+                        (Array.isArray(list) ? list : []).forEach(item => {
+                            const hv = normalizeHeartVoice(item);
+                            if (hv.sourceChatId === chatObj.id) affectedSpeakerIds.add(hv.speakerId || speakerId);
+                        });
+                    });
+                }
+            });
+        }
 
         chatObj.history = chatObj.history.filter(m => {
             if (!m || m.type !== 'heart_voice') return true;
+            const sourceChatId = m.sourceChatId || m.heartVoice?.sourceChatId || m.content?.sourceChatId;
             const sourceMessageId = m.sourceMessageId || m.heartVoice?.sourceMessageId || m.content?.sourceMessageId;
             const hvId = m.heartVoiceId || m.heartVoice?.heartVoiceId || m.content?.heartVoiceId;
+            if (deleteAllFromChat) return sourceChatId !== chatObj.id;
             return !((sourceMessageId && deletedIdSet.has(sourceMessageId)) || (hvId && affectedHeartVoiceIds.has(hvId)));
         });
 
@@ -13091,6 +13257,7 @@ async function deleteHeartVoicesLinkedToMessages(chatObj, deletedMessageIds = []
                 const list = Array.isArray(chatObj.memberHeartVoiceHistory[speakerId]) ? chatObj.memberHeartVoiceHistory[speakerId] : [];
                 chatObj.memberHeartVoiceHistory[speakerId] = list.filter(item => {
                     const hv = normalizeHeartVoice(item);
+                    if (deleteAllFromChat) return hv.sourceChatId !== chatObj.id;
                     const byHvId = hv.heartVoiceId && affectedHeartVoiceIds.has(hv.heartVoiceId);
                     const byMessage = hv.sourceMessageId && deletedIdSet.has(hv.sourceMessageId);
                     return !(hv.sourceChatId === chatObj.id && (byHvId || byMessage));
@@ -13103,6 +13270,7 @@ async function deleteHeartVoicesLinkedToMessages(chatObj, deletedMessageIds = []
             owner.heartVoiceHistory = Array.isArray(owner.heartVoiceHistory) ? owner.heartVoiceHistory : [];
             owner.heartVoiceHistory = owner.heartVoiceHistory.filter(item => {
                 const hv = normalizeHeartVoice(item);
+                if (deleteAllFromChat) return hv.sourceChatId !== chatObj.id;
                 if (hv.sourceChatId !== chatObj.id) return true;
                 const byHvId = hv.heartVoiceId && affectedHeartVoiceIds.has(hv.heartVoiceId);
                 const byMessage = hv.sourceMessageId && deletedIdSet.has(hv.sourceMessageId);
@@ -13113,7 +13281,8 @@ async function deleteHeartVoicesLinkedToMessages(chatObj, deletedMessageIds = []
             if (owner.echoMemory?.entries) {
                 owner.echoMemory.entries = owner.echoMemory.entries.filter(entry => {
                     if (entry.sourceType !== 'heart_voice') return true;
-                    const sameChat = entry.sourceChatId === chatObj.id || !entry.sourceChatId;
+                    const sameChat = entry.sourceChatId === chatObj.id || (!deleteAllFromChat && !entry.sourceChatId);
+                    if (deleteAllFromChat) return entry.sourceChatId !== chatObj.id;
                     const byHvId = entry.heartVoiceId && affectedHeartVoiceIds.has(entry.heartVoiceId);
                     const byMessage = entry.sourceMessageId && deletedIdSet.has(entry.sourceMessageId);
                     return !(sameChat && (byHvId || byMessage));
@@ -13125,6 +13294,7 @@ async function deleteHeartVoicesLinkedToMessages(chatObj, deletedMessageIds = []
         const chatMemory = ensureEchoMemory(chatObj);
         chatMemory.entries = chatMemory.entries.filter(entry => {
             if (entry.sourceType !== 'heart_voice') return true;
+            if (deleteAllFromChat) return entry.sourceChatId !== chatObj.id;
             const byHvId = entry.heartVoiceId && affectedHeartVoiceIds.has(entry.heartVoiceId);
             const byMessage = entry.sourceMessageId && deletedIdSet.has(entry.sourceMessageId);
             return !(byHvId || byMessage);
@@ -38062,7 +38232,9 @@ if (muteButton) {
                 .filter(m => m && m.type !== 'heart_voice')
                 .map(m => m.id)
                 .filter(Boolean);
-            await deleteHeartVoicesLinkedToMessages(group, deletedMessageIds);
+            await deleteHeartVoicesLinkedToMessages(group, deletedMessageIds, {
+                deleteAllFromChat: true
+            });
             // 核心操作：清空 history 数组
             group.history = [];
             
@@ -39621,7 +39793,9 @@ document.getElementById('clear-chat-history-btn').addEventListener('click', asyn
                 .filter(m => m && m.type !== 'heart_voice')
                 .map(m => m.id)
                 .filter(Boolean);
-            await deleteHeartVoicesLinkedToMessages(contact, deletedMessageIds);
+            await deleteHeartVoicesLinkedToMessages(contact, deletedMessageIds, {
+                deleteAllFromChat: true
+            });
             contact.history = [];
             contact.smsHistory = []; 
             
@@ -43418,7 +43592,7 @@ chatContactNameEl.addEventListener('click', (e) => {
     toggleHeartVoicePanelFor();
 });
 
-heartVoicePanel.addEventListener('click', (e) => {
+heartVoicePanel.addEventListener('click', async (e) => {
     const panel = document.getElementById('heart-voice-panel');
     if (e.target.closest('.hv-status-close') || e.target.classList.contains('hv-backdrop')) {
         panel.style.display = 'none';
@@ -43434,6 +43608,52 @@ heartVoicePanel.addEventListener('click', (e) => {
     if (editHistoryBtn) {
         e.stopPropagation();
         renderHeartVoiceEditPanel(editHistoryBtn.dataset.heartVoiceId);
+        return;
+    }
+    const historyDeleteBtn = e.target.closest('.hv-history-delete-btn');
+    if (historyDeleteBtn) {
+        e.stopPropagation();
+        const confirmed = await showCustomConfirm(
+            '删除心声',
+            '确定要删除这条心声吗？删除后不会删除对应聊天消息，但这条心声会从状态和历史记录里移除。',
+            true
+        );
+        if (!confirmed) return;
+        const stateData = window.currentHeartVoicePanelState;
+        if (!stateData) return;
+        const currentChat = state.contacts.find(c => c.id === state.activeChatId);
+        const speakerId = stateData.options?.speakerId || heartVoicePanel.dataset.speakerId;
+        await deleteHeartVoiceEntry(currentChat, speakerId, historyDeleteBtn.dataset.heartVoiceId);
+        const refreshedHistory = getHeartVoiceHistory(currentChat, speakerId);
+        stateData.options.history = refreshedHistory;
+        stateData.heartVoice = getLatestHeartVoice(currentChat, speakerId);
+        renderHeartVoiceHistoryPanel();
+        return;
+    }
+    const deleteEntryBtn = e.target.closest('.hv-delete-btn');
+    if (deleteEntryBtn) {
+        e.stopPropagation();
+        const confirmed = await showCustomConfirm(
+            '删除心声',
+            '确定要删除这条心声吗？删除后不会删除对应聊天消息，但这条心声会从状态和历史记录里移除。',
+            true
+        );
+        if (!confirmed) return;
+        const stateData = window.currentHeartVoicePanelState;
+        if (!stateData) return;
+        const currentChat = state.contacts.find(c => c.id === state.activeChatId);
+        const speakerId = stateData.options?.speakerId || heartVoicePanel.dataset.speakerId;
+        const previousView = panel.dataset.previousView || 'current';
+        await deleteHeartVoiceEntry(currentChat, speakerId, deleteEntryBtn.dataset.heartVoiceId || panel.dataset.editHeartVoiceId);
+        const refreshedHistory = getHeartVoiceHistory(currentChat, speakerId);
+        const refreshedLatest = getLatestHeartVoice(currentChat, speakerId);
+        stateData.options.history = refreshedHistory;
+        stateData.heartVoice = refreshedLatest;
+        if (previousView === 'history') {
+            renderHeartVoiceHistoryPanel();
+        } else {
+            renderHeartVoicePanel(refreshedLatest, stateData.speakerName, stateData.options);
+        }
         return;
     }
     if (e.target.closest('.hv-edit-cancel')) {
